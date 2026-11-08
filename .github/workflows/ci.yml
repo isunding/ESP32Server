@@ -48,12 +48,14 @@ jobs:
 
       - name: 页面构建与 web/ 同步
         run: |
+          # 只比 *.html：.gz 的 deflate 输出与 zlib 版本有关，本地与 CI 的
+          # 解释器不同就会得到「大小相同、字节不同」的假报警
           fail=0
           for b in $BOARDS; do
             python $b/scripts/build.py
-            if ! git diff --quiet -- $b/www; then
+            if ! git diff --quiet -- "$b/www/*.html"; then
               echo "::error::$b/www 与 $b/web 不同步，请运行 python $b/scripts/build.py 后提交"
-              git diff --stat -- $b/www
+              git diff --stat -- "$b/www/*.html"
               fail=1
             else
               echo "$b/www 与 web/ 一致"
