@@ -36,7 +36,7 @@ legacy/
 esp32/README.md
 esp32/backup/
 esp32/tmp_*
-esp32/__pycache__/
+__pycache__/
 esp32/build_mpy/
 esp32/tools/
 esp32/docs/screens/
