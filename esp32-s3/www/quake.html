@@ -273,31 +273,44 @@ video{width:100%;height:100%;display:block;background:#0b0e12}
   .grid{grid-template-columns:1fr}
 }
 
-</style>
-<style>
-  .chips{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px}
-  .chips button{font-size:12px;padding:4px 10px;border-radius:999px;cursor:pointer;
-    border:1px solid var(--line);background:var(--bg3);color:var(--fg2);font-family:inherit}
-  .chips button.on{border-color:var(--acc);color:var(--acc);background:rgba(255,106,0,.12)}
-  .chips .lbl{font-size:11.5px;color:var(--fg2);align-self:center;margin-right:2px}
+/* ---------- 信息流模块（新闻 / 地震共用；视觉与首页 .tile 一致） ---------- */
+.feed{display:grid;gap:10px}
+@media (min-width:560px){.feed{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.feed>.empty{grid-column:1/-1}
+.chips{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px}
+.chips button{font-size:12px;padding:4px 10px;border-radius:999px;cursor:pointer;
+  border:1px solid var(--line);background:var(--bg3);color:var(--fg2);font-family:inherit}
+.chips button.on{border-color:var(--acc);color:var(--acc);background:rgba(255,106,0,.12)}
+.chips .lbl{font-size:11.5px;color:var(--fg2);align-self:center;margin-right:2px}
+.empty{padding:20px 0;text-align:center}
+.fitem{min-width:0;background:linear-gradient(160deg,var(--bg2),var(--bg3));
+  border:1px solid var(--line);border-radius:var(--radius);padding:12px 14px}
+.fitem .fh{display:flex;align-items:center;gap:8px;margin-bottom:8px;
+  font-size:11.5px;color:var(--fg2);font-variant-numeric:tabular-nums}
+.fitem .fh .sp{flex:1}
+.fitem .fb{font-size:13.5px;line-height:1.6;white-space:pre-wrap;word-break:break-word;
+  display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+.fitem.open .fb{-webkit-line-clamp:unset;display:block}
+.fitem .fb b{font-weight:600;color:var(--fg)}
+.fitem .ff{display:flex;gap:6px;flex-wrap:wrap;margin-top:9px;align-items:center}
+.flv{font-size:10.5px;border-radius:5px;padding:1px 6px;flex:0 0 auto}
+.flv.A{background:rgba(230,60,60,.16);color:#e23c3c}
+.flv.B{background:rgba(240,160,40,.16);color:#d98a1a}
+.flv.C{background:var(--bg3);color:var(--fg2)}
+.fmag{font-size:15px;font-weight:600;border-radius:6px;padding:2px 9px;flex:0 0 auto}
+.fmag.m6{background:rgba(226,60,60,.18);color:#e23c3c}
+.fmag.m5{background:rgba(240,120,40,.18);color:#e07a1f}
+.fmag.m4{background:rgba(230,190,40,.18);color:#b8901a}
+.fmag.m0{background:var(--bg3);color:var(--fg2)}
+.ftag{font-size:11px;color:var(--fg2);border:1px solid var(--line);
+  border-radius:999px;padding:1px 7px}
+.fbtn{font-size:11px;border:1px solid var(--line);border-radius:999px;
+  padding:1px 7px;cursor:pointer;background:var(--bg2);color:var(--fg2);font-family:inherit}
+.fbtn.added{border-color:var(--ok);color:var(--ok)}
+.fsum{display:flex;gap:16px;flex-wrap:wrap;margin-bottom:4px}
+.fsum .k{font-size:11.5px;color:var(--fg2)}
+.fsum .v{font-size:15px;font-weight:600;margin-top:2px}
 
-  .q{display:flex;gap:10px;align-items:flex-start;padding:10px 0;
-    border-top:1px solid var(--line)}
-  .q:first-child{border-top:0}
-  .q .mag{flex:0 0 46px;text-align:center;border-radius:8px;padding:4px 0;
-    font-size:16px;font-weight:600;font-variant-numeric:tabular-nums}
-  .m6{background:rgba(226,60,60,.18);color:#e23c3c}
-  .m5{background:rgba(240,120,40,.18);color:#e07a1f}
-  .m4{background:rgba(230,190,40,.18);color:#b8901a}
-  .m0{background:var(--bg3);color:var(--fg2)}
-  .q .mi{min-width:0;flex:1}
-  .q .pl{font-size:13.5px;line-height:1.45;word-break:break-all}
-  .q .mt{font-size:11.5px;color:var(--fg2);margin-top:3px;
-    font-variant-numeric:tabular-nums}
-  .empty{padding:20px 0;text-align:center}
-  .sum{display:flex;gap:16px;flex-wrap:wrap;margin-bottom:4px}
-  .sum .k{font-size:11.5px;color:var(--fg2)}
-  .sum .v{font-size:15px;font-weight:600;margin-top:2px}
 </style>
 </head>
 <body>
@@ -317,7 +330,7 @@ video{width:100%;height:100%;display:block;background:#0b0e12}
   </div>
 
   <div class="card">
-    <div class="sum">
+    <div class="fsum">
       <div><div class="k">近 7 天</div><div class="v" id="cAll">—</div></div>
       <div><div class="k">M4 以上</div><div class="v" id="c4">—</div></div>
       <div><div class="k">最大震级</div><div class="v" id="cMax">—</div></div>
@@ -332,9 +345,7 @@ video{width:100%;height:100%;display:block;background:#0b0e12}
     <button data-m="5">M5+</button>
   </div>
 
-  <div class="card">
-    <div id="list"><div class="skel"></div><div class="skel"></div><div class="skel"></div></div>
-  </div>
+  <div id="list" class="feed"><div class="skel"></div><div class="skel"></div><div class="skel"></div></div>
 
   <p class="foot">
     国内速报与全球震情速报两路数据经路由器转发，各自按天存 CSV、只留 7 天。
@@ -553,14 +564,15 @@ function render() {
     return;
   }
   $("list").innerHTML = items.map(function (x) {
-    var meta = "时间：" + (x.time || "—") +
-               " · 深度：" + (x.depth || "—") + " km";
+    var meta = "深度：" + (x.depth || "—") + " km";
     var co = coord(x.lat, x.lon);
     if (co) meta += " · " + co;
-    return '<div class="q"><div class="mag ' + magCls(x.mag) + '">' +
-      (x.mag ? x.mag.toFixed(1) : "—") + "</div>" +
-      '<div class="mi"><div class="pl">' + esc(x.place || "位置未知") + "</div>" +
-      '<div class="mt">' + esc(meta) + "</div></div></div>";
+    return '<div class="fitem">' +
+      '<div class="fh"><span class="fmag ' + magCls(x.mag) + '">' +
+      (x.mag ? x.mag.toFixed(1) : "—") + "</span>" +
+      '<span class="sp"></span><span>时间：' + esc(x.time || "—") + "</span></div>" +
+      '<div class="fb">' + esc(x.place || "位置未知") + "</div>" +
+      '<div class="ff"><span class="muted small">' + esc(meta) + "</span></div></div>";
   }).join("");
 }
 

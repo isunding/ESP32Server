@@ -454,6 +454,7 @@ class App:
         self.watch = load_watch()   # 自选股（列表 + 行情各一份缓存）
         self.watch_quotes = None
         self.watch_ts = 0
+        self.watch_partial = 0
 
         # 新闻 / 地震：只在有人看页面且过期时才取，取回增量追加到当天 CSV
         self.news_due = False
@@ -703,11 +704,28 @@ class App:
     def h_health(self, req):
         return httpsrv.json_resp(self._health_state())
 
+    def _watch_items(self, got):
+        """按 watch.json 顺序生成完整清单；取不到行情的条目保留占位。"""
+        by = {d["code"]: d for d in got} if got else {}
+        out = []
+        partial = 0
+        for it in self.watch:
+            d = by.get(it["code"])
+            if d:
+                d["name"] = it.get("name") or it["code"]
+                out.append(d)
+            else:
+                partial = 1
+                out.append({"code": it["code"],
+                            "name": it.get("name") or it["code"],
+                            "missing": 1})
+        return out, partial
+
     def h_watch(self, req):
         """自选股：列表存板上 watch.json，行情一次批量取，按需 + TTL。
 
         与行情页同一套限制：只有人打开页面才联网，`?force=1` 15 秒内最多一次，
-        取失败先给旧值。名称由前端用 GBK 解码（固件里没有 gbk 编码表）。
+        取失败仍返回完整清单。名称由前端用 GBK 解码（固件里没有 gbk 编码表）。
         """
         # 只查代码清单（新闻页标注「已在自选」用）：不联网、不查行情，
         # 行情源挂掉时也能返回，且与行情页的 items 结构解耦。
@@ -716,13 +734,13 @@ class App:
                                       "codes": [x["code"] for x in self.watch]})
         now = time.ticks_ms()
         force = req.arg("force") == "1"
-        age = None
         if self.watch_quotes and self.watch_ts:
             age = time.ticks_diff(now, self.watch_ts)
             if age < 0:
                 age = 0
             if age < WATCH_TTL and not (force and age >= 15000):
                 return httpsrv.json_resp({"ok": 1, "age": age // 1000,
+                                          "partial": self.watch_partial,
                                           "items": self.watch_quotes})
         got = None
         if self.watch:
@@ -730,22 +748,17 @@ class App:
                 got = rap.sina_quotes([it["code"] for it in self.watch])
             except Exception as e:
                 print("[watch]", e)
+        out, partial = self._watch_items(got)
         if got:
-            by = {d["code"]: d for d in got}
-            out = []
-            for it in self.watch:
-                d = by.get(it["code"])
-                if not d:
-                    continue
-                d["name"] = it.get("name") or it["code"]
-                out.append(d)
             self.watch_quotes = out
+            self.watch_partial = partial
             self.watch_ts = now
-            return httpsrv.json_resp({"ok": 1, "age": 0, "items": out})
-        if self.watch_quotes:
-            return httpsrv.json_resp({"ok": 1, "stale": 1,
-                                      "items": self.watch_quotes})
-        return httpsrv.json_resp({"ok": 0, "msg": "行情源不可用"})
+            return httpsrv.json_resp({"ok": 1, "age": 0,
+                                      "partial": partial, "items": out})
+        # 行情源不可用时仍返回完整清单，缺失项标 missing，页面据此展示与删除。
+        # 不更新缓存时间戳，TTL 到期后继续重试行情。
+        return httpsrv.json_resp({"ok": 1, "no_quote": 1,
+                                  "partial": 1, "items": out})
 
     def h_watch_action(self, req):
         """增删自选。只动板上 watch.json，不触发重启、不联网。"""
@@ -770,6 +783,7 @@ class App:
             return httpsrv.json_resp({"ok": 0, "msg": "写入失败"})
         self.watch_quotes = None
         self.watch_ts = 0
+        self.watch_partial = 0
         return httpsrv.json_resp({"ok": 1,
                                   "codes": [x["code"] for x in self.watch]})
 

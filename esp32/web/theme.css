@@ -264,3 +264,41 @@ video{width:100%;height:100%;display:block;background:#0b0e12}
   .meters{grid-template-columns:1fr 1fr;gap:10px}
   .grid{grid-template-columns:1fr}
 }
+
+/* ---------- 信息流模块（新闻 / 地震共用；视觉与首页 .tile 一致） ---------- */
+.feed{display:grid;gap:10px}
+@media (min-width:560px){.feed{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.feed>.empty{grid-column:1/-1}
+.chips{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px}
+.chips button{font-size:12px;padding:4px 10px;border-radius:999px;cursor:pointer;
+  border:1px solid var(--line);background:var(--bg3);color:var(--fg2);font-family:inherit}
+.chips button.on{border-color:var(--acc);color:var(--acc);background:rgba(255,106,0,.12)}
+.chips .lbl{font-size:11.5px;color:var(--fg2);align-self:center;margin-right:2px}
+.empty{padding:20px 0;text-align:center}
+.fitem{min-width:0;background:linear-gradient(160deg,var(--bg2),var(--bg3));
+  border:1px solid var(--line);border-radius:var(--radius);padding:12px 14px}
+.fitem .fh{display:flex;align-items:center;gap:8px;margin-bottom:8px;
+  font-size:11.5px;color:var(--fg2);font-variant-numeric:tabular-nums}
+.fitem .fh .sp{flex:1}
+.fitem .fb{font-size:13.5px;line-height:1.6;white-space:pre-wrap;word-break:break-word;
+  display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+.fitem.open .fb{-webkit-line-clamp:unset;display:block}
+.fitem .fb b{font-weight:600;color:var(--fg)}
+.fitem .ff{display:flex;gap:6px;flex-wrap:wrap;margin-top:9px;align-items:center}
+.flv{font-size:10.5px;border-radius:5px;padding:1px 6px;flex:0 0 auto}
+.flv.A{background:rgba(230,60,60,.16);color:#e23c3c}
+.flv.B{background:rgba(240,160,40,.16);color:#d98a1a}
+.flv.C{background:var(--bg3);color:var(--fg2)}
+.fmag{font-size:15px;font-weight:600;border-radius:6px;padding:2px 9px;flex:0 0 auto}
+.fmag.m6{background:rgba(226,60,60,.18);color:#e23c3c}
+.fmag.m5{background:rgba(240,120,40,.18);color:#e07a1f}
+.fmag.m4{background:rgba(230,190,40,.18);color:#b8901a}
+.fmag.m0{background:var(--bg3);color:var(--fg2)}
+.ftag{font-size:11px;color:var(--fg2);border:1px solid var(--line);
+  border-radius:999px;padding:1px 7px}
+.fbtn{font-size:11px;border:1px solid var(--line);border-radius:999px;
+  padding:1px 7px;cursor:pointer;background:var(--bg2);color:var(--fg2);font-family:inherit}
+.fbtn.added{border-color:var(--ok);color:var(--ok)}
+.fsum{display:flex;gap:16px;flex-wrap:wrap;margin-bottom:4px}
+.fsum .k{font-size:11.5px;color:var(--fg2)}
+.fsum .v{font-size:15px;font-weight:600;margin-top:2px}

@@ -147,6 +147,15 @@ function gbkName(hex) {
 }
 
 function watchRow(d) {
+  if (d.missing) {
+    return '<div class="mkrow flat">' +
+      '<div><div class="nm">' + MR.esc(d.name || d.code) + '</div>' +
+      '<div class="sub">' + MR.esc(d.code) + '</div></div>' +
+      '<div style="display:flex;align-items:center;gap:8px">' +
+      '<span class="muted small">行情暂缺</span>' +
+      '<a class="wdel" data-del="' + MR.esc(d.code) + '" title="从自选移除">✕</a>' +
+      "</div></div>";
+  }
   var pct = Number(d.pct) || 0;
   var cls = pct > 0 ? "up" : (pct < 0 ? "down" : "flat");
   var digits = Math.abs(Number(d.price) || 0) >= 100 ? 2 : 3;
@@ -173,7 +182,8 @@ function renderWatch(w) {
     ? items.map(watchRow).join("")
     : '<span class="muted small">还没有自选，下面输入代码添加</span>';
   MR.$("wCnt").textContent = items.length + " 支 · " +
-    (w.stale ? "旧数据" : (Number(w.age) ? Math.round(w.age / 60) + " 分钟前" : "刚刚"));
+    (w.no_quote ? "行情源不可用" : w.stale ? "旧数据" : w.partial ? "部分行情暂缺"
+      : (Number(w.age) ? Math.round(w.age / 60) + " 分钟前" : "刚刚"));
   var dels = MR.$("listWatch").querySelectorAll("[data-del]");
   for (var i = 0; i < dels.length; i++) {
     dels[i].addEventListener("click", function () {
