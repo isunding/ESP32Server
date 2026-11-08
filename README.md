@@ -7,6 +7,7 @@
 ![Platform](https://img.shields.io/badge/ESP32-D0WD--V3-e7352c)
 ![Flash](https://img.shields.io/badge/flash-4MB-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
+![Release](https://img.shields.io/github/v/release/isunding/ESP32Server)
 
 ---
 
@@ -74,6 +75,10 @@ flowchart LR
 ---
 
 ## 快速开始
+
+预编译包见 [Releases](https://github.com/isunding/ESP32Server/releases)：
+`source.zip` 为完整源码，`deploy.zip` 为板端部署文件（8 个 `.py` + `www/` + 配置模板），
+解压后可直接上传。
 
 ### 1. 烧写固件
 
