@@ -87,15 +87,22 @@ jobs:
 
       - name: 板级目录结构一致
         run: |
-          # 两个板级目录的模块、页面、构建产物必须同名，防止只改一边
+          # 两个板级目录的模块、页面、构建产物必须同名，防止只改一边。
+          # 例外：S3 版独享「财联社」「地震」两页（内存与数据源只有 S3 扛得住），
+          # 允许 S3 多出这几个文件，其余仍然必须一一对应。
           a=$(git ls-files esp32    | sed 's|^esp32/||'    | sort)
           b=$(git ls-files esp32-s3 | sed 's|^esp32-s3/||' | sort)
-          if [ "$a" != "$b" ]; then
-            echo "::error::esp32/ 与 esp32-s3/ 文件清单不一致"
-            diff <(echo "$a") <(echo "$b") || true
+          missing=$(comm -23 <(echo "$a") <(echo "$b"))
+          extra=$(comm -13 <(echo "$a") <(echo "$b"))
+          allowed='^web/(news|quake)\.html$|^www/(news|quake)\.html(\.gz)?$'
+          bad=$(echo "$extra" | grep -vE "$allowed" | grep -v '^$')
+          if [ -n "$missing" ] || [ -n "$bad" ]; then
+            echo "::error::两目录文件不一致（S3 只允许多出 news/quake 页面）"
+            if [ -n "$missing" ]; then echo "只在 esp32 有:"; echo "$missing"; fi
+            if [ -n "$bad" ]; then echo "S3 多出未允许的文件:"; echo "$bad"; fi
             exit 1
           fi
-          echo "目录结构一致（$(echo "$a" | wc -l) 个文件）"
+          echo "结构一致，S3 多出 $(echo "$extra" | grep -c . ) 个允许的文件"
 
       - name: 敏感文件未入库
         run: |

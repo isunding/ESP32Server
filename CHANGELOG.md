@@ -19,6 +19,15 @@
   进行中三色区分）与区间明细
 - 顶栏心跳：`mountTop()` 挂载后自动每 15 秒刷 `/api/health`，
   状态点呼吸、IP 实时更新（原先要求每页自己调，漏一页就永远显示「连接中」）
+- 财联社电报页（`/news.html`，仅 S3）：按重要度与主题筛选、正文折叠、
+  含股票代码可一键加入自选
+- 地震页（`/quake.html`，仅 S3）：近 7 天列表、震级配色与筛选、来源为
+  路由器转发的中国地震台网
+- `/api/news`、`/api/quake`：数据按天落 CSV（`news-YYYYMMDD.csv` /
+  `quake-YYYYMMDD.csv`），增量追加、只留 7 天；冷启动返回 pending，
+  取数在主循环后台完成
+- 路由器端新增两个 shell CGI：`/cgi-bin/news`（财联社签名 + 5 分钟缓存）、
+  `/cgi-bin/quake`（30 分钟缓存），都带 mkdir 单飞锁，避免并发时堆 curl
 - `/api/info`：新增芯片卡片（温度、复位原因、优化级别、内部 RAM 分块）
   与 WiFi 详情（SSID/信道/发射功率/省电模式）
 - `README.md`：项目说明、页面清单、架构图、部署指引

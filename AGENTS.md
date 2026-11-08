@@ -14,7 +14,20 @@ ESP32 + MicroPython 的无头终端服务器：单线程 HTTP 服务，向局域
 S3 版 Python 堆在 8MB PSRAM、内部 SRAM 留给 WiFi 与 lwIP。
 
 **两个目录要同步改**：页面、路由、API 的改动必须同时落到 `esp32/` 与 `esp32-s3/`，
-除非改动本身是板级差异（LED / 频率 / 内存）。
+除非改动本身是板级差异（LED / 频率 / 内存）。唯一允许的例外是 `news.html` 与
+`quake.html` 两页及其 `/api/news`、`/api/quake`——它们只有 S3 版有（CI 里列了白名单）。
+
+## 路由器端 CGI
+
+新闻与地震的数据由路由器上的两个 shell CGI 转发（`/data/iptv/www/cgi-bin/news|quake`），
+板子走 uhttpd 的 8088 端口直连——nginx 只对白名单里的 `/cgi-bin/xxx` 做了反代，
+走 8088 就不必改路由器配置。
+
+- 路由器**没有 `sha1sum`**（busybox 只编了 `md5sum`），哈希要退回 `openssl dgst`；
+  直接写 `sha1sum` 会得到空签名，上游回 `errno 10012`
+- CGI 文件必须是 LF 换行。CRLF 会让 `#!/bin/sh^M` 报 not found
+- 缓存写在 `/tmp`（tmpfs），不要写 `/data`，免得反复擦写 flash
+- 并发只用一个 `mkdir` 原子锁做单飞，不要用 `flock`（busybox 不一定有）
 
 ---
 

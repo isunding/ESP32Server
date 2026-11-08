@@ -43,7 +43,8 @@ cp esp32-s3/config.example.json esp32-s3/config.json    # ESP32-S3
     "host": "192.168.1.1",          // 数据源路由器地址
     "port": 80,
     "r2h_port": 5140,               // rtp2httpd 端口
-    "udpxy_port": 12123             // udpxy 端口
+    "udpxy_port": 12123,            // udpxy 端口
+    "aux_port": 8088                // 路由器 uhttpd 端口（新闻/地震 CGI 走这里）
   },
 
   "ntp": {
@@ -55,7 +56,9 @@ cp esp32-s3/config.example.json esp32-s3/config.json    # ESP32-S3
   "poll": {
     "weather_ms": 600000,           // 天气缓存 TTL
     "weatherhist_ms": 43200000,     // 过去 7 天历史缓存 TTL（12 小时）
-    "channels_ms": 300000           // 频道库缓存 TTL
+    "channels_ms": 300000,          // 频道库缓存 TTL
+    "news_ms": 300000,              // 财联社电报 TTL（仅 S3）
+    "quake_ms": 10800000            // 地震 TTL（3 小时，仅 S3）
   },
 
   "led": {
@@ -115,6 +118,14 @@ cp esp32-s3/config.example.json esp32-s3/config.json    # ESP32-S3
 ### `poll`
 
 缓存有效期，无后台轮询。数据过期后由下一次请求触发拉取。
+
+`news_ms` / `quake_ms` 只对 S3 版生效。取回的数据按天追加到板上的 CSV
+（`news-YYYYMMDD.csv`、`quake-YYYYMMDD.csv`），只保留最近 7 天，第 8 天自动删除最老的一个。
+
+### `router.aux_port`
+
+新闻与地震的 CGI 走路由器 uhttpd 自己的端口（默认 8088）直连，不经 nginx。
+路由器上 nginx 只对白名单里的 `/cgi-bin/xxx` 做了反代，走 8088 就不用改它的配置。
 
 ### `led`
 

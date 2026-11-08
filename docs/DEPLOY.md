@@ -231,3 +231,36 @@ esptool.py --chip esp32s3 --port COM3 write-flash -z 0x0 backup-8MB.bin
 先读取输出；需要 traceback 时发送 Ctrl-C 中断程序。
 
 Windows 上可用 `mpremote connect COM3`，或 PuTTY / 串口助手。
+
+---
+
+## 九、路由器端 CGI（新闻 / 地震，仅 S3）
+
+数据经路由器转发，板子不直接访问公网。两个脚本在 `router/cgi/`：
+
+| 文件 | 部署到 | 说明 |
+|---|---|---|
+| `news` | `/data/iptv/www/cgi-bin/news` | 财联社电报，本地算签名，缓存 5 分钟 |
+| `quake` | `/data/iptv/www/cgi-bin/quake` | 中国地震台网（apihz），缓存 30 分钟 |
+
+```bash
+# 必须是 LF 换行，否则 #!/bin/sh^M 报 not found
+scp router/cgi/news router/cgi/quake root@<路由器>:/data/iptv/www/cgi-bin/
+ssh root@<路由器> 'chmod 755 /data/iptv/www/cgi-bin/news /data/iptv/www/cgi-bin/quake'
+
+# 地震接口凭据（600 权限）
+ssh root@<路由器> "printf 'Q_ID=你的ID\nQ_KEY=你的KEY\n' > /data/iptv/etc/quake.conf && \
+  chmod 600 /data/iptv/etc/quake.conf"
+```
+
+板子通过 `router.aux_port`（默认 8088）直连 uhttpd，**不需要改 nginx**——
+nginx 只对白名单里的 `/cgi-bin/xxx` 做了反代，新加 CGI 不必动它。
+
+自检：
+
+```bash
+curl --noproxy "*" "http://<路由器>:8088/cgi-bin/news?a=cache"
+curl --noproxy "*" "http://<路由器>:8088/cgi-bin/quake?a=list"
+```
+
+两个脚本都有 `?a=flush` 清缓存。路由器上没有 `sha1sum`，脚本会退回 `openssl dgst`。
