@@ -60,3 +60,6 @@ esp32/*.mpy
 Thumbs.db
 *.log
 *.swp
+
+# ---- 发布产物 ----
+dist/
