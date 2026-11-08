@@ -14,10 +14,21 @@
 - `docs/CONFIG.md`：配置项说明
 - `docs/DEPLOY.md`：烧写与部署步骤
 - `CHANGELOG.md`、`LICENSE`（MIT）、`.gitignore`
+- 天气页：24 小时温度/降水折线图、7 天高低温区间图、未来 24 小时 AQI 柱状图、
+  过去 7 天曲线（逐小时/逐日切换）、天气图标、生活指数建议文字
+- `/api/weatherhist`：过去 7 天历史接口，落盘缓存 12 小时，取数在主线后台完成
+- `rap.py`：下载超时改为可配置（`dl` 参数，默认仍 4 秒）
 
 ### 变更
 - `config.example.json`：补齐 `led`、`tz` 字段，移除废弃字段 `tz_min`、`first_source`
+- `config.example.json`：新增 `poll.weatherhist_ms`
 - `esp32/README.md` 不再随仓库发布
+- 天气页预警改为解析 `warning.alerts`（`headline` / `description` /
+  `eventType.name` / `issuedTime`），此前读取的字段名不存在，导致有预警时仍显示「无生效预警」
+- 天气页体积 8.7 KB → 15.6 KB（gzip）
+
+### 修复
+- 天气页预警恒显示为空
 
 ### 安全
 - `config.json`（含 WiFi 密码）不入库，仅保留脱敏模板

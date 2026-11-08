@@ -123,7 +123,8 @@ python esp32/scripts/flash.py --no-upload
 | GET | `/api/health` | IP、RSSI、运行时长、剩余堆、路由器可达性 |
 | GET | `/api/home` | 健康状态、服务状态、今日历法 |
 | GET | `/api/info` | 固件、板型、CPU、MAC、堆、Flash、文件清单 |
-| GET | `/api/weather` | 天气聚合数据 |
+| GET | `/api/weather` | 天气聚合数据（实况 / 24 小时 / 7 天 / 空气 / 预警 / 指数） |
+| GET | `/api/weatherhist` | 过去 7 天历史（首次请求返回 `pending`，由主循环后台取回后再提供） |
 | GET | `/api/channels` | 频道库 |
 | GET | `/api/services` | rtp2httpd / udpxy 运行状态 |
 | GET | `/api/calendar` | 农历、节气、节日 |

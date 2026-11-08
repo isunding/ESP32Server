@@ -52,6 +52,7 @@ cp esp32/config.example.json esp32/config.json
 
   "poll": {
     "weather_ms": 600000,           // 天气缓存 TTL
+    "weatherhist_ms": 43200000,     // 过去 7 天历史缓存 TTL（12 小时）
     "channels_ms": 300000           // 频道库缓存 TTL
   },
 
