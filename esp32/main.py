@@ -143,6 +143,7 @@ P_DHCP = "/cgi-bin/sysstat?a=dhcp"
 P_ARP = "/cgi-bin/sysstat?a=arp"
 P_CLIENTS = "/cgi-bin/netperip"
 P_WEATHER = "/cgi-bin/weather?a=data"
+P_WEATHER_FLUSH = "/cgi-bin/weather?a=flush"
 P_WHIST = "/cgi-bin/weatherhist?a=history"
 P_CHANNELS = "/cgi-bin/iptv?a=list"
 P_SVC = "/cgi-bin/svcstat?port=%d"
@@ -374,6 +375,7 @@ class App:
         self.channels_ts = 0        # 上次成功刷新的时刻（ticks_ms）
         self.channels_due = False   # 需要后台补刷（h_channels 只吐旧文件，不阻塞）
         self.wx = {}
+        self.wx_force = False      # force 刷新：主循环后台重取
         self.reachable = None
         self.quote = None           # 行情缓存（几百字节）
         self.quote_ts = 0
@@ -451,10 +453,10 @@ class App:
         if ok:
             self.clients_ts = time.ticks_ms()
 
-    def poll_weather(self):
+    def poll_weather(self, dl=4000):
         try:
             n = self.api.download_cached(P_WEATHER, WEATHER_FILE,
-                                         self.cfg["poll"]["weather_ms"])
+                                         self.cfg["poll"]["weather_ms"], dl=dl)
             self.weather_size = n
             self.wx = {"temp": find_num_file(WEATHER_FILE, "temp"),
                        "aqi": find_num_file(WEATHER_FILE, "aqi")}
@@ -810,6 +812,16 @@ class App:
         return httpsrv.json_resp({"ok": 0, "msg": "行情不可用"})
 
     def h_weather(self, req):
+        if req.arg("force") == "1":
+            # 路由器 CGI 自身有 3 小时 TTL：不清它，板子再怎么刷都是同一份旧缓存。
+            # 只做「清缓存」这一个短请求，重取交给主循环（上游要串行取 8 个接口）。
+            try:
+                self.api.get_json(P_WEATHER_FLUSH, 2048)
+            except OSError as e:
+                print("[weather] flush", e, self.api.last_err)
+            self.api.drop(P_WEATHER)
+            self.wx_force = True
+            return httpsrv.json_resp({"ok": 1, "refreshing": 1})
         # download_cached 自带 TTL（weather_ms，默认 10 分钟），命中就秒回，
         # 过期才去拉一次，所以这里可以放心每次调用。
         self.poll_weather()
@@ -1079,6 +1091,9 @@ class App:
 
             # 频道库 / 终端列表到期补刷：请求侧只吐旧数据，补刷放在这里慢慢做，
             # 不占用任何一次 HTTP 请求的等待时间。
+            if self.wx_force:
+                self.wx_force = False
+                self.poll_weather(20000)
             if self.channels_due:
                 self.refresh_channels()
             if self.hist_due:

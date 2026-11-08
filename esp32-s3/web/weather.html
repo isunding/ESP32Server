@@ -953,6 +953,23 @@ function loadHist(tries) {
   });
 }
 
+var lastTs = 0;
+
+/* force 刷新：固件先清路由器 CGI 缓存，取数在主循环后台完成。
+   轮询到 ts 变化再渲染，避免把旧缓存当成新数据。 */
+function pollRefresh(n) {
+  setTimeout(function () {
+    MR.api("/api/weather").then(function (w) {
+      if (w && w.ok && w.ts && w.ts !== lastTs) { load(true); return; }
+      if (n < 16) { pollRefresh(n + 1); return; }
+      load(true);
+    }).catch(function () {
+      if (n < 16) pollRefresh(n + 1);
+      else load(true);
+    });
+  }, 1500);
+}
+
 function load(silent, retried) {
   var b = $("btnRefresh");
   if (!silent) {
@@ -961,6 +978,7 @@ function load(silent, retried) {
   }
   return MR.api("/api/weather").then(function (w) {
     if (w && w.ok) {
+      lastTs = w.ts || lastTs;
       render(w);
       $("updAt").textContent = "更新于 " + MR.hhmm(new Date());
       return;
@@ -985,7 +1003,17 @@ function load(silent, retried) {
 }
 
 $("btnRefresh").addEventListener("click", function () {
-  load(false);
+  var b = $("btnRefresh");
+  b.classList.add("spin");
+  b.disabled = true;
+  MR.api("/api/weather?force=1").then(function (r) {
+    if (r && r.refreshing) {
+      $("updAt").textContent = "正在刷新…";
+      pollRefresh(0);
+    } else {
+      load(false);
+    }
+  }).catch(function () { load(false); });
   loadHist(0);
 });
 

@@ -274,9 +274,13 @@ video{width:100%;height:100%;display:block;background:#0b0e12}
 }
 
 /* ---------- 信息流模块（新闻 / 地震共用；视觉与首页 .tile 一致） ---------- */
-.feed{display:grid;gap:10px}
-@media (min-width:560px){.feed{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.feed{display:grid;gap:12px}
 .feed>.empty{grid-column:1/-1}
+.frow{min-width:0}
+.frow .fh{display:flex;align-items:center;gap:8px;margin-bottom:6px;
+  font-size:12.5px;color:var(--fg);font-variant-numeric:tabular-nums}
+.frow .fh .ft{font-weight:600}
+.frow .fh .sp{flex:1}
 .chips{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px}
 .chips button{font-size:12px;padding:4px 10px;border-radius:999px;cursor:pointer;
   border:1px solid var(--line);background:var(--bg3);color:var(--fg2);font-family:inherit}
@@ -285,14 +289,11 @@ video{width:100%;height:100%;display:block;background:#0b0e12}
 .empty{padding:20px 0;text-align:center}
 .fitem{min-width:0;background:linear-gradient(160deg,var(--bg2),var(--bg3));
   border:1px solid var(--line);border-radius:var(--radius);padding:12px 14px}
-.fitem .fh{display:flex;align-items:center;gap:8px;margin-bottom:8px;
-  font-size:11.5px;color:var(--fg2);font-variant-numeric:tabular-nums}
-.fitem .fh .sp{flex:1}
 .fitem .fb{font-size:13.5px;line-height:1.6;white-space:pre-wrap;word-break:break-word;
   display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
-.fitem.open .fb{-webkit-line-clamp:unset;display:block}
+.frow.open .fb{-webkit-line-clamp:unset;display:block}
 .fitem .fb b{font-weight:600;color:var(--fg)}
-.fitem .ff{display:flex;gap:6px;flex-wrap:wrap;margin-top:9px;align-items:center}
+.frow .ff{display:flex;gap:6px;flex-wrap:wrap;margin-top:7px;align-items:center}
 .flv{font-size:10.5px;border-radius:5px;padding:1px 6px;flex:0 0 auto}
 .flv.A{background:rgba(230,60,60,.16);color:#e23c3c}
 .flv.B{background:rgba(240,160,40,.16);color:#d98a1a}
@@ -1412,6 +1413,23 @@ function loadHist(tries) {
   });
 }
 
+var lastTs = 0;
+
+/* force 刷新：固件先清路由器 CGI 缓存，取数在主循环后台完成。
+   轮询到 ts 变化再渲染，避免把旧缓存当成新数据。 */
+function pollRefresh(n) {
+  setTimeout(function () {
+    MR.api("/api/weather").then(function (w) {
+      if (w && w.ok && w.ts && w.ts !== lastTs) { load(true); return; }
+      if (n < 16) { pollRefresh(n + 1); return; }
+      load(true);
+    }).catch(function () {
+      if (n < 16) pollRefresh(n + 1);
+      else load(true);
+    });
+  }, 1500);
+}
+
 function load(silent, retried) {
   var b = $("btnRefresh");
   if (!silent) {
@@ -1420,6 +1438,7 @@ function load(silent, retried) {
   }
   return MR.api("/api/weather").then(function (w) {
     if (w && w.ok) {
+      lastTs = w.ts || lastTs;
       render(w);
       $("updAt").textContent = "更新于 " + MR.hhmm(new Date());
       return;
@@ -1444,7 +1463,17 @@ function load(silent, retried) {
 }
 
 $("btnRefresh").addEventListener("click", function () {
-  load(false);
+  var b = $("btnRefresh");
+  b.classList.add("spin");
+  b.disabled = true;
+  MR.api("/api/weather?force=1").then(function (r) {
+    if (r && r.refreshing) {
+      $("updAt").textContent = "正在刷新…";
+      pollRefresh(0);
+    } else {
+      load(false);
+    }
+  }).catch(function () { load(false); });
   loadHist(0);
 });
 

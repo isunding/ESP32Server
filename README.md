@@ -27,8 +27,8 @@
 | 天气 | `/weather.html` | 实况、24 小时、7 天预报、空气质量、生活指数 |
 | 行情 | `/market.html` | 三大指数、汇率、自选股（存于板上） |
 | 电台 | `/radio.html` | 67 个电台 / 9 个分类，支持搜索与折叠 |
-| 新闻 | `/news.html` | 卡片模块、重要度与主题筛选、`【】` 标题加粗、股票标签点选加入 / 移出自选（仅 S3） |
-| 地震 | `/quake.html` | 卡片模块、国内 / 全球切换、近 7 天列表、按震级筛选与配色、经纬度标注 N/S/E/W（仅 S3） |
+| 新闻 | `/news.html` | 单列卡片、时间与重要度置于标题行、标签置于卡片下方、重要度与主题筛选、`【】` 标题加粗、股票标签点选加入 / 移出自选（仅 S3） |
+| 地震 | `/quake.html` | 单列卡片、国内 / 全球切换、近 7 天列表、按震级筛选与配色、经纬度标注 N/S/E/W（仅 S3） |
 | 本机 | `/info.html` | 固件、板型、CPU、芯片温度、内部 RAM 分块、MAC、堆、Flash、休眠记录与时间轴 |
 | NTP | `/ntp.html` | 板载 NTP 服务端状态、上游同步、时区设置、农历 |
 | IPTV | `/iptv.html` | 频道库浏览与网页播放 |
@@ -143,7 +143,7 @@ python esp32-s3/scripts/flash.py esp32-s3/main.py esp32-s3/www/index.html ...
 | GET | `/api/health` | IP、RSSI、运行时长、剩余堆、路由器可达性 |
 | GET | `/api/home` | 健康状态、服务状态、今日历法 |
 | GET | `/api/info` | 固件、板型、CPU 频率、芯片温度、复位原因、内部 RAM 分块、MAC、堆、Flash、文件清单 |
-| GET | `/api/weather` | 天气聚合数据（实况 / 24 小时 / 7 天 / 空气 / 预警 / 指数） |
+| GET | `/api/weather` | 天气聚合数据（实况 / 24 小时 / 7 天 / 空气 / 预警 / 指数）；`?force=1` 清除两级缓存后重取 |
 | GET | `/api/weatherhist` | 过去 7 天历史（首次请求返回 `pending`，由主循环后台取回后再提供） |
 | GET | `/api/channels` | 频道库 |
 | GET | `/api/services` | rtp2httpd / udpxy 运行状态 |

@@ -108,11 +108,11 @@ function render() {
     var meta = "深度：" + (x.depth || "—") + " km";
     var co = coord(x.lat, x.lon);
     if (co) meta += " · " + co;
-    return '<div class="fitem">' +
+    return '<div class="frow">' +
       '<div class="fh"><span class="fmag ' + magCls(x.mag) + '">' +
       (x.mag ? x.mag.toFixed(1) : "—") + "</span>" +
       '<span class="sp"></span><span>时间：' + esc(x.time || "—") + "</span></div>" +
-      '<div class="fb">' + esc(x.place || "位置未知") + "</div>" +
+      '<div class="fitem"><div class="fb">' + esc(x.place || "位置未知") + "</div></div>" +
       '<div class="ff"><span class="muted small">' + esc(meta) + "</span></div></div>";
   }).join("");
 }

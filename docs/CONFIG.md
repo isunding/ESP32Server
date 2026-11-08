@@ -119,6 +119,10 @@ cp esp32-s3/config.example.json esp32-s3/config.json    # ESP32-S3
 
 缓存有效期，无后台轮询。数据过期后由下一次请求触发拉取。
 
+`weather_ms` 为板端缓存有效期。路由器 CGI 另有独立缓存；手动刷新
+（`/api/weather?force=1`）同时清除两级缓存，取数在主循环后台完成，
+页面在数据时间戳变化后重新渲染。
+
 `news_ms` / `quake_ms` 只对 S3 版生效。取回的数据按天追加到板上的 CSV
 （`news-YYYYMMDD.csv`、`quake-YYYYMMDD.csv`、`quakeg-YYYYMMDD.csv`），保留最近 7 天。
 

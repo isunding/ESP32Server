@@ -109,11 +109,12 @@ function render() {
           esc(name || raw) + " " + esc(raw) + "</button>";
       }).join("");
     }
-    return '<div class="fitem" data-k="' + esc(x.key) + '">' +
-      '<div class="fh"><span>' + hhmm(x.ctime) + "</span>" +
+    return '<div class="frow" data-k="' + esc(x.key) + '">' +
+      '<div class="fh"><span class="ft">' + hhmm(x.ctime) + "</span>" +
       '<span class="flv ' + esc(x.lv || "C") + '">' + esc(x.lv || "C") + "</span>" +
       '<span class="sp"></span></div>' +
-      '<div class="fb">' + boldBracket(x.text || x.title || "") + "</div>" +
+      '<div class="fitem"><div class="fb">' +
+      boldBracket(x.text || x.title || "") + "</div></div>" +
       '<div class="ff">' + x.subjects.map(function (s) {
         return '<span class="ftag">' + esc(s) + "</span>";
       }).join("") + stk + "</div></div>";
@@ -230,7 +231,7 @@ $("list").addEventListener("click", function (e) {
     });
     return;
   }
-  var it = e.target.closest ? e.target.closest(".fitem") : null;
+  var it = e.target.closest ? e.target.closest(".frow") : null;
   if (it) it.classList.toggle("open");
 });
 

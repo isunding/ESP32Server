@@ -46,6 +46,7 @@ S3 版 Python 堆在 8MB PSRAM、内部 SRAM 留给 WiFi 与 lwIP。
 | `main.py` `h_weatherhist()` | 只吐落盘文件，取数交给 `refresh_weather_history()` | 历史天气要串行汇总 7 天，冷启动 5~15 秒，放进请求路径会堵死主循环 |
 | `main.py` `idle_power()`（S3） | `idle_mhz` 不低于 80，调用点放在 `web.poll()` 之后 | 80MHz 是 WiFi 的 APB 与 Octal PSRAM 时序的下限，更低会断网或崩堆；放在 poll 之前会漏掉本轮 accept |
 | `main.py` 频率基准 | 满频取配置 `power.max_mhz`，不读 `machine.freq()` | `esp_pm` 时钟配置不随软复位恢复 |
+| `main.py` `h_weather(force=1)` | 先清路由器 `a=flush` 与板端缓存，取数交主循环 | 路由器 CGI 有独立缓存；在请求路径等待上游取数会阻塞单线程主循环 |
 
 页面约束：
 
