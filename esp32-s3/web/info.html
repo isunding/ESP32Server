@@ -230,11 +230,19 @@ function pmRender(d) {
   var up = d.up || 0;
   var live = pm.down_at > 0;       // 正在进行的那一段
 
+  /* 打开这一页本身就会把 CPU 唤醒，所以「休眠中」几乎永远看不到。
+     用最后一段区间的结束时刻反推：刚结束（3 秒内）说明是这次访问把它叫醒的。 */
+  var prev = (pm.log || [])[(pm.log || []).length - 1];
+  var justWoke = !live && prev && (up - prev[1]) <= 3;
+
   MR.$("pmSub").textContent = pm.on
     ? "空闲 " + pm.idle_after + " 秒降频到 " + pm.mhz + " MHz"
     : "降频未启用";
-  MR.$("pmCur").textContent = (live ? "休眠中 · " : "满频 · ") + pm.cur + " MHz";
-  MR.$("pmCur").style.color = live ? "var(--ok)" : "";
+  MR.$("pmCur").textContent = live
+    ? "休眠中 · " + pm.mhz + " MHz"
+    : justWoke ? "刚从休眠唤醒 · " + pm.max + " MHz"
+    : "满频 · " + pm.cur + " MHz";
+  MR.$("pmCur").style.color = live || justWoke ? "var(--ok)" : "";
   MR.$("pmTotal").textContent = pm.sleep_total > 0 ? MR.fmtDur(pm.sleep_total) : "—";
   MR.$("pmCnt").textContent = (pm.downs || 0) + " 次";
 
