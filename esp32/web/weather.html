@@ -243,6 +243,17 @@ function zoned(iso) {
            hm: p2(d.getUTCHours()) + ":" + p2(d.getUTCMinutes()) };
 }
 
+/* 预警走 CAP 字段（issuedTime / onsetTime / expireTime），带 Z 的是 UTC，
+   必须换算成本地时间再显示，否则「发布/时段」会比实际早整整 8 小时。 */
+function wtime(iso) {
+  if (!iso) return "";
+  var t = Date.parse(iso);
+  if (isNaN(t)) return String(iso).replace("T", " ").substr(0, 16);
+  var d = new Date(t + TZ_OFF * 60000);
+  return d.getUTCFullYear() + "-" + p2(d.getUTCMonth() + 1) + "-" +
+    p2(d.getUTCDate()) + " " + p2(d.getUTCHours()) + ":" + p2(d.getUTCMinutes());
+}
+
 /* ================= 简易 SVG 图表引擎 =================
    不引任何第三方库：图表全部在浏览器端画，板子只发页面和一份 JSON。
    viewBox 固定 660 宽，靠 CSS 自适应容器宽度。 */
@@ -643,9 +654,9 @@ function normAlerts(w) {
       title: head || (typeName ? typeName + "预警" : "气象预警"),
       text: a.description || a.text || a.instruction || "",
       typeName: typeName,
-      pub: (a.issuedTime || a.issueTime || a.pubTime || "").replace("T", " ").substr(0, 16),
-      start: (a.onsetTime || a.effectiveTime || a.startTime || "").replace("T", " ").substr(0, 16),
-      end: (a.expireTime || a.endTime || "").replace("T", " ").substr(0, 16)
+      pub: wtime(a.issuedTime || a.issueTime || a.pubTime || ""),
+      start: wtime(a.onsetTime || a.effectiveTime || a.startTime || ""),
+      end: wtime(a.expireTime || a.endTime || "")
     };
   });
 }
