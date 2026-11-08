@@ -19,7 +19,7 @@
   进行中三色区分）与区间明细
 - 顶栏心跳：`mountTop()` 挂载后自动每 15 秒刷 `/api/health`，
   状态点呼吸、IP 实时更新（原先要求每页自己调，漏一页就永远显示「连接中」）
-- 新闻页（`/news.html`，原「财联社」，仅 S3）：按重要度与主题筛选、正文折叠、
+- 新闻页（`/news.html`，仅 S3）：按重要度与主题筛选、正文折叠、
   正文里 `【小标题】` 自动加粗；股票标签显示是否已在自选，点一次加入、再点一次
   移除并提示，同一支股票在多条电报里的状态同步更新
 - `/api/watch?a=codes`：只返回自选代码清单，不触发行情请求，供新闻页标注标签
@@ -30,7 +30,12 @@
 - `/api/news`、`/api/quake`：数据按天落 CSV（`news-YYYYMMDD.csv` /
   `quake-YYYYMMDD.csv`），增量追加、只留 7 天；冷启动返回 pending，
   取数在主循环后台完成
-- 路由器端新增两个 shell CGI：`/cgi-bin/news`（财联社签名 + 5 分钟缓存）、
+- 地震页「国内 / 全球」切换：国内走 `dizhen.php`（30 条国内速报），
+  全球走 `dizhensu.php`（10 条、含海外），两路共用一份 `quake.conf` 凭据，
+  各有独立 CSV（`quake-*.csv` / `quakeg-*.csv`）、缓存与单飞锁；
+  `/api/quake?a=global` 取全球视图
+- 首页卡片与顶栏页签重排：天气 · 地震 / 新闻 · 行情 / IPTV · 电台 / 本机 · NTP
+- 路由器端新增两个 shell CGI：`/cgi-bin/news`（上游签名 + 5 分钟缓存）、
   `/cgi-bin/quake`（30 分钟缓存），都带 mkdir 单飞锁，避免并发时堆 curl
 - `/api/info`：新增芯片卡片（温度、复位原因、优化级别、内部 RAM 分块）
   与 WiFi 详情（SSID/信道/发射功率/省电模式）

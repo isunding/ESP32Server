@@ -240,8 +240,8 @@ Windows 上可用 `mpremote connect COM3`，或 PuTTY / 串口助手。
 
 | 文件 | 部署到 | 说明 |
 |---|---|---|
-| `news` | `/data/iptv/www/cgi-bin/news` | 财联社电报，本地算签名，缓存 5 分钟 |
-| `quake` | `/data/iptv/www/cgi-bin/quake` | 中国地震台网（apihz），缓存 30 分钟 |
+| `news` | `/data/iptv/www/cgi-bin/news` | 新闻电报，本地算上游签名，缓存 5 分钟 |
+| `quake` | `/data/iptv/www/cgi-bin/quake` | `?a=list` 国内速报（`dizhen.php`）、`?a=global` 全球震情速报（`dizhensu.php`，含海外），两路缓存各 30 分钟、锁与缓存文件各自独立 |
 
 ```bash
 # 必须是 LF 换行，否则 #!/bin/sh^M 报 not found
@@ -260,7 +260,11 @@ nginx 只对白名单里的 `/cgi-bin/xxx` 做了反代，新加 CGI 不必动�
 
 ```bash
 curl --noproxy "*" "http://<路由器>:8088/cgi-bin/news?a=cache"
+curl --noproxy "*" "http://<路由器>:8088/cgi-bin/quake?a=cache"   # 国内 + 全球两路缓存状态
 curl --noproxy "*" "http://<路由器>:8088/cgi-bin/quake?a=list"
+curl --noproxy "*" "http://<路由器>:8088/cgi-bin/quake?a=global"
 ```
 
-两个脚本都有 `?a=flush` 清缓存。路由器上没有 `sha1sum`，脚本会退回 `openssl dgst`。
+两个脚本都有 `?a=flush` 清缓存；`quake` 会同时清国内与全球两份。
+两个上游接口共用 `/data/iptv/etc/quake.conf` 里的同一份 ID/KEY。
+路由器上没有 `sha1sum`，新闻脚本会退回 `openssl dgst`。

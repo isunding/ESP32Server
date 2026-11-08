@@ -310,6 +310,12 @@ video{width:100%;height:100%;display:block;background:#0b0e12}
     <button class="btn" id="btnRefresh"><span class="ic">↻</span>刷新</button>
   </div>
 
+  <div class="chips" id="scopeChips">
+    <span class="lbl">范围</span>
+    <button data-s="cn" class="on">国内</button>
+    <button data-s="global">全球（含海外）</button>
+  </div>
+
   <div class="card">
     <div class="sum">
       <div><div class="k">近 7 天</div><div class="v" id="cAll">—</div></div>
@@ -331,7 +337,7 @@ video{width:100%;height:100%;display:block;background:#0b0e12}
   </div>
 
   <p class="foot">
-    数据经路由器转发中国地震台网（apihz 接口），本地按天存 CSV、只留 7 天。
+    国内速报与全球震情速报两路数据经路由器转发，各自按天存 CSV、只留 7 天。
     震级配色：<b style="color:#b8901a">M4</b> / <b style="color:#e07a1f">M5</b> /
     <b style="color:#e23c3c">M6+</b>。经纬度 N/S 为北 / 南纬，E/W 为东 / 西经。
   </p>
@@ -348,13 +354,13 @@ var MR = (function () {
   var PAGES = [
     { href: "/", title: "首页" },
     { href: "/weather.html", title: "天气" },
-    { href: "/market.html", title: "行情" },
-    { href: "/news.html", title: "新闻" },
     { href: "/quake.html", title: "地震" },
+    { href: "/news.html", title: "新闻" },
+    { href: "/market.html", title: "行情" },
+    { href: "/iptv.html", title: "IPTV" },
     { href: "/radio.html", title: "电台" },
     { href: "/info.html", title: "本机" },
-    { href: "/ntp.html", title: "NTP" },
-    { href: "/iptv.html", title: "IPTV" }
+    { href: "/ntp.html", title: "NTP" }
   ];
 
   function $(id) { return document.getElementById(id); }
@@ -496,7 +502,7 @@ var MR = (function () {
 MR.mountTop("地震");
 var $ = MR.$, esc = MR.esc;
 
-var ALL = [], MIN = 0;
+var ALL = [], MIN = 0, SCOPE = "cn";
 
 function csvLine(s) {
   var out = [], cur = "", q = false, i, c;
@@ -541,7 +547,9 @@ function render() {
   var items = ALL.filter(function (x) { return x.mag >= MIN; });
   if (!items.length) {
     $("list").innerHTML = '<div class="empty muted small">' +
-      (ALL.length ? "没有达到该震级的地震" : "暂无数据，稍后自动刷新") + "</div>";
+      (ALL.length ? "没有达到该震级的地震"
+                  : (SCOPE === "global" ? "暂无全球数据，稍后自动刷新"
+                                        : "暂无国内数据，稍后自动刷新")) + "</div>";
     return;
   }
   $("list").innerHTML = items.map(function (x) {
@@ -559,7 +567,10 @@ function render() {
 function load(force) {
   var b = $("btnRefresh");
   b.disabled = true;
-  return MR.api("/api/quake" + (force ? "?force=1" : "")).then(function (d) {
+  var q = [];
+  if (SCOPE === "global") q.push("a=global");
+  if (force) q.push("force=1");
+  return MR.api("/api/quake" + (q.length ? "?" + q.join("&") : "")).then(function (d) {
     if (!d.ok) {
       $("updAt").textContent = d.msg || "准备中…";
       setTimeout(function () { load(true); }, 4000);
@@ -582,14 +593,28 @@ function load(force) {
     $("cAll").textContent = ALL.length + " 次";
     $("c4").textContent = m4 + " 次";
     $("cMax").textContent = mx ? "M" + mx.toFixed(1) : "—";
+    var tag = SCOPE === "global" ? "全球" : "国内";
     $("updAt").textContent = ALL.length
-      ? "最近 " + (ALL[0].time || "").replace(/^\d{4}-/, "") : "无数据";
+      ? tag + " · 最近 " + (ALL[0].time || "").replace(/^\d{4}-/, "")
+      : tag + " · 无数据";
     render();
   }).catch(function () {
     $("updAt").textContent = "读取失败";
     $("list").innerHTML = '<div class="empty muted small">接口无响应，点刷新重试</div>';
   }).then(function () { b.disabled = false; });
 }
+
+$("scopeChips").addEventListener("click", function (e) {
+  var t = e.target;
+  if (t.tagName !== "BUTTON") return;
+  var s = t.getAttribute("data-s");
+  if (!s || s === SCOPE) return;
+  SCOPE = s;
+  [].forEach.call(this.querySelectorAll("button"), function (b) { b.className = ""; });
+  t.className = "on";
+  $("updAt").textContent = "加载中…";
+  load(false);
+});
 
 $("magChips").addEventListener("click", function (e) {
   var t = e.target;

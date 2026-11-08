@@ -1,18 +1,20 @@
 #!/bin/sh
 # 地震数据代理 CGI — 30 分钟缓存 + 单飞锁
 #   数据源 cn.apihz.cn（转发中国地震台网），免费版只限制每分钟调用次数
-#   ?a=list      最近 30 条，原样透传上游 JSON（由页面解析）
-#   ?a=cache     缓存状态
-#   ?a=flush     清缓存
+#   ?a=list      国内速报 dizhen.php：最近 30 条，原样透传 JSON
+#   ?a=global    全球震情速报 dizhensu.php：最近 10 条（含海外），原样透传 JSON
+#   ?a=cache     两个缓存的状态
+#   ?a=flush     清两个缓存
 #
-# 凭据放在 /data/iptv/etc/quake.conf（chmod 600）：
+# 凭据放在 /data/iptv/etc/quake.conf（chmod 600），两个接口共用同一份：
 #   Q_ID=你的数字ID
 #   Q_KEY=你的KEY
 
 CONF=${QUAKE_CONF:-/data/iptv/etc/quake.conf}
-CACHE=${QUAKE_CACHE:-/tmp/quake_cache.json}
-CACHE_TS=$CACHE.ts
-LOCK=/tmp/quake.lock
+CN_CACHE=${QUAKE_CACHE:-/tmp/quake_cache.json}
+GL_CACHE=${QUAKE_CACHE_GLOBAL:-/tmp/quake_global_cache.json}
+CN_LOCK=/tmp/quake.lock
+GL_LOCK=/tmp/quake_global.lock
 TTL=1800
 Q_ID=""
 Q_KEY=""
@@ -27,9 +29,25 @@ getp() {
     | sed 's/+/ /g'
 }
 
+A=$(getp a)
+case "$A" in
+  global)
+    # 震情速报：国内 + 海外混合，字段带 weidu2 / jingdu2 方向标注
+    URL="https://cn.apihz.cn/api/tianqi/dizhensu.php"
+    CACHE="$GL_CACHE"
+    LOCK="$GL_LOCK"
+    ;;
+  *)
+    URL="https://cn.apihz.cn/api/tianqi/dizhen.php"
+    CACHE="$CN_CACHE"
+    LOCK="$CN_LOCK"
+    ;;
+esac
+CACHE_TS=$CACHE.ts
+
 fetch() {
   curl -s -m 15 -H 'User-Agent: ra81-iptv' \
-    "https://cn.apihz.cn/api/tianqi/dizhen.php?id=$Q_ID&key=$Q_KEY" 2>/dev/null
+    "$URL?id=$Q_ID&key=$Q_KEY" 2>/dev/null
 }
 
 fresh() {
@@ -49,24 +67,29 @@ wait_cache() {
   [ -s "$CACHE" ]
 }
 
-case "$(getp a)" in
+stat() {
+  c=$1
+  if [ -s "$c" ]; then
+    printf '{"bytes":%s,"age":%s}' \
+      "$(wc -c < "$c" | tr -d ' ')" \
+      "$(( $(date +%s) - $(cat "$c.ts" 2>/dev/null || echo 0) ))"
+  else
+    printf '{"bytes":0}'
+  fi
+}
+
+case "$A" in
   cache)
     hdr
-    if [ -s "$CACHE" ]; then
-      printf '{"ok":1,"bytes":%s,"age":%s,"ttl":%s,"conf":%s}\n' \
-        "$(wc -c < "$CACHE" | tr -d ' ')" \
-        "$(( $(date +%s) - $(cat "$CACHE_TS" 2>/dev/null || echo 0) ))" \
-        "$TTL" "$([ -n "$Q_KEY" ] && echo true || echo false)"
-    else
-      printf '{"ok":1,"bytes":0,"ttl":%s,"conf":%s}\n' \
-        "$TTL" "$([ -n "$Q_KEY" ] && echo true || echo false)"
-    fi
+    printf '{"ok":1,"ttl":%s,"conf":%s,"cn":%s,"global":%s}\n' \
+      "$TTL" "$([ -n "$Q_KEY" ] && echo true || echo false)" \
+      "$(stat "$CN_CACHE")" "$(stat "$GL_CACHE")"
     ;;
   flush)
-    rm -f "$CACHE" "$CACHE_TS"
-    rmdir "$LOCK" 2>/dev/null
+    rm -f "$CN_CACHE" "$CN_CACHE.ts" "$GL_CACHE" "$GL_CACHE.ts"
+    rmdir "$CN_LOCK" "$GL_LOCK" 2>/dev/null
     hdr
-    printf '{"ok":1,"msg":"缓存已清"}\n'
+    printf '{"ok":1,"msg":"国内与全球缓存已清"}\n'
     ;;
   *)
     if [ -z "$Q_ID" ] || [ -z "$Q_KEY" ]; then

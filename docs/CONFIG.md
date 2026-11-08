@@ -57,7 +57,7 @@ cp esp32-s3/config.example.json esp32-s3/config.json    # ESP32-S3
     "weather_ms": 600000,           // 天气缓存 TTL
     "weatherhist_ms": 43200000,     // 过去 7 天历史缓存 TTL（12 小时）
     "channels_ms": 300000,          // 频道库缓存 TTL
-    "news_ms": 300000,              // 财联社电报 TTL（仅 S3）
+    "news_ms": 300000,              // 新闻电报 TTL（仅 S3）
     "quake_ms": 10800000            // 地震 TTL（3 小时，仅 S3）
   },
 

@@ -178,6 +178,7 @@ P_SVC = "/cgi-bin/svcstat?port=%d"
 P_NTP = "/cgi-bin/ntpctl?a=status"
 P_NEWS = "/cgi-bin/news?a=list"
 P_QUAKE = "/cgi-bin/quake?a=list"
+P_QUAKE_GLOBAL = "/cgi-bin/quake?a=global"
 
 WEATHER_FILE = "weather.json"   # 天气太大，落盘后由 HTTP 层流式吐出
 WHIST_FILE = "whist.json"        # 过去 7 天历史（约 34KB），同样落盘
@@ -463,6 +464,10 @@ class App:
         self.quake_ts = 0
         self.quake_fail_ts = 0
         self.quake_ids = set()
+        self.quakeg_due = False
+        self.quakeg_ts = 0
+        self.quakeg_fail_ts = 0
+        self.quakeg_ids = set()
 
         self.t_wifi = 0
         self.reboot_at = 0
@@ -1281,11 +1286,13 @@ class App:
                              req.arg("force") == "1")
 
     def h_quake(self, req):
-        return self._h_daily("quake", "quake_ms", QUAKE_ROWS_MAX,
+        # 国内 / 全球各一份 CSV，互不覆盖；页面用 ?a=global 切到全球视图
+        prefix = "quakeg" if req.arg("a") == "global" else "quake"
+        return self._h_daily(prefix, "quake_ms", QUAKE_ROWS_MAX,
                              req.arg("force") == "1")
 
     def refresh_news(self):
-        """财联社电报：取 20 条，按 id 去重后追加到当天 CSV。"""
+        """新闻电报：取 20 条，按 id 去重后追加到当天 CSV。"""
         self.news_due = False
         t0 = time.ticks_ms()
         try:
@@ -1376,6 +1383,53 @@ class App:
         _csv_prune("quake")
         print("[quake] +%d 条 共%d %dms" % (added, len(self.quake_ids),
                                            time.ticks_diff(self.quake_ts, t0)))
+        return True
+
+    def refresh_quake_global(self):
+        """全球震情速报：取最近 10 条（含海外），按「时间_震级」去重落盘。"""
+        self.quakeg_due = False
+        t0 = time.ticks_ms()
+        try:
+            d = self.api_aux.get_json(P_QUAKE_GLOBAL, 32768)
+        except Exception as e:
+            print("[quakeg]", e)
+            self.quakeg_fail_ts = time.ticks_ms()
+            return False
+        rows = (d or {}).get("data") or []
+        if not rows:
+            self.quakeg_fail_ts = time.ticks_ms()
+            return False
+        if not self.quakeg_ids:
+            self.quakeg_ids = self._daily_ids("quakeg")
+        fn = "quakeg-%s.csv" % _ymd()
+        added = 0
+        try:
+            with open(fn, "a") as f:
+                for n in rows:
+                    tm = str(n.get("time") or n.get("addtime") or "")
+                    leve = str(n.get("leve") or "")
+                    if not tm:
+                        continue
+                    k = tm.replace(" ", "_").replace(":", "") + "_" + leve
+                    if k in self.quakeg_ids:
+                        continue
+                    self.quakeg_ids.add(k)
+                    # dizhi 末尾带「（北纬34.23度东经88.14度）」，页面已单独显示坐标
+                    place = str(n.get("dizhi") or n.get("weizhi") or "")
+                    place = place.split("（")[0]
+                    f.write("%s,%s,%s,%s,%s,%s,%s\n" % (
+                        k, leve, _csv_q(tm), _csv_q(place),
+                        n.get("shendu") or "", n.get("weidu") or "",
+                        n.get("jingdu") or ""))
+                    added += 1
+        except OSError as e:
+            print("[quakeg] write", e)
+            self.quakeg_fail_ts = time.ticks_ms()
+            return False
+        self.quakeg_ts = time.ticks_ms()
+        _csv_prune("quakeg")
+        print("[quakeg] +%d 条 共%d %dms" % (added, len(self.quakeg_ids),
+                                            time.ticks_diff(self.quakeg_ts, t0)))
         return True
 
     # ---------------- 空闲降频 ----------------
@@ -1508,6 +1562,8 @@ class App:
                 self.refresh_news()
             if self.quake_due:
                 self.refresh_quake()
+            if self.quakeg_due:
+                self.refresh_quake_global()
 
             if time.ticks_diff(now, self.t_wifi) >= 30000:
                 self.t_wifi = now
