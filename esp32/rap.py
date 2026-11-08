@@ -25,12 +25,13 @@ class _Reader:
     没有它，一次 2 秒的 CGI 就会让整个 Web 服务停摆 2 秒。
     """
 
-    __slots__ = ("s", "buf", "yield_cb")
+    __slots__ = ("s", "buf", "yield_cb", "dl")
 
-    def __init__(self, s, buf=b"", yield_cb=None):
+    def __init__(self, s, buf=b"", yield_cb=None, dl=4000):
         self.s = s
         self.buf = buf
         self.yield_cb = yield_cb
+        self.dl = dl          # 单次等待的总上限（毫秒），默认 4 秒
 
     def _yield(self):
         if self.yield_cb:
@@ -43,8 +44,9 @@ class _Reader:
         # 路由器 CGI 首块数据可能要 1 秒以上才回。以前 socket 超时 2 秒，
         # 这一次 recv 就把单线程主循环整个锁住：80 端口没人 accept，
         # 页面和 ping 一起失联。现在每次最多等 0.5 秒，超时先 yield
-        # 处理 HTTP，再接着等，总上限 4 秒。
-        deadline = time.ticks_add(time.ticks_ms(), 4000)
+        # 处理 HTTP，再接着等，总上限由 self.dl 决定（默认 4 秒）。
+        # 历史天气接口要串行取 7 天，单次 4 秒不够，调用方传更大的 dl。
+        deadline = time.ticks_add(time.ticks_ms(), self.dl)
         while True:
             self._yield()
             try:
@@ -110,8 +112,12 @@ class RouterAPI:
         self.fail_count = 0
 
     # ---------------- 底层 ----------------
-    def _begin(self, path):
-        """发请求、读响应头。返回 (socket, _Reader, chunked, content_len)。"""
+    def _begin(self, path, dl=4000):
+        """发请求、读响应头。返回 (socket, _Reader, chunked, content_len)。
+
+        dl 是「等响应头」的总上限（毫秒）。普通 CGI 4 秒足够；
+        历史天气要串行汇总 7 天，需要更大的值。
+        """
         if self.yield_cb:
             try:
                 self.yield_cb()
@@ -136,7 +142,7 @@ class RouterAPI:
                     "User-Agent: esp32-terminal\r\n\r\n" % (path, self.host)).encode())
             s.settimeout(0.12)
             head = b""
-            deadline = time.ticks_add(time.ticks_ms(), 4000)
+            deadline = time.ticks_add(time.ticks_ms(), dl)
             while b"\r\n\r\n" not in head:
                 if self.yield_cb:
                     try:
@@ -181,14 +187,14 @@ class RouterAPI:
 
         self.fail_count = 0
         self.last_ok = time.ticks_ms()
-        return s, _Reader(s, rest, self.yield_cb), chunked, clen
+        return s, _Reader(s, rest, self.yield_cb, dl), chunked, clen
 
     # ---------------- 小响应：读进内存 ----------------
-    def get(self, path, limit=24576):
+    def get(self, path, limit=24576, dl=4000):
         """返回 body 的 bytes。超过 limit 抛 OSError("oversize")。"""
         s = None
         try:
-            s, r, chunked, clen = self._begin(path)
+            s, r, chunked, clen = self._begin(path, dl)
             buf = bytearray(limit)
             pos = 0
             if chunked:
@@ -220,7 +226,7 @@ class RouterAPI:
                     pass
 
     # ---------------- 大响应：流式落盘 ----------------
-    def download(self, path, filename, limit=262144):
+    def download(self, path, filename, limit=262144, dl=4000):
         """把 body 直接写到 filename，内存占用恒定 1KB。
 
         先写 .tmp 再改名，避免半截文件被当成有效缓存。
@@ -231,7 +237,7 @@ class RouterAPI:
         f = None
         total = 0
         try:
-            s, r, chunked, clen = self._begin(path)
+            s, r, chunked, clen = self._begin(path, dl)
             f = open(tmp, "wb")
             chunk = bytearray(1024)
             mv = memoryview(chunk)
@@ -364,7 +370,7 @@ class RouterAPI:
         except OSError:
             return False
 
-    def download_cached(self, path, filename, ttl_ms, limit=262144):
+    def download_cached(self, path, filename, ttl_ms, limit=262144, dl=4000):
         hit = self._cache.get(path)
         now = time.ticks_ms()
         if hit and ttl_ms > 0:
@@ -372,7 +378,7 @@ class RouterAPI:
             if 0 <= age < ttl_ms and self._fs_ok(filename):
                 return hit[1]
         try:
-            n = self.download(path, filename, limit)
+            n = self.download(path, filename, limit, dl)
         except OSError:
             if hit and self._fs_ok(filename):
                 return hit[1]

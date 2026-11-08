@@ -36,6 +36,7 @@
   "poll": {
     "_说明": "只有缓存 TTL（多久算过期），没有后台轮询任务",
     "weather_ms": 600000,
+    "weatherhist_ms": 43200000,
     "channels_ms": 300000
   },
 

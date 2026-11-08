@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>天气 · ESP32 终端服务器</title>
 <link rel="icon" href="data:,">
-<link rel="stylesheet" href="/theme.css?v=20261107d">
+<link rel="stylesheet" href="/theme.css?v=20261108a">
 <style>
   .pgtop{display:flex;align-items:center;gap:10px;margin:0 0 10px}
   .pgtop .upd{margin-left:auto;font-size:11.5px;color:var(--fg2)}
@@ -14,6 +14,27 @@
   #btnRefresh.spin{opacity:.65;pointer-events:none}
   #btnRefresh.spin .ic{animation:sp .8s linear infinite}
   @keyframes sp{to{transform:rotate(360deg)}}
+
+  /* 图表：viewBox 定宽 660，宽度交给容器自适应 */
+  .chart{position:relative}
+  .chart svg{display:block;width:100%;height:auto}
+  .legend{display:flex;gap:12px;flex-wrap:wrap;font-size:11.5px;
+    color:var(--fg2);margin-top:6px}
+  .legend i{display:inline-block;width:9px;height:9px;border-radius:2px;
+    margin-right:4px;vertical-align:middle}
+  .tip{font-size:11.5px;color:var(--fg2);margin-top:4px;min-height:16px}
+
+  .seg{display:flex;gap:6px;margin-bottom:10px}
+  .seg button{font-size:12px;padding:4px 10px;border-radius:7px;
+    border:1px solid var(--line);background:var(--bg3);color:var(--fg2);
+    cursor:pointer;font-family:inherit}
+  .seg button.on{border-color:var(--acc);color:var(--acc);
+    background:rgba(255,106,0,.12)}
+
+  /* 生活指数：多一行建议文字 */
+  .idx .it p{margin:3px 0 0;font-size:11.5px;line-height:1.45;color:var(--fg2)}
+  .warn-item .bd{white-space:pre-wrap}
+
   /* 路由器原始天气页入口 */
   .srcbar{display:flex;align-items:center;gap:10px;padding:12px 14px;margin-top:14px;
     background:var(--bg2);border:1px solid var(--line);border-radius:var(--radius);
@@ -71,16 +92,29 @@
       </div>
     </div>
     <div class="poll" id="poll"></div>
+    <div class="tip" id="aq24Tip" style="display:none"></div>
+    <div class="chart" id="chartAq24" style="margin-top:6px"></div>
   </div>
 
   <div class="card">
     <h2>未来 24 小时</h2>
     <div class="hours" id="hours"><span class="muted small">加载中…</span></div>
+    <div class="chart" id="chart24" style="margin-top:12px"></div>
   </div>
 
   <div class="card">
     <h2>未来 7 天</h2>
     <div id="days"><span class="muted small">加载中…</span></div>
+    <div class="chart" id="chart7" style="margin-top:12px"></div>
+  </div>
+
+  <div class="card">
+    <h2>过去 7 天曲线</h2>
+    <div class="seg" id="histSeg">
+      <button class="on" onclick="histMode('hour',this)">逐小时</button>
+      <button onclick="histMode('day',this)">逐日</button>
+    </div>
+    <div class="chart" id="chartHist"><span class="muted small">加载中…</span></div>
   </div>
 
   <div class="card">
@@ -98,150 +132,664 @@
   <p class="foot" id="foot">—</p>
 </div>
 
-<script src="/ui.js?v=20261107d"></script>
+<script src="/ui.js?v=20261108a"></script>
 <script>
-MR.mountTop("天气");
+"use strict";
+
+var $ = MR.$, esc = MR.esc;
 
 /* 路由器地址从 /api/health 动态取：换网段、改配置都不用动页面 */
 MR.healthTick().then(function (h) {
   var host = (h && h.router && h.router.host) || "10.0.0.1";
-  MR.$("routerWx").href = "http://" + host + "/manage/weather/";
-  MR.$("routerWxHost").textContent = host + "/manage/weather/ · 原始配置与数据源";
+  $("routerWx").href = "http://" + host + "/manage/weather/";
+  $("routerWxHost").textContent = host + "/manage/weather/ · 原始配置与数据源";
 }).catch(function () {});
 
-function aqiColor(a) {
-  if (a <= 50) return "#3fb950";
-  if (a <= 100) return "#c9a227";
-  if (a <= 150) return "#e07000";
-  if (a <= 200) return "#d1242f";
-  if (a <= 300) return "#8b2f8b";
-  return "#6e1b1b";
+/* ---------------- 和风天气代码 → 图标 ---------------- */
+var WICON = {
+  "100":"☀️","101":"⛅","102":"⛅","103":"⛅","104":"☁️","150":"🌙","151":"☁️",
+  "152":"☁️","153":"☁️","300":"🌦","301":"🌦","302":"⛈","303":"⛈","304":"⛈",
+  "305":"🌧","306":"🌧","307":"🌧","308":"🌧","309":"🌧","310":"🌧","311":"🌧",
+  "312":"🌧","313":"🌧","314":"🌧","315":"🌧","316":"🌧","317":"🌧","318":"🌧",
+  "350":"🌦","351":"🌦","399":"🌧","400":"🌨","401":"🌨","402":"❄️","403":"❄️",
+  "404":"🌨","405":"🌨","406":"🌨","407":"🌨","408":"🌨","409":"🌨","410":"❄️",
+  "456":"🌨","457":"🌨","499":"❄️","500":"🌫","501":"🌫","502":"😷","503":"😷",
+  "504":"😷","507":"🌫","508":"🌫","509":"🌫","510":"🌫","511":"🌫","512":"🌫",
+  "513":"🌫","514":"🌫","515":"🌫","900":"🌡","901":"🥶","902":"🌡","999":"❔"
+};
+function icon(c) { return WICON[String(c)] || "❔"; }
+
+/* ---------------- 空气质量配色（国标 HJ 633-2012） ---------------- */
+var AQ_COLOR = {
+  "1":"rgb(0,190,90)","2":"rgb(230,210,0)","3":"rgb(255,150,40)",
+  "4":"rgb(215,25,45)","5":"rgb(140,20,90)","6":"rgb(110,25,50)"
+};
+/* 同一色相压深，用于白底/浅底上的文字 */
+var AQ_INK = {
+  "1":"rgb(0,140,50)","2":"rgb(176,138,0)","3":"rgb(200,80,0)",
+  "4":"rgb(180,20,38)","5":"rgb(140,20,90)","6":"rgb(110,25,50)"
+};
+var POLL_NAME = {
+  "pm2p5":"PM2.5","pm10":"PM10","no2":"NO₂","so2":"SO₂","co":"CO","o3":"O₃"
+};
+function aqiLevel(v) {
+  v = +v || 0;
+  if (v <= 50) return "1";
+  if (v <= 100) return "2";
+  if (v <= 150) return "3";
+  if (v <= 200) return "4";
+  if (v <= 300) return "5";
+  return "6";
 }
-function aqiAdvice(a) {
-  if (a <= 50) return "空气质量令人满意，可正常户外活动。";
-  if (a <= 100) return "空气质量可接受，极少数敏感人群应减少户外活动。";
-  if (a <= 150) return "易感人群症状可能加重，建议减少长时间户外锻炼。";
-  if (a <= 200) return "心脏、呼吸系统疾病患者不宜户外活动，一般人适量减少。";
+function aqiFg(lv) { return (lv === "1" || lv === "2" || lv === "3") ? "#1f2328" : "#fff"; }
+function pickIdx(list) {
+  if (!list || !list.length) return null;
+  for (var i = 0; i < list.length; i++) if (list[i].code === "cn-mee") return list[i];
+  return list[0];
+}
+function aqiAdvice(v) {
+  if (v <= 50) return "空气质量令人满意，可正常户外活动。";
+  if (v <= 100) return "空气质量可接受，极少数敏感人群应减少户外活动。";
+  if (v <= 150) return "易感人群症状可能加重，建议减少长时间户外锻炼。";
+  if (v <= 200) return "心脏、呼吸系统疾病患者不宜户外活动，一般人适量减少。";
   return "建议留在室内，关闭门窗，外出佩戴口罩。";
 }
 
-/* 兼容 v1（indexes[]）与旧版（now.aqi）两种结构 */
-function pickAqi(w) {
-  var air = w.air || {};
-  if (air.indexes && air.indexes.length) {
-    var x = air.indexes[0];
-    return { aqi: Number(x.aqi), cat: x.category || "", level: x.level };
-  }
-  if (air.now && air.now.aqi != null) {
-    return { aqi: Number(air.now.aqi), cat: air.now.category || "" };
-  }
-  return null;
+/* 空气接口统一给 UTC 时间（...T09:00Z），按本地时区换算后再显示 */
+var TZ_OFF = 8 * 60;
+function setTzFrom(obsTime) {
+  var m = /([+-])(\d{2}):(\d{2})$/.exec(obsTime || "");
+  if (m) TZ_OFF = (m[1] === "-" ? -1 : 1) * (parseInt(m[2], 10) * 60 + parseInt(m[3], 10));
+}
+function p2(n) { return (n < 10 ? "0" : "") + n; }
+function zoned(iso) {
+  var t = Date.parse(iso);
+  if (isNaN(t)) return null;
+  var d = new Date(t + TZ_OFF * 60000);
+  return { md: p2(d.getUTCMonth() + 1) + "-" + p2(d.getUTCDate()),
+           hm: p2(d.getUTCHours()) + ":" + p2(d.getUTCMinutes()) };
 }
 
-function pickPollutants(w) {
-  var air = w.air || {};
-  var out = [];
-  if (air.pollutants && air.pollutants.length) {
-    air.pollutants.forEach(function (p) {
-      var v = (p.concentration && p.concentration.value) || p.concentration;
-      out.push({ n: p.name || p.code, v: v, u: (p.concentration && p.concentration.unit) || "" });
+/* ================= 简易 SVG 图表引擎 =================
+   不引任何第三方库：图表全部在浏览器端画，板子只发页面和一份 JSON。
+   viewBox 固定 660 宽，靠 CSS 自适应容器宽度。 */
+function svgEl(tag, attrs) {
+  var e = document.createElementNS("http://www.w3.org/2000/svg", tag);
+  for (var k in attrs) e.setAttribute(k, attrs[k]);
+  return e;
+}
+
+function drawChart(host, o) {
+  host.innerHTML = "";
+  var W = 660, H = o.height || 220, P = { l: 34, r: 34, t: 14, b: 26 };
+  var iw = W - P.l - P.r, ih = H - P.t - P.b;
+  var n = o.labels.length;
+  if (!n) { host.innerHTML = MR.empty("暂无数据"); return; }
+
+  function rng(arr, opts) {
+    opts = opts || {};
+    var vs = arr.filter(function (v) { return v !== null && !isNaN(v); });
+    if (!vs.length) return [0, 1];
+    var lo = Math.min.apply(null, vs), hi = Math.max.apply(null, vs);
+    if (opts.include0) { lo = Math.min(lo, 0); hi = Math.max(hi, 0); }
+    if (opts.nonNeg) lo = Math.max(lo, 0);
+    if (hi === lo) hi = lo + 1;
+    var pad = (hi - lo) * 0.12;
+    var a = lo - pad, b = hi + pad;
+    if (opts.nonNeg && a < 0) a = 0;
+    if (opts.include0 && b < 0) b = 0;
+    return [a, b];
+  }
+
+  var leftArr = [], rightArr = [];
+  o.series.forEach(function (s) {
+    if (s.axis === "r") rightArr = rightArr.concat(s.data);
+    else leftArr = leftArr.concat(s.data);
+  });
+  var LR = o.leftRange || rng(leftArr, { include0: false });
+  var RR = o.rightRange || rng(rightArr, { include0: true, nonNeg: !!o.rightNonNeg });
+
+  var svg = svgEl("svg", { viewBox: "0 0 " + W + " " + H,
+                           preserveAspectRatio: "xMidYMid meet" });
+
+  function X(i) { return P.l + (n === 1 ? iw / 2 : i * iw / (n - 1)); }
+  function YL(v) { return P.t + ih - (v - LR[0]) / (LR[1] - LR[0]) * ih; }
+  function YR(v) { return P.t + ih - (v - RR[0]) / (RR[1] - RR[0]) * ih; }
+
+  for (var g = 0; g <= 4; g++) {
+    var gy = P.t + ih * g / 4;
+    svg.appendChild(svgEl("line", { x1: P.l, y1: gy, x2: W - P.r, y2: gy,
+      stroke: "var(--line)", "stroke-width": 1, opacity: .55 }));
+  }
+
+  /* 柱状（右轴） */
+  var BASE = (o.baseline == null) ? Math.max(0, RR[0]) : o.baseline;
+  o.series.forEach(function (s) {
+    if (s.type !== "bar") return;
+    var bw = Math.max(2, iw / n * (o.barWidth || 0.55));
+    s.data.forEach(function (v, i) {
+      if (v === null || isNaN(v)) return;
+      if (v <= BASE && !o.showZeroBar) return;
+      var y = YR(v), y0 = YR(BASE);
+      svg.appendChild(svgEl("rect", { x: X(i) - bw / 2, y: Math.min(y, y0), width: bw,
+        height: Math.max(1, Math.abs(y0 - y)), rx: 2, fill: s.color,
+        opacity: s.opacity || .55 }));
+    });
+  });
+
+  /* 折线 */
+  o.series.forEach(function (s) {
+    if (s.type === "bar") return;
+    var YF = (s.axis === "r") ? YR : YL;
+    var d = "", started = false;
+    s.data.forEach(function (v, i) {
+      if (v === null || isNaN(v)) { started = false; return; }
+      d += (started ? "L" : "M") + X(i).toFixed(1) + " " + YF(v).toFixed(1) + " ";
+      started = true;
+    });
+    svg.appendChild(svgEl("path", { d: d, fill: "none", stroke: s.color,
+      "stroke-width": 2.2, "stroke-linejoin": "round", "stroke-linecap": "round" }));
+  });
+
+  /* 数值标签：点数超过 maxLabels 直接不画，避免糊成一团 */
+  if (o.showLabels && n <= (o.maxLabels || 10)) {
+    o.series.forEach(function (s) {
+      var YF = (s.axis === "r") ? YR : YL;
+      var dstep = s.step || 1;
+      s.data.forEach(function (v, i) {
+        if (i % dstep) return;
+        if (v === null || isNaN(v)) return;
+        if (s.type === "bar" && v <= 0) return;
+        var isBar = s.type === "bar";
+        var dy = s.labelBelow ? 13 : (isBar ? -5 : -7);
+        var tx = svgEl("text", {
+          x: X(i), y: YF(v) + dy,
+          "font-size": s.labelSize || 10.5, "font-weight": 600,
+          fill: s.labelColor || s.color,
+          "paint-order": "stroke", stroke: "var(--bg2)", "stroke-width": 2.5,
+          "stroke-linejoin": "round"
+        });
+        tx.textContent = v + (s.labelUnit || o.labelUnit || "");
+        svg.appendChild(tx);
+      });
     });
   }
-  return out.slice(0, 6);
+
+  /* 底部附加行（降水概率百分比之类），压在 X 轴上方 */
+  if (o.bottomRows && o.bottomRows.length) {
+    o.bottomRows.forEach(function (row, k) {
+      row.data.forEach(function (v, i) {
+        if (v === null || v === undefined || isNaN(v)) return;
+        if (row.hideZero && !v) return;
+        var ty = P.t + ih - 4 - (o.bottomRows.length - 1 - k) * 12;
+        var tx = svgEl("text", { x: X(i), y: ty, "text-anchor": "middle",
+          "font-size": row.fontSize || 9.5, "font-weight": 600,
+          fill: row.color || "var(--fg2)" });
+        tx.textContent = v + (row.suffix || "");
+        svg.appendChild(tx);
+      });
+    });
+  }
+
+  var step = Math.max(1, Math.ceil(n / 8));
+  o.labels.forEach(function (t, i) {
+    if (i % step !== 0 && i !== n - 1) return;
+    var tx = svgEl("text", { x: X(i), y: H - 8, "text-anchor": "middle",
+      "font-size": 10.5, fill: "var(--fg2)" });
+    tx.textContent = t;
+    svg.appendChild(tx);
+  });
+
+  [0, 0.5, 1].forEach(function (f) {
+    var t1 = svgEl("text", { x: P.l - 5, y: P.t + ih * (1 - f) + 3.5,
+      "text-anchor": "end", "font-size": 10, fill: "var(--fg2)" });
+    t1.textContent = Math.round(LR[0] + (LR[1] - LR[0]) * f) + (o.leftUnit || "");
+    svg.appendChild(t1);
+    if (rightArr.length) {
+      var t2 = svgEl("text", { x: W - P.r + 5, y: P.t + ih * (1 - f) + 3.5,
+        "text-anchor": "start", "font-size": 10, fill: "var(--fg2)" });
+      t2.textContent = Math.round(RR[0] + (RR[1] - RR[0]) * f) + (o.rightUnit || "");
+      svg.appendChild(t2);
+    }
+  });
+
+  /* 天气图标：贴在对应数据点上方 */
+  if (o.icons && o.icons.length) {
+    o.icons.forEach(function (s, i) {
+      if (!s) return;
+      var yv = (o.iconsAxis === "r") ? YR(o.iconsY[i]) : YL(o.iconsY[i]);
+      var ty = yv - (o.iconsOffset || 18);
+      if (ty < P.t + 11) ty = P.t + 11;
+      var tx = svgEl("text", { x: X(i), y: ty, "text-anchor": "middle",
+        "font-size": 12.5 });
+      tx.textContent = s;
+      svg.appendChild(tx);
+    });
+  }
+
+  /* 图例 + 悬停提示先建好，再挂监听，避免闭包拿到 undefined */
+  var lg = document.createElement("div");
+  lg.className = "legend";
+  o.series.forEach(function (s) {
+    var sp = document.createElement("span");
+    sp.innerHTML = '<i style="background:' + s.color + '"></i>' + esc(s.name);
+    lg.appendChild(sp);
+  });
+  host.appendChild(svg);
+  host.appendChild(lg);
+  var tipEl = document.createElement("div");
+  tipEl.className = "tip";
+  tipEl.textContent = o.hint || "悬停查看数值";
+  host.appendChild(tipEl);
+
+  var vline = svgEl("line", { x1: 0, y1: P.t, x2: 0, y2: P.t + ih,
+    stroke: "var(--acc)", "stroke-width": 1, "stroke-dasharray": "3 3", opacity: 0 });
+  svg.appendChild(vline);
+  var hit = svgEl("rect", { x: P.l, y: P.t, width: iw, height: ih, fill: "transparent" });
+  hit.addEventListener("mousemove", function (ev) {
+    var r = svg.getBoundingClientRect();
+    var px = (ev.clientX - r.left) / r.width * W;
+    var i = Math.round((px - P.l) / (iw || 1) * (n - 1));
+    i = Math.max(0, Math.min(n - 1, i));
+    vline.setAttribute("x1", X(i));
+    vline.setAttribute("x2", X(i));
+    vline.setAttribute("opacity", .8);
+    tipEl.textContent = o.tip ? o.tip(i) : o.labels[i];
+  });
+  hit.addEventListener("mouseleave", function () {
+    vline.setAttribute("opacity", 0);
+    tipEl.textContent = o.hint || "悬停查看数值";
+  });
+  svg.appendChild(hit);
 }
 
-function render(w) {
-  if (!w || !w.ok) {
-    var why = (w && w.msg) || "天气数据不可用";
-    MR.$("foot").textContent = why + " · 可点右上角刷新重试";
-    MR.$("hours").innerHTML = MR.empty("无数据");
-    MR.$("days").innerHTML = MR.empty("无数据");
+/* ---------------- 未来 24 小时 ---------------- */
+function draw24(hs) {
+  var host = $("chart24");
+  if (!host) return;
+  var arr = hs.slice(0, 24);
+  if (!arr.length) { host.innerHTML = MR.empty("暂无数据"); return; }
+
+  var labels = [], temp = [], pop = [], prcp = [], icons = [];
+  var hasRain = false;
+  arr.forEach(function (h) {
+    labels.push((h.fxTime || "").substr(11, 5));
+    temp.push(+h.temp);
+    pop.push(+(h.pop || 0));
+    var pv = +(h.precip || 0);
+    prcp.push(pv);
+    if (pv > 0) hasRain = true;
+    icons.push(icon(h.icon));
+  });
+
+  var tmin = Math.min.apply(null, temp), tmax = Math.max.apply(null, temp);
+  var padT = Math.max(2, Math.round((tmax - tmin) * 0.25));
+  var lo = tmin - padT, hi = tmax + padT;
+  if (hi - lo < 6) { var mid = (hi + lo) / 2; lo = mid - 3; hi = mid + 3; }
+
+  var series = [
+    { name: "气温", color: "#ff9540", type: "line", data: temp, axis: "l",
+      labelUnit: "°", labelBelow: true, step: 2, labelColor: "#d97a1f", labelSize: 10 }
+  ];
+  var rightUnit = "", rightRange = null;
+  if (hasRain) {
+    var maxPr = Math.max.apply(null, prcp);
+    var topPr = Math.max(0.5, Math.ceil(maxPr * 1.4 * 10) / 10);
+    series.unshift({ name: "降水量", color: "rgba(88,166,255,.55)", type: "bar",
+                     data: prcp, axis: "r", opacity: .8, labelUnit: "" });
+    rightUnit = "mm";
+    rightRange = [0, topPr];
+  }
+
+  drawChart(host, {
+    labels: labels, height: 250, leftUnit: "°", rightUnit: rightUnit,
+    leftRange: [lo, hi], rightRange: rightRange, rightNonNeg: true,
+    baseline: 0, barWidth: 0.5, series: series,
+    showLabels: true, maxLabels: 24,
+    bottomRows: [{ data: pop, suffix: "%", hideZero: true,
+                   color: "#58a6ff", fontSize: 9.5 }],
+    icons: icons, iconsY: temp, iconsAxis: "l", iconsOffset: 16,
+    hint: "悬停查看每小时数值",
+    tip: function (i) {
+      return labels[i] + "：" + temp[i] + "° · 降水概率 " + pop[i] +
+        "% · 降水量 " + prcp[i] + "mm · " + (arr[i].text || "");
+    }
+  });
+}
+
+/* ---------------- 未来 7 天 ---------------- */
+var WEEKS = ["日", "一", "二", "三", "四", "五", "六"];
+function draw7(days) {
+  var host = $("chart7");
+  if (!host) return;
+  if (!days.length) { host.innerHTML = MR.empty("暂无数据"); return; }
+  var labels = days.map(function (x, i) {
+    var dt = new Date((x.fxDate || "").replace(/-/g, "/"));
+    return i === 0 ? "今天" : "周" + WEEKS[dt.getDay()];
+  });
+  var tmax = days.map(function (x) { return +x.tempMax; });
+  var tmin = days.map(function (x) { return +x.tempMin; });
+  var pre = days.map(function (x) { return +(x.precip || 0); });
+  drawChart(host, {
+    labels: labels, height: 220, leftUnit: "°", rightUnit: "mm", rightNonNeg: true,
+    showLabels: true, maxLabels: 10,
+    series: [
+      { name: "最高温", color: "#ff6a00", type: "line", data: tmax, axis: "l", labelUnit: "°" },
+      { name: "最低温", color: "#58a6ff", type: "line", data: tmin, axis: "l", labelUnit: "°" },
+      { name: "降水量", color: "#7ee787", type: "bar", data: pre, axis: "r", labelUnit: "mm" }
+    ],
+    hint: "悬停查看每天数值",
+    tip: function (i) {
+      return labels[i] + "：最高 " + tmax[i] + "° / 最低 " + tmin[i] +
+        "° · 降水 " + pre[i] + " mm";
+    }
+  });
+}
+
+/* ---------------- 过去 7 天 ---------------- */
+var HIST = null, HMODE = "hour";
+
+function histMode(m, btn) {
+  HMODE = m;
+  var bs = $("histSeg").getElementsByTagName("button");
+  for (var i = 0; i < bs.length; i++) bs[i].className = "";
+  if (btn) btn.className = "on";
+  if (HIST) drawHist();
+}
+
+function drawHist() {
+  var host = $("chartHist");
+  var days = (HIST.days || []).slice().sort(function (a, b) {
+    var da = (a.weatherDaily && a.weatherDaily.date) || "";
+    var db = (b.weatherDaily && b.weatherDaily.date) || "";
+    return da < db ? -1 : (da > db ? 1 : 0);
+  });
+  if (!days.length) { host.innerHTML = MR.empty("暂无历史数据"); return; }
+
+  if (HMODE === "day") {
+    var lb = days.map(function (d) { return (d.weatherDaily.date || "").slice(5); });
+    var hi = days.map(function (d) { return +(d.weatherDaily.tempMax || 0); });
+    var lo = days.map(function (d) { return +(d.weatherDaily.tempMin || 0); });
+    var hu = days.map(function (d) { return +(d.weatherDaily.humidity || 0); });
+    var pr = days.map(function (d) { return +(d.weatherDaily.precip || 0); });
+    drawChart(host, {
+      labels: lb, height: 220, leftUnit: "°", rightUnit: "mm", rightNonNeg: true,
+      showLabels: true, maxLabels: 10,
+      series: [
+        { name: "最高温", color: "#ff6a00", type: "line", data: hi, axis: "l", labelUnit: "°" },
+        { name: "最低温", color: "#58a6ff", type: "line", data: lo, axis: "l", labelUnit: "°" },
+        { name: "降水量", color: "#7ee787", type: "bar", data: pr, axis: "r", labelUnit: "mm" }
+      ],
+      hint: "悬停查看每天数值",
+      tip: function (i) {
+        return lb[i] + "：最高 " + hi[i] + "° / 最低 " + lo[i] +
+          "° · 湿度 " + hu[i] + "% · 降水 " + pr[i] + " mm";
+      }
+    });
     return;
   }
 
-  MR.$("loc").textContent = w.name || w.loc || "—";
+  var labels = [], temp = [], hum = [], pre = [];
+  days.forEach(function (d) {
+    (d.weatherHourly || []).forEach(function (h) {
+      labels.push((h.time || "").slice(5, 13).replace("T", " "));
+      temp.push(+h.temp);
+      hum.push(+h.humidity);
+      pre.push(+(h.precip || 0));
+    });
+  });
+  drawChart(host, {
+    labels: labels, height: 230, leftUnit: "°", rightUnit: "%",
+    rightRange: [0, 100],
+    series: [
+      { name: "气温", color: "#ff9540", type: "line", data: temp, axis: "l" },
+      { name: "湿度", color: "#58a6ff", type: "line", data: hum, axis: "r" }
+    ],
+    hint: "悬停查看逐小时数值",
+    tip: function (i) {
+      return labels[i] + "：" + temp[i] + "° · 湿度 " + hum[i] +
+        "% · 降水 " + pre[i] + " mm";
+    }
+  });
+  /* 累计降水单独一行，比塞进图里直观 */
+  if (pre.some(function (v) { return v > 0; })) {
+    var total = pre.reduce(function (a, b) { return a + b; }, 0);
+    var rainy = pre.filter(function (v) { return v > 0; }).length;
+    var sub = document.createElement("div");
+    sub.className = "tip";
+    sub.textContent = "过去 7 天累计降水 " + total.toFixed(1) +
+      " mm，其中 " + rainy + " 个小时有降水";
+    host.appendChild(sub);
+  }
+}
+
+/* ================= 预警 =================
+   后端给的是和风 v7 warning.alerts：headline / description / severity /
+   color.code / eventType.name / issuedTime。severity 用 minor…extreme，
+   颜色另有一份 color.code（blue/yellow/orange/red），两者都要认。 */
+var LV = { white: 0, blue: 1, yellow: 2, orange: 3, red: 4,
+           minor: 1, moderate: 2, severe: 3, extreme: 4 };
+var LV_COLOR = ["#8b949e", "#1f6feb", "#b8860b", "#e07000", "#d1242f"];
+var LV_NAME = { minor: "蓝色", moderate: "黄色", severe: "橙色", extreme: "红色",
+                blue: "蓝色", yellow: "黄色", orange: "橙色", red: "红色" };
+
+function normAlerts(w) {
+  var al = (w && w.alerts) || [];
+  return al.map(function (a) {
+    var sev = String(a.severity || "").toLowerCase();
+    var col = (a.color && a.color.code) ? String(a.color.code).toLowerCase() : "";
+    var lv = LV[col] != null ? LV[col] : (LV[sev] != null ? LV[sev] : 2);
+    var ev = a.eventType;
+    var typeName = (ev && ev.name) ? ev.name : (a.eventName || "");
+    var head = a.headline || a.title || "";
+    return {
+      lv: lv,
+      lvName: LV_NAME[col] || LV_NAME[sev] || "预警",
+      title: head || (typeName ? typeName + "预警" : "气象预警"),
+      text: a.description || a.text || a.instruction || "",
+      typeName: typeName,
+      pub: (a.issuedTime || a.issueTime || "").replace("T", " ").substr(0, 16),
+      start: (a.onsetTime || a.effectiveTime || "").replace("T", " ").substr(0, 16),
+      end: (a.expireTime || "").replace("T", " ").substr(0, 16)
+    };
+  });
+}
+
+function renderWarn(list) {
+  var wc = $("warnCard");
+  if (!list.length) {
+    wc.innerHTML = '<h2>气象预警</h2><div class="warn-bar"><span class="ok-dot"></span>当前无生效预警</div>';
+    return;
+  }
+  var html = list.map(function (x) {
+    var c = LV_COLOR[x.lv] || LV_COLOR[2];
+    var mt = [];
+    if (x.typeName) mt.push("类型 " + x.typeName);
+    if (x.pub) mt.push("发布 " + x.pub);
+    if (x.start && x.end) mt.push("时段 " + x.start + " ~ " + x.end);
+    return '<div class="warn-item" style="border-left-color:' + c + '">' +
+      '<div class="hd"><span class="lv" style="background:' + c + '">' +
+      esc(x.lvName) + '</span><span class="ti">' + esc(x.title) + "</span></div>" +
+      (x.text ? '<div class="bd">' + esc(x.text) + "</div>" : "") +
+      (mt.length ? '<div class="mt">' + esc(mt.join(" · ")) + "</div>" : "") +
+      "</div>";
+  }).join("");
+  wc.innerHTML = "<h2>气象预警（" + list.length + "）</h2>" + html;
+}
+
+/* ---------------- 未来 24 小时 AQI ---------------- */
+function drawAq24(hAir) {
+  var host = $("chartAq24"), tip = $("aq24Tip");
+  var a = ((hAir && hAir.hours) || []).map(function (h) {
+    var ix = pickIdx(h.indexes), z = zoned(h.forecastTime);
+    if (!ix) return null;
+    return { t: z ? z.hm : "", v: +ix.aqi,
+             txt: ix.aqiDisplay || ix.aqi,
+             col: AQ_COLOR[aqiLevel(ix.aqi)] };
+  }).filter(Boolean);
+
+  if (!a.length) {
+    host.innerHTML = "";
+    host.style.display = "none";
+    tip.style.display = "none";
+    return;
+  }
+  host.style.display = "block";
+  tip.style.display = "block";
+
+  var W = 660, H = 170, P = { l: 30, r: 12, t: 24, b: 22 };
+  var iw = W - P.l - P.r, ih = H - P.t - P.b;
+  var mx = Math.max.apply(null, a.map(function (x) { return x.v; }));
+  var top = Math.max(100, Math.ceil(mx / 50) * 50);
+  var bw = Math.max(3, iw / a.length * 0.62);
+  var svg = svgEl("svg", { viewBox: "0 0 " + W + " " + H,
+                           preserveAspectRatio: "xMidYMid meet" });
+  svg.appendChild(svgEl("line", { x1: P.l, y1: P.t + ih, x2: W - P.r, y2: P.t + ih,
+    stroke: "var(--line)", "stroke-width": 1 }));
+
+  a.forEach(function (x, i) {
+    var cx = P.l + iw * (i + 0.5) / a.length;
+    var h = Math.max(2, x.v / top * ih);
+    var y = P.t + ih - h;
+    svg.appendChild(svgEl("rect", { x: cx - bw / 2, y: y, width: bw, height: h,
+      rx: 2, fill: x.col || "#8b949e" }));
+    var fs = a.length > 20 ? 8 : (a.length > 14 ? 9 : 10);
+    var t1 = svgEl("text", { x: cx, y: y - 3.5, "text-anchor": "middle",
+      "font-size": fs, "font-weight": 600,
+      fill: AQ_INK[aqiLevel(x.v)] || "var(--fg2)",
+      "paint-order": "stroke", stroke: "var(--bg2)", "stroke-width": 2.2,
+      "stroke-linejoin": "round" });
+    t1.textContent = x.txt;
+    svg.appendChild(t1);
+    if (i % 3 === 0) {
+      var t2 = svgEl("text", { x: cx, y: H - 6, "text-anchor": "middle",
+        "font-size": 9, fill: "var(--fg2)" });
+      t2.textContent = x.t;
+      svg.appendChild(t2);
+    }
+  });
+
+  host.innerHTML = "";
+  host.appendChild(svg);
+  tip.textContent = "未来 24 小时 AQI · 峰值 " + mx;
+}
+
+/* ---------------- 主渲染 ---------------- */
+function render(w) {
+  if (!w || !w.ok) {
+    var why = (w && w.msg) || "天气数据不可用";
+    $("foot").textContent = why + " · 可点右上角刷新重试";
+    $("hours").innerHTML = MR.empty("无数据");
+    $("days").innerHTML = MR.empty("无数据");
+    $("idx").innerHTML = MR.empty("无数据");
+    return;
+  }
+
   var n = (w.now && w.now.now) || {};
-  MR.$("temp").innerHTML = n.temp != null
-    ? MR.esc(n.temp) + '<i class="deg">°</i>'
-    : "--";
-  MR.$("txt").textContent = n.text || "—";
-  MR.$("feels").textContent = n.feelsLike != null ? "体感 " + n.feelsLike + "°" : "";
-  MR.$("hum").textContent = n.humidity != null ? n.humidity + "%" : "—";
-  MR.$("wind").textContent = n.windDir || "—";
-  MR.$("scale").textContent = n.windScale ? n.windScale + " 级" : "—";
-  MR.$("press").textContent = n.pressure ? n.pressure : "—";
+  setTzFrom(n.obsTime);
+
+  $("loc").textContent = (w.name || w.loc || "—") +
+    (n.obsTime ? " · " + n.obsTime.replace("T", " ").slice(5, 16) : "");
+  $("temp").innerHTML = n.temp != null ? esc(n.temp) + '<i class="deg">°</i>' : "--";
+  $("txt").textContent = (n.icon ? icon(n.icon) + " " : "") + (n.text || "—");
+  $("feels").textContent = (n.feelsLike != null ? "体感 " + n.feelsLike + "°" : "") +
+    (n.vis != null ? " · 能见度 " + n.vis + " km" : "");
+  $("hum").textContent = n.humidity != null ? n.humidity + "%" : "—";
+  $("wind").textContent = n.windDir || "—";
+  $("scale").textContent = n.windScale ? n.windScale + " 级" : "—";
+  $("press").textContent = n.pressure ? n.pressure : "—";
 
   /* 预警 */
-  var ws = (w.warning && w.warning.warning) || [];
-  var wc = MR.$("warnCard");
-  if (ws.length) {
-    var mm = ws.map(function (x, i) {
-      var lv = String(x.severityColor || "").toLowerCase();
-      var color = lv === "red" || lv === "black" ? "#d1242f" : lv === "orange" ? "#e07000" :
-        lv === "yellow" ? "#b8860b" : "#1f6feb";
-      return '<div class="warn-item" style="border-left-color:' + color + '">' +
-        '<div class="hd"><span class="lv" style="background:' + color + '">' +
-        MR.esc(x.severity || x.level || "预警") + '</span><span class="ti">' +
-        MR.esc(x.title || x.typeName || "") + "</span></div>" +
-        '<div class="bd">' + MR.esc(x.text || "") + "</div>" +
-        '<div class="mt">' + MR.esc((x.pubTime || "").replace("T", " ").substr(0, 16)) + "</div></div>";
-    }).join("");
-    wc.innerHTML = "<h2>气象预警（" + ws.length + "）</h2>" + mm;
-  } else {
-    wc.innerHTML = '<h2>气象预警</h2><div class="warn-bar"><span class="ok-dot"></span>当前无生效预警</div>';
-  }
+  renderWarn(normAlerts(w.warning));
 
-  /* 空气 */
-  var a = pickAqi(w);
-  if (a && !isNaN(a.aqi)) {
-    var c = aqiColor(a.aqi);
-    var tile = MR.$("aqiTile");
+  /* 空气质量 */
+  var air = w.air || {};
+  var main = pickIdx(air.indexes);
+  if (main && !isNaN(+main.aqi)) {
+    var lv = String(main.level || aqiLevel(main.aqi));
+    var c = AQ_COLOR[lv] || "#8b949e";
+    var tile = $("aqiTile");
     tile.style.background = c;
-    MR.$("aqi").textContent = a.aqi;
-    MR.$("aqiCat").textContent = a.cat || "空气质量";
-    MR.$("aqiCat").style.color = c;
-    MR.$("aqiAdv").textContent = aqiAdvice(a.aqi);
+    tile.style.color = aqiFg(lv);
+    $("aqi").textContent = main.aqiDisplay || main.aqi;
+    $("aqiCat").textContent = main.category || "空气质量";
+    $("aqiCat").style.color = AQ_INK[lv] || "var(--fg)";
+    $("aqiAdv").textContent = aqiAdvice(+main.aqi);
   } else {
-    MR.$("aqiCat").textContent = "暂无空气数据";
-    MR.$("aqiAdv").textContent = "检查 weather.conf 里的 W_LAT / W_LON 是否配置（缺省会 404）";
+    $("aqiCat").textContent = "暂无空气数据";
+    $("aqiAdv").textContent = "路由器的 W_LAT / W_LON 未配置时会拿不到空气数据";
   }
-  var ps = pickPollutants(w);
-  MR.$("poll").innerHTML = ps.map(function (p) {
-    return '<div class="p"><div class="n">' + MR.esc(p.n) + '</div><div class="v">' +
-      MR.esc(p.v) + '</div><div class="u">' + MR.esc(p.u) + "</div></div>";
+  $("poll").innerHTML = (air.pollutants || []).map(function (p) {
+    var cv = p.concentration && p.concentration.value;
+    if (cv == null) return "";
+    var un = (p.concentration && p.concentration.unit) || "";
+    var si = pickIdx(p.subIndexes);
+    var pc = si ? (AQ_COLOR[aqiLevel(si.aqi)] || "transparent") : "transparent";
+    return '<div class="p" style="border-left-color:' + pc + '">' +
+      '<div class="n">' + esc(POLL_NAME[p.code] || p.name || p.code) + "</div>" +
+      '<div class="v">' + (Math.round(cv * 10) / 10) + "</div>" +
+      '<div class="u">' + esc(un) + "</div></div>";
   }).join("");
+  drawAq24(w.airh);
 
   /* 24 小时 */
   var hs = (w.hourly && w.hourly.hourly) || [];
-  MR.$("hours").innerHTML = hs.map(function (h) {
-    return '<div class="hour"><div class="h">' + MR.esc((h.fxTime || "").substr(11, 5)) +
-      '</div><div class="t">' + MR.esc(h.temp) + '°</div><div class="s">' +
-      MR.esc(h.text || "") + "</div></div>";
+  $("hours").innerHTML = hs.map(function (h) {
+    return '<div class="hour"><div class="h">' +
+      esc((h.fxTime || "").substr(11, 5)) + '</div><div class="t">' +
+      esc(h.temp) + '°</div><div class="s">' + esc(h.text || "") + "</div></div>";
   }).join("") || MR.empty("无数据");
+  draw24(hs);
 
   /* 7 天 */
   var ds = (w.daily && w.daily.daily) || [];
-  MR.$("days").innerHTML = ds.map(function (d) {
+  $("days").innerHTML = ds.map(function (d) {
     var pop = d.pop != null && Number(d.pop) > 0 ? " · 降水 " + d.pop + "%" : "";
-    return '<div class="day"><div class="d">' + MR.mmdd(d.fxDate || d.fxTime) + '</div>' +
-      '<div class="s">' + MR.esc(d.textDay || "") + pop + '</div>' +
-      '<div class="r"><i>' + MR.esc(d.tempMin) + '°</i> / <b>' + MR.esc(d.tempMax) + "°</b></div></div>";
+    return '<div class="day"><div class="d">' + MR.mmdd(d.fxDate) + "</div>" +
+      '<div class="s">' + icon(d.iconDay) + " " + esc(d.textDay || "") + pop + "</div>" +
+      '<div class="r"><i>' + esc(d.tempMin) + '°</i> / <b>' + esc(d.tempMax) + "°</b></div></div>";
   }).join("") || MR.empty("无数据");
+  draw7(ds);
 
-  /* 指数 */
+  /* 生活指数 */
   var ix = (w.indices && w.indices.daily) || [];
-  MR.$("idx").innerHTML = ix.map(function (x) {
-    return '<div class="it"><b>' + MR.esc(x.name) + "</b><span>" + MR.esc(x.category) + "</span></div>";
+  $("idx").innerHTML = ix.map(function (x) {
+    return '<div class="it"><b>' + esc(x.name) + "</b><span>" +
+      esc(x.category) + "</span>" +
+      (x.text ? "<p>" + esc(x.text) + "</p>" : "") + "</div>";
   }).join("") || MR.empty("无数据");
 
-  var ts = w.ts ? new Date(w.ts * 1000) : null;
-  MR.$("foot").textContent = ts
+  var ts = w.ts ? new Date(Number(w.ts) * 1000) : null;
+  $("foot").textContent = ts
     ? "更新于 " + MR.hhmm(ts) + " · 路由器缓存 3 小时 · 来源 和风天气"
     : "来源 和风天气";
 }
 
+/* ---------------- 历史数据：板子后台取，页面轮询等它 ---------------- */
+function loadHist(tries) {
+  var host = $("chartHist");
+  tries = tries || 0;
+  return MR.api("/api/weatherhist").then(function (h) {
+    if (h && h.ok && h.days && h.days.length) {
+      HIST = h;
+      drawHist();
+      return;
+    }
+    /* 板子正在后台串行取 7 天，最长要十几秒；这时只能等 */
+    if (tries < 8) {
+      host.innerHTML = MR.empty(h && h.pending ? "历史数据准备中，正在后台获取…" : "历史数据暂不可用");
+      setTimeout(function () { loadHist(tries + 1); }, 4000);
+    } else {
+      host.innerHTML = MR.empty((h && h.msg) || "历史数据不可用");
+    }
+  }).catch(function () {
+    if (tries < 3) setTimeout(function () { loadHist(tries + 1); }, 4000);
+    else host.innerHTML = MR.empty("历史数据加载失败");
+  });
+}
+
 function load(silent, retried) {
-  var b = MR.$("btnRefresh");
+  var b = $("btnRefresh");
   if (!silent) {
     b.classList.add("spin");
     b.disabled = true;
@@ -249,33 +797,35 @@ function load(silent, retried) {
   return MR.api("/api/weather").then(function (w) {
     if (w && w.ok) {
       render(w);
-      var t = new Date();
-      MR.$("updAt").textContent = "更新于 " + MR.hhmm(t);
+      $("updAt").textContent = "更新于 " + MR.hhmm(new Date());
       return;
     }
     render(w);
-    // 板子刚重启、路由器 CGI 偶发超时都会走到这里：自动重试一次再下结论，
-    // 避免用户一进页面就只看到「不可用」。
+    /* 板子刚重启、路由器 CGI 偶发超时都会走到这里：先自动重试一次再下结论 */
     if (!retried) {
-      MR.$("foot").textContent = "首次取数失败，正在自动重试…";
+      $("foot").textContent = "首次取数失败，正在自动重试…";
       setTimeout(function () { load(true, true); }, 1500);
     }
   }).catch(function () {
     if (!retried) {
-      MR.$("foot").textContent = "连接失败，正在自动重试…";
+      $("foot").textContent = "连接失败，正在自动重试…";
       setTimeout(function () { load(true, true); }, 1500);
       return;
     }
-    MR.$("foot").textContent = "取数失败：检查 ESP32 与路由器的连通性";
+    $("foot").textContent = "取数失败：检查 ESP32 与路由器的连通性";
   }).then(function () {
     b.classList.remove("spin");
     b.disabled = false;
   });
 }
 
-MR.$("btnRefresh").addEventListener("click", function () { load(false); });
+$("btnRefresh").addEventListener("click", function () {
+  load(false);
+  loadHist(0);
+});
 
 load(true);
+loadHist(0);
 setInterval(function () { load(true); }, 600000);
 </script>
 </body>

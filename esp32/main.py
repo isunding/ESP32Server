@@ -116,7 +116,8 @@ DEFAULT_CFG = {
         "tz": 8,              # 时区小时数，+8 = 北京时间
     },
     # 只留「缓存 TTL」：数据多久算过期。没有任何周期性后台采集了。
-    "poll": {"weather_ms": 600000, "channels_ms": 300000},
+    "poll": {"weather_ms": 600000, "weatherhist_ms": 43200000,
+             "channels_ms": 300000},
     # 板载蓝灯：启动时常亮，就绪后按此节奏心跳（0 = 关闭，就绪后熄灭）
     "led": {"on": 1, "period_ms": 2000, "pulse_ms": 70},
     # 联网小功能：行情页（指数 + 汇率）。默认「打开行情页且缓存过期」才联网一次，
@@ -142,11 +143,13 @@ P_DHCP = "/cgi-bin/sysstat?a=dhcp"
 P_ARP = "/cgi-bin/sysstat?a=arp"
 P_CLIENTS = "/cgi-bin/netperip"
 P_WEATHER = "/cgi-bin/weather?a=data"
+P_WHIST = "/cgi-bin/weatherhist?a=history"
 P_CHANNELS = "/cgi-bin/iptv?a=list"
 P_SVC = "/cgi-bin/svcstat?port=%d"
 P_NTP = "/cgi-bin/ntpctl?a=status"
 
 WEATHER_FILE = "weather.json"   # 天气太大，落盘后由 HTTP 层流式吐出
+WHIST_FILE = "whist.json"        # 过去 7 天历史（约 34KB），同样落盘
 CHANNELS_FILE = "channels.json"  # 频道库 18KB，同样落盘，避免 24KB 连续堆
 WATCH_FILE = "watch.json"        # 自选股列表（几十字节）
 WATCH_TTL = 600000               # 自选行情缓存 10 分钟，与行情页一致
@@ -363,6 +366,10 @@ class App:
         self.svc_ts = 0
         self.svc_due = False
         self.weather_size = 0
+        self.hist_size = 0
+        self.hist_ts = 0            # 上次成功取到历史的时刻（ticks_ms）
+        self.hist_due = False       # 需要后台补刷（h_weatherhist 只吐旧文件）
+        self.hist_fail_ts = 0       # 上次失败时刻，失败后 60 秒内不再催
         self.channels_size = 0
         self.channels_ts = 0        # 上次成功刷新的时刻（ticks_ms）
         self.channels_due = False   # 需要后台补刷（h_channels 只吐旧文件，不阻塞）
@@ -493,6 +500,7 @@ class App:
         w.route("GET", "/api/home", self.h_home)
         w.route("GET", "/api/info", self.h_info)
         w.route("GET", "/api/weather", self.h_weather)
+        w.route("GET", "/api/weatherhist", self.h_weatherhist)
         w.route("GET", "/api/channels", self.h_channels)
         w.route("GET", "/api/services", self.h_services)
         w.route("GET", "/api/ntp", self.h_ntp)
@@ -800,6 +808,52 @@ class App:
             return httpsrv.json_resp({"ok": 0, "msg": "天气数据不可用（路由器 CGI 取数失败）"})
         return httpsrv.file_resp(WEATHER_FILE, httpsrv.CTYPES[".json"])
 
+    def h_weatherhist(self, req):
+        """过去 7 天历史天气：只吐已落盘的旧文件，从不在这里等 CGI。
+
+        路由器那条 /cgi-bin/weatherhist 要**串行**向上游取 7 天，每次超时
+        15 秒，冷启动常常 5 秒以上。放进请求路径里会把单线程主循环整段堵死，
+        所以策略和频道库一样：
+        - 有文件 → 立刻吐（几十毫秒），过期只打个「该刷了」的标记
+        - 没文件 → 立刻回 pending，前端过几秒自己再来要
+        真正的取数在主循环里做（refresh_weather_history）。
+        """
+        ttl = self.cfg["poll"].get("weatherhist_ms", 43200000)
+        if self._file_ok(WHIST_FILE):
+            if (not self.hist_size or not self.hist_ts
+                    or time.ticks_diff(time.ticks_ms(), self.hist_ts) >= ttl):
+                # 刚刚失败过就先别催，免得每个请求都触发一次 20 秒的空转
+                if not self.hist_fail_ts or time.ticks_diff(
+                        time.ticks_ms(), self.hist_fail_ts) >= 60000:
+                    self.hist_due = True
+            return httpsrv.file_resp(WHIST_FILE, httpsrv.CTYPES[".json"])
+        if not self.hist_fail_ts or time.ticks_diff(
+                time.ticks_ms(), self.hist_fail_ts) >= 60000:
+            self.hist_due = True
+        return httpsrv.json_resp({"ok": 0, "pending": 1,
+                                  "msg": "历史数据准备中，稍后自动刷新"})
+
+    def refresh_weather_history(self):
+        """主循环里的补刷：7 天历史最长可能要十几秒，绝不放在请求路径上。
+
+        等数据期间 _more() 每 0.12 秒 yield 一次，HTTP 照常服务；
+        失败不删除旧文件，下次进页面时按 60 秒退避重试。
+        """
+        self.hist_due = False
+        ttl = self.cfg["poll"].get("weatherhist_ms", 43200000)
+        try:
+            self.api.drop(P_WHIST)
+            n = self.api.download_cached(P_WHIST, WHIST_FILE, ttl,
+                                         limit=131072, dl=20000)
+            if n and self._file_ok(WHIST_FILE):
+                self.hist_size = n
+                self.hist_ts = time.ticks_ms()
+                self.hist_fail_ts = 0
+                print("[whist] ok", n)
+        except OSError as e:
+            self.hist_fail_ts = time.ticks_ms()
+            print("[whist] fail", e, self.api.last_err)
+
     @staticmethod
     def _file_ok(filename):
         import os
@@ -1013,6 +1067,8 @@ class App:
             # 不占用任何一次 HTTP 请求的等待时间。
             if self.channels_due:
                 self.refresh_channels()
+            if self.hist_due:
+                self.refresh_weather_history()
             if self.clients_due:
                 self.clients_due = False
                 self.poll_clients()
