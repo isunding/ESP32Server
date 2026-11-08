@@ -2,15 +2,15 @@
 
 ## 一、配置文件
 
-板端配置文件为 `/config.json`（文件系统根目录）。仓库内仅提供脱敏模板，
-两块板各有一份（字段完全相同，只有 `led` 的默认值不同）：
+板端配置文件为 `/config.json`（文件系统根目录）。仓库提供脱敏模板，
+两个板级目录各一份，字段一致，`led` 默认值不同：
 
 ```bash
 cp esp32/config.example.json    esp32/config.json       # ESP32
 cp esp32-s3/config.example.json esp32-s3/config.json    # ESP32-S3
 ```
 
-`config.json` 已在 `.gitignore` 中，不会被提交。
+`config.json` 已列入 `.gitignore`。
 
 ### 修改方式
 
@@ -94,7 +94,7 @@ cp esp32-s3/config.example.json esp32-s3/config.json    # ESP32-S3
 连接热点后可访问配置页填写 WiFi 与路由器地址。
 
 `hostname` 通过 DHCP 上报，在支持本地 DNS 的路由器上可用 `http://server/` 访问。
-若 `.lan` / `.local` 后缀无法解析，使用裸名。
+`.lan` / `.local` 后缀不可解析时使用裸主机名。
 
 ### `router`
 
@@ -106,26 +106,26 @@ cp esp32-s3/config.example.json esp32-s3/config.json    # ESP32-S3
 | `/cgi-bin/weather?a=data` | 天气聚合数据 |
 | `/cgi-bin/iptv?a=list` | 频道库 |
 
-这些 CGI 需自行部署，不在本仓库内。缺少时天气、频道、服务状态显示为空，
-本机信息、NTP、电台、农历、行情功能不受影响。
+上述 CGI 需单独部署，不在本仓库内。未提供时天气、频道与服务状态为空，
+其余功能不受影响。
 
 ### `ntp`
 
 设备同时作为 NTP 服务端监听 UDP 123，`upstream` 为其公网时间源。
 
-`tz` 单位为**小时**，支持小数：`8` 为北京时间，`5.5` 为印度时区，`-5` 为美东时区。
+`tz` 单位为小时，支持小数：`8` 为 UTC+8，`5.5` 为 UTC+5:30，`-5` 为 UTC-5。
 
 ### `poll`
 
 缓存有效期，无后台轮询。数据过期后由下一次请求触发拉取。
 
 `news_ms` / `quake_ms` 只对 S3 版生效。取回的数据按天追加到板上的 CSV
-（`news-YYYYMMDD.csv`、`quake-YYYYMMDD.csv`），只保留最近 7 天，第 8 天自动删除最老的一个。
+（`news-YYYYMMDD.csv`、`quake-YYYYMMDD.csv`、`quakeg-YYYYMMDD.csv`），保留最近 7 天。
 
 ### `router.aux_port`
 
-新闻与地震的 CGI 走路由器 uhttpd 自己的端口（默认 8088）直连，不经 nginx。
-路由器上 nginx 只对白名单里的 `/cgi-bin/xxx` 做了反代，走 8088 就不用改它的配置。
+新闻与地震 CGI 经路由器 uhttpd 端口（默认 8088）直连。
+nginx 仅代理白名单内的 `/cgi-bin/xxx`，无需修改其配置。
 
 ### `led`
 
@@ -139,22 +139,20 @@ S3 版改为单颗 WS2812（GPIO48），用 `kind` 区分驱动方式：
 ```
 
 `kind: "np"` 走 neopixel（RMT），`kind: "gpio"` 走普通引脚电平。
-`on: 0` 时上电写一次黑色之后全程不再驱动，指示灯彻底不亮。
+`on: 0` 时上电写入一次关闭值，之后不再驱动。
 
 ### `power`
 
-空闲降频。单线程主循环在没人访问时纯空转，把 CPU 降下来可以省电流、降几度芯片温度。
+空闲降频用于降低空闲时段的功耗与芯片温度。
 
 - 连续 `idle_after_s` 秒没有任何 HTTP 请求 → `machine.freq(idle_mhz)`
-- 下一个连接被 accept 时立刻回满频，正常响应
+- 新连接被 accept 时恢复 `max_mhz`
 - `idle_mhz` 下限 80：WiFi 需要 80MHz 的 APB 时钟，Octal PSRAM 时序也按它配置，
   填更低的值会被忽略并按「不开启」处理
-- `max_mhz` 必须写死（别指望读 `machine.freq()`）：时钟配置不随软复位恢复，
-  软复位时如果正处在低频，读到的就是低频，会被误当成满频而再也不升频
-- 板级不支持改频（`esp_pm` 未启用）时，首次切换失败即自动关闭该功能并在串口打一行日志
+- `max_mhz` 取自配置，不读取 `machine.freq()`：`esp_pm` 时钟配置不随软复位恢复
+- 板级不支持改频时，首次切换失败后自动关闭该功能并记录日志
 
-判断「有没有人来」用的是 HTTP 服务的 accept 计数，NTP、TCP 握手之类的零散流量
-不会把 CPU 拉满，也不会被当成访问活动。
+访问活动以 HTTP 服务的 accept 计数为准；NTP 与 TCP 握手不计入。
 
 ### `quote`
 
@@ -181,7 +179,7 @@ ESP32 侧不持有天气服务的凭据。天气数据由路由器 CGI 提供：
 
 设备仅请求 `/cgi-bin/weather?a=data`，获取已聚合的 JSON。
 
-因此：
+配置要点：
 
 - 无需在 `config.json` 中填写任何 API Key
 - 更换天气服务商只需修改路由器端 CGI
@@ -189,10 +187,10 @@ ESP32 侧不持有天气服务的凭据。天气数据由路由器 CGI 提供：
 
 ### 无路由器 CGI 时直连天气 API
 
-需自行实现处理函数（参考 `h_weather`）。密钥不应写入源码或 `config.json`，
-建议单独存放于 `esp32/secrets.json` 并加入 `.gitignore`。
+需自行实现处理函数。密钥应单独存放并列入 `.gitignore`，
+不写入源码或 `config.json`。
 
-MCU 无安全密钥存储，写入 flash 的凭据在物理接触设备时可被读取。
+MCU 无安全存储，写入 flash 的凭据在物理接触设备时可被读取。
 
 ---
 
@@ -206,13 +204,13 @@ MCU 无安全密钥存储，写入 flash 的凭据在物理接触设备时可被
 | 配置接口 | 无鉴权，仅限局域网使用 |
 | 第三方密钥 | 存放于路由器端，不存放于 MCU |
 
-本服务定位为局域网展示终端。对外提供访问时需自行增加反向代理与认证。
+本服务面向局域网使用；对外提供访问时需配置反向代理与认证。
 
 ---
 
 ## 六、最小配置
 
-仅需本机信息、农历、NTP 功能时：
+最小配置（本机信息、农历、NTP）：
 
 ```json
 {
@@ -223,4 +221,4 @@ MCU 无安全密钥存储，写入 flash 的凭据在物理接触设备时可被
 }
 ```
 
-其余字段使用 `DEFAULT_CFG` 默认值。天气与 IPTV 页面将无数据。
+其余字段使用 `DEFAULT_CFG` 默认值；天气与 IPTV 页面无数据。

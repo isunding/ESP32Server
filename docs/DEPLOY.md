@@ -1,7 +1,7 @@
 # 烧写与部署
 
-适用于 Windows + esptool + mpremote。两个板级目录（`esp32/`、`esp32-s3/`）的部署流程一致，
-差异只在固件变体、烧写偏移与 USB 串口形态。
+适用于 Windows 环境，工具为 esptool 与 mpremote。两个板级目录的部署流程一致，
+差异为固件变体、烧写偏移与 USB 串口形态。
 
 ---
 
@@ -17,9 +17,8 @@
 
 工具：`pip install esptool mpremote`。设备与路由器需在同一局域网。
 
-固件从 [micropython.org/download](https://micropython.org/download/) 下载：
-ESP32 用 `ESP32_GENERIC` 变体（不用 spiram / d2wd / unicore / ota）；
-S3 必须用 `ESP32_GENERIC_S3-SPIRAM_OCT` 变体——板载 8MB Octal PSRAM 只有这个变体带驱动。
+固件取自 [micropython.org/download](https://micropython.org/download/)。
+ESP32 使用 `ESP32_GENERIC` 变体；S3 使用 `ESP32_GENERIC_S3-SPIRAM_OCT` 变体（板载 8MB Octal PSRAM 驱动）。
 
 ---
 
@@ -43,25 +42,20 @@ esptool.py --chip esp32s3 --port COM3 --baud 460800 --after hard-reset \
   write-flash -z 0x0 ESP32_GENERIC_S3-SPIRAM_OCT-20260824-v1.29.0.bin
 ```
 
-ESP32 波特率 230400 较稳定（1.7MB 固件约 51 秒）；921600 在部分 CH9102 上会中断。
-S3 用 460800 即可（2.4MB 固件约 20 秒）。
+推荐波特率：ESP32 为 230400，S3 为 460800。
 
-S3 注意两点：**偏移是 `0x0`**（写入 bootloader 起点，用 `0x1000` 会起不来）；
-`--after hard-reset` 对原生 USB 无效，刷完可能要手动按 RST 或执行 `esptool.py run`。
+S3 烧写偏移为 `0x0`。原生 USB 串口下 `--after hard-reset` 不生效，
+烧写完成后需手动按 RST，或执行 `esptool.py run`。
 
 ---
 
-## 三、两项注意
+## 三、烧写注意事项
 
 ### 1. 射频校准数据（ESP32 版）
 
-`0xF000` 处的 4KB 为出厂射频校准数据。`--erase-all` 会将其一并擦除，导致：
-
-- `scan()` 返回空列表
-- 连接 WiFi 报 `201 NO_AP_FOUND`
-- 热点模式仍可正常工作
-
-处理方法：从烧写前的整片备份中恢复该 4KB。
+`0xF000` 处的 4KB 为出厂射频校准数据。`--erase-all` 会一并擦除，
+擦除后 `scan()` 返回空列表，连接 WiFi 报 `201 NO_AP_FOUND`。
+恢复方法：从烧写前的整片备份中写回该 4KB。
 
 ```bash
 mpremote connect COM3 cp phy_init.bin :
@@ -70,18 +64,15 @@ mpremote connect COM3 exec "import esp; esp.flash_write(0xf000, open('phy_init.b
 
 校验：`esp.flash_read(0xf000, 4)` 返回 `b'PHYI'`。
 
-S3 版没有这个位置：射频参数在独立分区，整片擦除后首次启动自行做完整校准（首启略慢），
-无需手工恢复。
+S3 版射频参数存放于独立分区，整片擦除后首次启动自动完成校准。
 
-另：热点开启状态下 `scan()` 同样返回空，排查 WiFi 时先关闭 AP 模式：
+AP 模式开启时 `scan()` 同样返回空列表。诊断 WiFi 前需关闭 AP：
 `network.WLAN(network.AP_IF).active(False)`。
 
-### 2. mpremote 中断运行
+### 2. mpremote 连接与复位
 
-`mpremote` 每次连接会发送 Ctrl-C 中断当前程序，传输完成后不会自动恢复。
-表现为设备可 ping 通但 HTTP 无响应，串口停在 REPL。
-
-传输完成后需复位：
+`mpremote` 连接时会发送 Ctrl-C 中断运行中的程序，传输完成后设备停在 REPL。
+传输结束后须复位：
 
 ```bash
 mpremote connect COM3 exec "import machine; machine.reset()"
@@ -93,8 +84,8 @@ python esp32/scripts/flash.py --no-upload
 
 ## 四、部署代码
 
-以下命令以 ESP32 版为例。S3 版把 `esp32/` 全部换成 `esp32-s3/`，串口换成 S3 的口
-（运行模式是原生 USB，下载模式是另一个 PID/端口号，换口时注意区分）。
+以下命令以 ESP32 版为例。S3 版将路径前缀替换为 `esp32-s3/`，并使用对应串口；
+原生 USB 的运行模式与下载模式对应不同的 PID 与端口号。
 
 ### 方式 A：逐个上传
 
@@ -110,7 +101,7 @@ python esp32/scripts/build.py
 mpremote connect COM3 cp esp32/www/index.html esp32/www/weather.html :www
 ```
 
-`mpremote` 单次传输超过约 8 个文件会超时，使用分批脚本：
+`mpremote` 单次传输文件数超过约 8 个会超时，改用分批脚本：
 
 ```bash
 python esp32/scripts/up_batch.py esp32/main.py esp32/www/index.html esp32/www/index.html.gz ...
@@ -126,10 +117,8 @@ python esp32/scripts/mpy.py            # 编译、上传、删除板上 .py、�
 python esp32/scripts/mpy.py --revert   # 回退为 .py
 ```
 
-MicroPython 优先加载 `.py`，`.mpy` 仅在无同名 `.py` 时生效。部署 `.mpy` 需同时删除板上对应 `.py`。
-
-6 个模块预编译后，导入耗时约 1.7s 降至 1.0s，服务就绪时间减少约 1.6 秒。
-`.mpy` 与解释器版本绑定（当前 `.mpy v6.3`），升级固件后需重新编译。
+MicroPython 优先加载 `.py`；部署 `.mpy` 时需删除板上同名 `.py`。
+`.mpy` 与解释器版本绑定（当前 v6.3），升级固件后需重新编译。
 
 ---
 
@@ -185,8 +174,8 @@ curl --noproxy "*" -s -o /dev/null -w "%{http_code} %{time_total}s\n" http://<�
 for i in $(seq 15); do curl -s -o /dev/null -w "%{http_code} " http://<设备IP>/; done
 ```
 
-判定标准：全部 200，单页 0.35~0.55s（受客户端网络影响较大，局域网内波动属正常）；
-`/api/health` 的 `mem_free`：ESP32 版保持 60KB 以上，S3 版在 7MB 以上（Python 堆在 PSRAM）。
+验收标准：响应码全部为 200；`/api/health` 的 `mem_free`，ESP32 版不低于 60KB，
+S3 版不低于 7MB。
 
 ---
 
@@ -203,11 +192,11 @@ esptool.py --port COM3 --before no-reset write-flash --erase-all --compress \
 esptool.py --chip esp32s3 --port COM3 write-flash -z 0x0 backup-8MB.bin
 ```
 
-代码：使用本地保留的 `backup/ok-YYYYMMDD-HHMMSS/` 快照，按相同流程上传覆盖。
+代码：使用本地快照目录 `backup/ok-YYYYMMDD-HHMMSS/`，按相同流程上传覆盖。
 
 ---
 
-## 八、故障排查
+## 八、故障处理
 
 | 现象 | 可能原因 | 处理 |
 |---|---|---|
@@ -217,26 +206,24 @@ esptool.py --chip esp32s3 --port COM3 write-flash -z 0x0 backup-8MB.bin
 | 连接 WiFi 报 `201 NO_AP_FOUND` | 射频校准丢失，或 SSID 大小写不符 | 同上；核对 SSID |
 | 页面可访问但无数据 | 路由器 CGI 未部署或不可达 | 检查 `router.host`；直接访问 CGI 验证 |
 | 天气页返回 `missing weather.json` | 落盘文件丢失 | 接口会自动重试；仍异常则重启 |
-| 打开多个页面后无响应 | 空闲堆低于 20KB | 串口查看 `gc.mem_free()` |
+| 打开多个页面后无响应 | 空闲堆低于 20KB | 通过串口读取 `gc.mem_free()` |
 | `incompatible .mpy file` | `.mpy` 与固件版本不匹配 | 重新执行 `scripts/mpy.py` 或 `--revert` |
 | 上传报 `could not enter raw repl` | 设备仍在启动 | 等待 3 秒重试 |
 | S3 刷完无任何输出 | 烧写偏移写成 `0x1000` | 用 `0x0` 重刷 |
 | S3 刷完不自动运行 | 原生 USB 的 `--after hard-reset` 无效 | 手动按 RST，或 `esptool.py run` |
-| 空闲后首个请求偏慢 | 空闲降频停在低频没回升 | 看 `/api/info` 的 `fw.freq` / `fw.pm_downs`；可先 `power.on=false` 关掉降频对比 |
-| S3 能连上但收发失败 | 内部 RAM 最大连续块过小（Python 堆在 PSRAM，不占内部 RAM） | `/api/info` 看内部 RAM 分块，最大连续块应 ≥64KB；低于 16KB 需断电重启 |
+| 空闲后首个请求偏慢 | 降频后未恢复满频 | 检查 `/api/info` 的 `fw.freq` 与 `fw.pm_downs`；可设 `power.on=false` |
+| S3 能连上但收发失败 | 内部 RAM 最大连续块过小 | 检查 `/api/info`；最大连续块应 ≥64KB，低于 16KB 时断电重启 |
 
 ### 串口诊断
 
-用任意串口工具以 115200 打开设备串口（不拉 DTR/RTS，避免中断运行中的程序），
-先读取输出；需要 traceback 时发送 Ctrl-C 中断程序。
-
-Windows 上可用 `mpremote connect COM3`，或 PuTTY / 串口助手。
+以 115200 打开设备串口，不拉 DTR/RTS；需要 traceback 时发送 Ctrl-C。
+Windows 下可使用 `mpremote connect COM3` 或串口工具。
 
 ---
 
 ## 九、路由器端 CGI（新闻 / 地震，仅 S3）
 
-数据经路由器转发，板子不直接访问公网。两个脚本在 `router/cgi/`：
+数据由路由器转发，设备不直接访问公网。脚本位于 `router/cgi/`：
 
 | 文件 | 部署到 | 说明 |
 |---|---|---|
@@ -253,8 +240,8 @@ ssh root@<路由器> "printf 'Q_ID=你的ID\nQ_KEY=你的KEY\n' > /data/iptv/etc
   chmod 600 /data/iptv/etc/quake.conf"
 ```
 
-板子通过 `router.aux_port`（默认 8088）直连 uhttpd，**不需要改 nginx**——
-nginx 只对白名单里的 `/cgi-bin/xxx` 做了反代，新加 CGI 不必动它。
+设备通过 `router.aux_port`（默认 8088）直连 uhttpd。
+nginx 仅代理白名单内的 `/cgi-bin/xxx`，无需修改其配置。
 
 自检：
 
@@ -265,6 +252,6 @@ curl --noproxy "*" "http://<路由器>:8088/cgi-bin/quake?a=list"
 curl --noproxy "*" "http://<路由器>:8088/cgi-bin/quake?a=global"
 ```
 
-两个脚本都有 `?a=flush` 清缓存；`quake` 会同时清国内与全球两份。
-两个上游接口共用 `/data/iptv/etc/quake.conf` 里的同一份 ID/KEY。
-路由器上没有 `sha1sum`，新闻脚本会退回 `openssl dgst`。
+两个脚本均支持 `?a=flush`；`quake` 同时清理国内与全球缓存。
+两个上游接口共用 `/data/iptv/etc/quake.conf` 中的 ID/KEY。
+路由器未提供 `sha1sum` 时，新闻脚本使用 `openssl dgst`。

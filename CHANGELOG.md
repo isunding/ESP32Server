@@ -1,83 +1,53 @@
-# Changelog
+# 变更记录
 
-格式参考 [Keep a Changelog](https://keepachangelog.com/)，按日期组织。
-
-标注：`新增` / `变更` / `修复` / `移除` / `安全`
+本项目遵循 [Keep a Changelog](https://keepachangelog.com/) 格式，条目分为
+`新增`、`变更`、`修复`、`移除`、`安全` 五类。
 
 ---
 
 ## 2026-11-08
 
 ### 新增
-- `esp32-s3/`：ESP32-S3 N16R8 移植（Python 堆放 PSRAM、原生 USB 串口、
-  WS2812 指示灯可彻底关闭、WiFi 关闭 modem sleep）
-- 空闲降频（`power` 配置）：连续 `idle_after_s` 秒没有 HTTP 请求就把 CPU
-  从 240MHz 降到 `idle_mhz`（默认 80），下一个请求到达立刻回满频
-- 休眠记录：降频时记下开始秒、升频时记下结束秒，最多保留 24 条；
-  `/api/info` 新增 `pm`（当前状态、累计休眠、区间列表）
-- 本机页「休眠记录」卡片：当前状态、累计时长、彩色时间轴（休眠 / 满频 /
-  进行中三色区分）与区间明细
-- 顶栏心跳：`mountTop()` 挂载后自动每 15 秒刷 `/api/health`，
-  状态点呼吸、IP 实时更新（原先要求每页自己调，漏一页就永远显示「连接中」）
-- 新闻页（`/news.html`，仅 S3）：按重要度与主题筛选、正文折叠、
-  正文里 `【小标题】` 自动加粗；股票标签显示是否已在自选，点一次加入、再点一次
-  移除并提示，同一支股票在多条电报里的状态同步更新
-- `/api/watch?a=codes`：只返回自选代码清单，不触发行情请求，供新闻页标注标签
-- 地震页（`/quake.html`，仅 S3）：近 7 天列表、震级配色与筛选、来源为
-  路由器转发的中国地震台网；时间 / 深度 / 经纬度带中文标签，
-  经纬度按正负标注 `N/S/E/W` 半球
-- 首页卡片与顶栏页签统一为「新闻」，页面标题同步
-- `/api/news`、`/api/quake`：数据按天落 CSV（`news-YYYYMMDD.csv` /
-  `quake-YYYYMMDD.csv`），增量追加、只留 7 天；冷启动返回 pending，
-  取数在主循环后台完成
-- 地震页「国内 / 全球」切换：国内走 `dizhen.php`（30 条国内速报），
-  全球走 `dizhensu.php`（10 条、含海外），两路共用一份 `quake.conf` 凭据，
-  各有独立 CSV（`quake-*.csv` / `quakeg-*.csv`）、缓存与单飞锁；
-  `/api/quake?a=global` 取全球视图
-- 首页卡片与顶栏页签重排：天气 · 地震 / 新闻 · 行情 / IPTV · 电台 / 本机 · NTP
-- 路由器端新增两个 shell CGI：`/cgi-bin/news`（上游签名 + 5 分钟缓存）、
-  `/cgi-bin/quake`（30 分钟缓存），都带 mkdir 单飞锁，避免并发时堆 curl
-- `/api/info`：新增芯片卡片（温度、复位原因、优化级别、内部 RAM 分块）
-  与 WiFi 详情（SSID/信道/发射功率/省电模式）
-- `README.md`：项目说明、页面清单、架构图、部署指引
-- `docs/ARCHITECTURE.md`：启动流程、请求生命周期、构建流水线
-- `docs/CONFIG.md`：配置项说明
-- `docs/DEPLOY.md`：烧写与部署步骤
-- `CHANGELOG.md`、`LICENSE`（MIT）、`.gitignore`
-- 天气页：24 小时温度/降水折线图、7 天高低温区间图、未来 24 小时 AQI 柱状图、
-  过去 7 天曲线（逐小时/逐日切换）、天气图标、生活指数建议文字
-- 天气页 7 天列表：每行温度区间条（7 天统一标尺）、点击展开日详情
-  （降水量条、昼夜天气/风、紫外线、气压、能见度、云量、日出日落、未来 3 天 AQI）
-- `/api/weatherhist`：过去 7 天历史接口，落盘缓存 12 小时，取数在主线后台完成
-- `rap.py`：下载超时改为可配置（`dl` 参数，默认仍 4 秒）
+- ESP32-S3 N16R8 板级版本 `esp32-s3/`：Python 堆位于 8MB PSRAM，原生 USB 串口，
+  WS2812 指示灯，WiFi 关闭 modem sleep
+- 空闲降频（`power`）：连续 `idle_after_s` 秒无请求后降至 `idle_mhz`，
+  新连接到达时恢复 `max_mhz`
+- 休眠记录与时间轴：`/api/info` 的 `pm` 字段及本机页卡片
+- 新闻页 `/news.html`（仅 S3）：重要度与主题筛选、`【】` 标题加粗、
+  股票标签加入 / 移出自选
+- 地震页 `/quake.html`（仅 S3）：国内 / 全球切换、震级筛选、经纬度半球标注
+- `/api/news`、`/api/quake`、`/api/quake?a=global`：按天增量写入 CSV，保留 7 天；
+  冷启动返回 `pending`，取数在主循环后台完成
+- `/api/watch?a=codes`：返回自选代码清单，不触发行情请求
+- 路由器端 `router/cgi/news`、`router/cgi/quake`：签名与缓存代理，
+  支持 `?a=global`、`?a=cache`、`?a=flush`
+- `/api/info`：芯片温度、复位原因、内部 RAM 分块、WiFi 详情
+- 天气页：24 小时温度 / 降水曲线、7 天高低温区间、24 小时 AQI、
+  过去 7 天曲线、7 天列表温度区间条与日详情
+- `/api/weatherhist`：过去 7 天历史，落盘缓存 12 小时
+- 顶栏心跳：每 15 秒刷新 `/api/health`，显示状态点与本机 IP
+- `rap.py`：下载读取超时可配置
+- 项目文档与 MIT 许可证
 
 ### 变更
-- `config.example.json`：补齐 `led`、`tz` 字段，移除废弃字段 `tz_min`、`first_source`
-- `config.example.json`：新增 `poll.weatherhist_ms`
-- `.pgtop`（页内工具条：更新时间 + 刷新按钮）样式从天气页内联移到 `theme.css`，成为公共组件
-- `esp32/README.md` 不再随仓库发布
-- 天气页预警改为解析 `warning.alerts`（`headline` / `description` /
-  `eventType.name` / `issuedTime`），此前读取的字段名不存在，导致有预警时仍显示「无生效预警」
-- 天气页体积 8.7 KB → 15.6 KB（gzip）
+- 配置模板补齐 `led`、`tz`、`poll.weatherhist_ms`、`router.aux_port`、
+  `poll.news_ms`、`poll.quake_ms`；移除 `tz_min`、`first_source`
+- 页内工具条样式提取至 `theme.css`
+- 天气页预警数据源改为 `warning.alerts`
+- 首页与顶栏顺序：天气 · 地震 / 新闻 · 行情 / IPTV · 电台 / 本机 · NTP
+- 页面标题与文案统一为「新闻」
 
 ### 修复
-- 天气页没有标题与导航：页面漏调 `MR.mountTop()`，整块顶栏未渲染
-- 电台 / 本机 / NTP / 首页右上角恒显示「连接中…」：这些页只挂顶栏、没启动心跳
-- 行情页刷新按钮位置错乱：`.pgtop` 的 flex 样式只写在天气页的内联样式里，
-  行情页用了同名 class 却拿不到样式，按钮没有靠右
-- 天气页预警恒显示为空
-- 天气页预警解析只认 `{alerts:[]}`，上游返回裸数组 / `{warning:[]}` 时整段丢弃；
-  现兼容四种形状，`severity` 与 `color.code` 统一按小写查表（`Minor` 等首字母大写也能命中）
-- 天气页预警的发布时间/时段按 UTC 原样显示，比本地时间早 8 小时，现统一换算
-- CI 目录结构检查：`grep` 无匹配时返回 1，被 `set -e` 当成失败；
-  所有可能空结果的管道补 `|| true`
+- 天气页顶栏与导航渲染
+- 各页顶栏状态与本机 IP 刷新
+- 行情页刷新按钮对齐
+- 天气页预警解析：兼容多种返回形状、等级大小写与 UTC 时间换算
+- CI 目录结构检查的空结果处理
 
 ### 安全
-- `config.json`（含 WiFi 密码）不入库，仅保留脱敏模板
-- 排除私钥、固件镜像、路由器端历史实现与旧截图
-- apihz 的 ID / KEY 只存路由器 `/data/iptv/etc/quake.conf`（权限 600），
-  CGI 源码与仓库内均为空值 / 占位符；额外忽略 `router/etc/` 与本机维护脚本
-  （内嵌硬件 InstanceId）
+- `config.json`、私钥、固件镜像、路由器端实现与本机维护脚本不入库
+- 第三方接口凭据仅存于路由器 `/data/iptv/etc/quake.conf`（权限 600），
+  仓库内为占位符
 
 ---
 
@@ -85,51 +55,41 @@
 
 ### 移除
 - 日历页 `/calendar.html` 与 `/api/calmonth`；农历保留在首页与 NTP 页
-- 遗留文件 `web/traffic.html`、`www/traffic.html`
+- 遗留页面 `traffic.html`
 
 ### 变更
-- 电台分类：移除「广东 · 华南」，新增「华东 · 江浙沪皖」（17 台）与「安徽 · 合肥」（9 台），
-  合计 67 台 / 9 类
-- 首页卡片顺序调整为：天气·行情 / IPTV·电台 / 本机·NTP
-- 顶栏页签调整为 7 项
+- 电台分类调整为「华东 · 江浙沪皖」与「安徽 · 合肥」，共 67 台 / 9 类
+- 首页卡片与顶栏入口顺序
 
 ### 修复
-- HTTP 请求无响应：lwIP socket 池耗尽，需完全断电后恢复
-- 回退计算器页面至 `ok-20261107-110054` 基线
+- lwIP socket 池耗尽导致的 HTTP 无响应
 
 ---
 
 ## 2026-11-06
 
 ### 移除
-- 状态页 `/status.html` 与 `/api/status`，由 `/info.html` 替代
-- 流量页 `/traffic.html` 与 `/api/clients`
-- 菜单中的告警入口及相关样式
+- `/status.html`、`/traffic.html` 及相关接口
 
 ### 新增
-- `/info.html`：本机信息（固件、板型、CPU、MAC、堆、Flash、文件清单、启动耗时）
-- 电台页
-- `scripts/build.py`：页面构建（内联 CSS/JS、生成 gzip）
-- `scripts/mpy.py`：模块预编译为 `.mpy`
-- `scripts/up_batch.py`：分批上传
-
-### 修复
-- 长时间运行后 HTTP 无响应：改为每个请求结束执行 `gc.collect()`
-- `select` 抛 `ValueError` 时逐个关闭连接，避免 fd 泄漏
+- `/info.html` 本机信息页、电台页
+- 构建、预编译、分批上传脚本
 
 ### 变更
-- `listen(12)` 调整为 `listen(3)`
-- 新增 `_draining` 队列，响应完成后等待客户端关闭
-- 静态资源内联，单页连接数由 4~5 条降至 1~2 条
-- 首页合并为 `/api/home`，首屏请求由 4 条降至 2 条
+- `listen(3)`、响应完成后等待客户端关闭、静态资源内联、
+  首页数据合并为 `/api/home`
+
+### 修复
+- 长时间运行后 HTTP 无响应
+- `select` 异常时的连接释放
 
 ---
 
 ## 2026-11-05
 
 ### 变更
-- 对外名称统一为 ESP32 Terminal Server
-- 预连接超时由 3 秒调整为 1 秒
+- 项目名称统一为 ESP32 Terminal Server
+- 预连接超时调整为 1 秒
 
 ### 修复
 - 预连接占满 listen backlog
@@ -139,41 +99,29 @@
 ## 2026-11-04
 
 ### 新增
-- 农历、24 节气、节日；年度表缓存至 `calendar.json`
-- NTP 时区下拉选择
-- 告警事件写入 CSV
+- 农历、24 节气、节日与年度表缓存
+- NTP 时区选择
+- 告警事件 CSV 记录
 
 ### 移除
 - 首页走秒时钟
 
 ### 修复
-- 事件历史显示异常（浏览器缓存）
+- 事件历史显示异常
 
 ---
 
 ## 2026-11-03
 
 ### 新增
-- IPTV 页内嵌播放器（mpegts.js），左右布局
-- 首页天气实况卡片
-- 板载 NTP 服务端（UDP 123）
-- 板载 LED 启动指示
+- IPTV 页内嵌播放器、首页天气卡片、板载 NTP 服务端、LED 启动指示
 
 ---
 
 ## 2026-11-01
 
 ### 新增
-- 项目由路由器端方案移植为 ESP32 + MicroPython 终端服务器
-- 首页 / 天气 / 状态 / NTP / IPTV 页面
-- 主题样式系统（`theme.css`）
-- 烧写与串口探测脚本
+- ESP32 + MicroPython 终端服务器：首页、天气、状态、NTP、IPTV 页与主题样式系统
 
 ### 安全
-- 完整烧写时保留 `0xF000` 处的射频校准数据
-
----
-
-## 前身
-
-路由器端的 IPTV 组播转单播与控制台方案（未包含在本仓库）。ESP32 侧为其展示终端。
+- 完整烧写时保留射频校准数据

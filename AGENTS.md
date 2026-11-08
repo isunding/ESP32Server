@@ -1,7 +1,6 @@
-# 编码助手说明
+# 开发约定
 
-本文件供 AI 编码助手（Claude Code / Cursor / Copilot / Codex 等）阅读。
-修改本仓库前请先读完，尤其是「不可改动项」。
+本文件定义仓库的修改规则与验证要求，提交前须完整阅读「不可改动项」。
 
 ## 项目
 
@@ -19,9 +18,8 @@ S3 版 Python 堆在 8MB PSRAM、内部 SRAM 留给 WiFi 与 lwIP。
 
 ## 路由器端 CGI
 
-新闻与地震的数据由路由器上的两个 shell CGI 转发（`/data/iptv/www/cgi-bin/news|quake`），
-板子走 uhttpd 的 8088 端口直连——nginx 只对白名单里的 `/cgi-bin/xxx` 做了反代，
-走 8088 就不必改路由器配置。
+新闻与地震的数据由路由器上的两个 shell CGI 转发（`/data/iptv/www/cgi-bin/news|quake`）。
+设备经 uhttpd 的 8088 端口直连；nginx 仅代理白名单内的 `/cgi-bin/xxx`，无需修改其配置。
 
 - 路由器**没有 `sha1sum`**（busybox 只编了 `md5sum`），哈希要退回 `openssl dgst`；
   直接写 `sha1sum` 会得到空签名，上游回 `errno 10012`
@@ -33,9 +31,9 @@ S3 版 Python 堆在 8MB PSRAM、内部 SRAM 留给 WiFi 与 lwIP。
 
 ## 不可改动项
 
-以下代码看起来冗余或可疑，但都是维持稳定运行的必要条件。**不要"优化"它们。**
+以下实现为稳定运行的必要条件，不得简化或替换。
 
-| 位置 | 内容 | 改动后果 |
+| 位置 | 实现 | 约束依据 |
 |---|---|---|
 | `httpsrv.py` `start()` | `listen(3)` | lwIP 在三次握手时即分配 PCB。改大后未发请求的预连接占满池子，真实请求被重置，整站无响应 |
 | `httpsrv.py` `_serve()` | 结束时 `gc.collect()` | 临时对象累积使空闲堆降至 20KB 以下，`accept()` 与内存分配失败 |
@@ -47,12 +45,12 @@ S3 版 Python 堆在 8MB PSRAM、内部 SRAM 留给 WiFi 与 lwIP。
 | `main.py` 主循环 | 无周期性取数 | 路由器 CGI 需 1~1.6 秒，后台轮询会阻塞单线程主循环 |
 | `main.py` `h_weatherhist()` | 只吐落盘文件，取数交给 `refresh_weather_history()` | 历史天气要串行汇总 7 天，冷启动 5~15 秒，放进请求路径会堵死主循环 |
 | `main.py` `idle_power()`（S3） | `idle_mhz` 不低于 80，调用点放在 `web.poll()` 之后 | 80MHz 是 WiFi 的 APB 与 Octal PSRAM 时序的下限，更低会断网或崩堆；放在 poll 之前会漏掉本轮 accept |
-| `main.py` 频率基准 | 满频取配置 `power.max_mhz`，不读 `machine.freq()` | `esp_pm` 的时钟配置不随软复位恢复，读到的可能是上次留下的低频，会把满频误判成 80MHz 从此不再升频 |
+| `main.py` 频率基准 | 满频取配置 `power.max_mhz`，不读 `machine.freq()` | `esp_pm` 时钟配置不随软复位恢复 |
 
-页面侧同样有约束：
+页面约束：
 
-- 页面必须单文件（CSS/JS 内联）。引入外链资源等于增加 TCP 连接，直接逼近 PCB 上限。
-- 页面源码在 `web/`，`www/` 是构建产物。
+- 页面须为单文件（CSS/JS 内联）；外链资源会增加 TCP 连接数。
+- 页面源码在 `web/`，`www/` 为构建产物。
 
 ---
 
@@ -120,8 +118,7 @@ python esp32/scripts/build.py    && git diff --exit-code -- esp32/www
 python esp32-s3/scripts/build.py && git diff --exit-code -- esp32-s3/www
 ```
 
-仓库内不含测试代码与硬件测试。涉及运行时行为的改动（HTTP 服务、内存、连接管理）
-无法在 CI 中验证，提交说明中应标注「未在真机验证」或注明验证方式。
+仓库不含测试代码。涉及运行时行为的改动无法在 CI 中验证，提交说明中须标注验证方式。
 
 ---
 

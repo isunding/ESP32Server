@@ -8,14 +8,14 @@
 ![License](https://img.shields.io/badge/license-MIT-green)
 ![Release](https://img.shields.io/github/v/release/isunding/ESP32Server)
 
-两个板级目录，同一套逻辑：
+支持两种硬件，代码按板级目录组织：
 
 | 目录 | 板型 | CPU | Flash / RAM | 差异 |
 |---|---|---|---|---|
 | `esp32/` | ESP32-D0WD-V3 | 160 MHz | 4MB / 520KB | 基线版本，GPIO2 单色指示灯 |
 | `esp32-s3/` | ESP32-S3 N16R8 | 240 MHz | 16MB / 8MB PSRAM | Python 堆在 PSRAM、原生 USB 串口、WS2812 指示灯、空闲降频 |
 
-两者仅在 LED 驱动、WiFi 省电、内存布局与频率管理上有差异，页面、路由、API 完全相同。
+两版页面、路由与 API 一致，差异限于 LED 驱动、WiFi 省电、内存布局与频率管理。
 
 ---
 
@@ -33,8 +33,7 @@
 | NTP | `/ntp.html` | 板载 NTP 服务端状态、上游同步、时区设置、农历 |
 | IPTV | `/iptv.html` | 频道库浏览与网页播放 |
 
-各页面通过顶栏互相跳转，共用 `web/theme.css` 样式系统，跟随系统深浅色。
-页面为单文件形式，CSS/JS 内联，配合 gzip 预压缩。
+页面共用 `web/theme.css`，支持系统深浅色；构建后为单文件形式，CSS/JS 内联并生成 gzip 预压缩版本。
 
 ---
 
@@ -48,8 +47,8 @@
 | 串口 | CH9102 / CP2102（USB 转串口） | 原生 USB-Serial/JTAG |
 | 指示灯 | GPIO2 单色 | GPIO48 WS2812（可彻底关闭） |
 
-都不需要 SD 卡与外设。S3 版把 Python 堆放在 PSRAM，内部 SRAM 全部留给 WiFi 与 lwIP。
-数据源为可运行 CGI 的路由器，见 [docs/CONFIG.md](docs/CONFIG.md)。
+无需 SD 卡或外设。S3 版 Python 堆位于 PSRAM，内部 SRAM 供 WiFi 与 lwIP 使用。
+数据源为运行 CGI 的路由器，见 [docs/CONFIG.md](docs/CONFIG.md)。
 
 ---
 
@@ -88,9 +87,8 @@ flowchart LR
 
 ## 快速开始
 
-预编译包见 [Releases](https://github.com/isunding/ESP32Server/releases)：
-`source.zip` 为完整源码，`deploy.zip` 为板端部署文件（8 个 `.py` + `www/` + 配置模板），
-解压后可直接上传。
+[Releases](https://github.com/isunding/ESP32Server/releases) 提供 `source.zip`（完整源码）与
+`deploy.zip`（板端部署文件：运行模块、`www/` 与配置模板）。
 
 ### 1. 烧写固件
 
@@ -102,13 +100,13 @@ esptool.py --chip esp32  --port COM3 erase_flash
 esptool.py --chip esp32  --port COM3 --baud 460800 write_flash -z 0x1000 \
   ESP32_GENERIC-20250911-v1.26.1.bin
 
-# ESP32-S3 N16R8（偏移是 0x0，不是 0x1000）
+# ESP32-S3 N16R8
 esptool.py --chip esp32s3 --port COM3 erase_flash
 esptool.py --chip esp32s3 --port COM3 --baud 460800 write_flash -z 0x0 \
   ESP32_GENERIC_S3-SPIRAM_OCT-20260824-v1.29.0.bin
 ```
 
-ESP32 版注意保留 `0xF000` 处的射频校准数据，详见 [docs/DEPLOY.md](docs/DEPLOY.md)。
+ESP32 版须保留 `0xF000` 处的射频校准数据，见 [docs/DEPLOY.md](docs/DEPLOY.md)。
 
 ### 2. 配置
 
@@ -126,15 +124,15 @@ pip install mpremote
 export ESP32_PORT=COM3            # 串口
 export ESP32_HOST=192.168.1.50    # 设备 IP
 
-python esp32-s3/scripts/build.py                       # 改过页面就要重建 www/
+python esp32-s3/scripts/build.py                       # 构建页面
 python esp32-s3/scripts/flash.py esp32-s3/main.py esp32-s3/www/index.html ...
 ```
 
-`flash.py` 传完文件后自动复位、抓启动日志、请求 `/api/health` 自检；
-文件多时用 `scripts/up_batch.py` 分批（每批 4 个）。
-可选：`scripts/mpy.py` 把 6 个核心模块预编译成 `.mpy`，启动时间缩短约 1.6 秒。
+`flash.py` 完成上传后复位设备、捕获启动日志并请求 `/api/health` 自检。
+文件数量较多时使用 `scripts/up_batch.py` 分批上传。
+`scripts/mpy.py` 可将核心模块预编译为 `.mpy`。
 
-两个板级目录的脚本用法完全一致，把路径前缀换掉即可。完整步骤见 [docs/DEPLOY.md](docs/DEPLOY.md)。
+两个板级目录的脚本用法相同。完整步骤见 [docs/DEPLOY.md](docs/DEPLOY.md)。
 
 ---
 
@@ -186,31 +184,31 @@ python esp32-s3/scripts/flash.py esp32-s3/main.py esp32-s3/www/index.html ...
     └── DEPLOY.md
 ```
 
-`www/` 由 `web/` 经 `scripts/build.py` 生成。修改页面应改 `web/` 下的源文件。
+`www/` 由 `web/` 经 `scripts/build.py` 生成；页面修改应在 `web/` 下进行。
 
 ---
 
 ## 设计约束
 
-| 约束 | 取值 | 原因 |
+| 约束 | 取值 | 说明 |
 |---|---|---|
-| 每请求 GC | `gc.collect()` | 临时对象累积会导致堆不足，`accept()` 失败 |
+| 每请求 GC | `gc.collect()` | 避免临时对象累积导致堆不足 |
 | listen backlog | 3 | TCP PCB 在握手时分配，池约 10 个 |
 | 连接关闭方式 | 服务端等待客户端先关 | MicroPython 无 `SO_LINGER`，主动关闭会进入 TIME_WAIT 60 秒 |
 | select 超时 | 30ms | 零超时会让 lwIP 任务得不到调度 |
 | 单次分配上限 | 8KB | GC 不压缩内存，大块分配易失败 |
 | 落盘方式 | 写 `.tmp` 后 rename | 避免并发读取到不完整文件 |
-| 空闲降频下限 | 80 MHz | WiFi 需要 80MHz 的 APB 时钟，Octal PSRAM 时序也按它配置；更低会断网或崩堆 |
-| 满频基准 | 写死在配置里 | `esp_pm` 的时钟配置不随 Ctrl-D 软复位恢复，读 `machine.freq()` 会把当时的低频误当满频 |
+| 空闲降频下限 | 80 MHz | WiFi APB 与 Octal PSRAM 时序的下限 |
+| 满频基准 | 配置项 `power.max_mhz` | `esp_pm` 时钟配置不随软复位恢复 |
 
 ---
 
-## 限制
+## 已知限制
 
 - 单线程：慢请求会阻塞后续请求；联网接口均有 TTL 缓存，无后台轮询
 - WiFi 密码以明文存于 flash
 - 不支持 HTTPS
-- 电台直链由第三方提供，可能失效
+- 电台直链由第三方提供
 - IPTV 音视频由浏览器直连，不经过 ESP32
 - `.mpy` 与解释器版本绑定（当前 `.mpy v6.3`），升级固件后需重新编译
 

@@ -1,7 +1,7 @@
 # 架构与流程
 
 系统运行于单线程，可用 TCP PCB 约 10 个。ESP32 版堆约 70KB（内部 SRAM）；
-S3 版 Python 堆在 8MB PSRAM，内部 SRAM 全部留给 WiFi 与 lwIP。以下流程围绕这些约束设计。
+S3 版 Python 堆位于 8MB PSRAM，内部 SRAM 供 WiFi 与 lwIP 使用。
 
 `esp32/` 与 `esp32-s3/` 是同一套代码的两个板级副本，模块划分与流程完全一致，
 差异集中在 `boot.py`（WiFi 省电）、`main.py`（LED 驱动、频率管理）与内存布局。
@@ -55,8 +55,8 @@ sequenceDiagram
     M->>M: run() 进入主循环
 ```
 
-WiFi 初始化位于 `boot.py`：驱动需一次申请约 12KB 静态缓冲区，在 `main.py` 导入模块后
-堆空间已碎片化，容易初始化失败或长时间无法关联。
+WiFi 初始化置于 `boot.py`：驱动需申请约 12KB 静态缓冲区，
+模块导入后堆空间碎片化会影响初始化。
 
 ### 主循环
 
@@ -78,17 +78,15 @@ loop:
 
 ### 空闲降频
 
-单线程主循环在没人访问时纯空转，把 CPU 频率降下来可以省电流、降芯片温度。
+空闲时段降低 CPU 频率以减少功耗与芯片发热。
 
 - 连续 `power.idle_after_s` 秒没有请求 → `machine.freq(idle_mhz)`（默认 80MHz）
-- 有连接被 `accept` 时立刻回满频。判断依据有两路：`httpsrv.accepted`（请求被服务完才加）
-  与 `httpsrv._pending`（accept 时间戳，只认 2 秒内的新连接）——只看前者会让空闲后的
-  第一个请求整段跑在低频
-- 切频后立刻在 PSRAM 上分配一小块验证堆可用；切不动就永久关闭该功能并打一行日志
+- 连接被 `accept` 时恢复 `max_mhz`。判断依据为 `httpsrv.accepted` 计数
+  与 `httpsrv._pending` 中 2 秒内的 accept 时间戳
+- 切频后在 PSRAM 上执行分配校验；不支持改频时关闭该功能并记录日志
 - 80MHz 是下限：WiFi 需要 80MHz 的 APB 时钟，Octal PSRAM 时序也按它配置
 - 满频写死在配置里（`power.max_mhz`），不读 `machine.freq()`：时钟配置不随软复位恢复
 
-降频不影响页面响应：实测空闲后首个请求的 TTFB 与满频常驻一致，收益体现在功耗与温度。
 
 ---
 
@@ -144,8 +142,8 @@ MicroPython 无 `SO_LINGER`，主动 `close()` 会使 PCB 停留在 TIME_WAIT 60
 
 ### 每请求回收
 
-`_serve()` 结束时执行 `gc.collect()`（约 3ms）。单次请求产生的临时对象不会被及时回收，
-累计约十次后空闲堆降至 20KB 以下，`accept()` 与内存分配开始失败。
+`_serve()` 结束时执行 `gc.collect()`（约 3ms）。请求产生的临时对象需及时回收，
+否则空闲堆下降将导致 `accept()` 与内存分配失败。
 
 ### 重入保护
 
@@ -223,7 +221,7 @@ flowchart TD
 | 项 | ESP32 版 | S3 版 |
 |---|---|---|
 | 就绪后空闲堆 | 60~70KB | 约 8MB（堆在 PSRAM） |
-| 内部 RAM 最大连续块 | 20~30KB | 约 128KB；掉到几 KB 时能握手但不回数据，是最关键的健康指标 |
+| 内部 RAM 最大连续块 | 20~30KB | 约 128KB；低于 16KB 时连接可建立但无数据返回 |
 | 单次大内存分配上限 | 8KB | 8KB（GC 不压缩，规则不变） |
 | TCP PCB 池 | 约 10 个 | 约 10 个 |
 | select 超时 | 30ms | 30ms |
@@ -231,7 +229,7 @@ flowchart TD
 | 大响应常驻内存 | 1KB | 1KB |
 | 复位到服务就绪 | 8~12s | 0.04~0.1s（`ready_ms` 会上报） |
 
-排查顺序：`gc.mem_free()` → 内部 RAM 分块（S3）→ `select` / `accept` 错误 → 业务逻辑。
+诊断顺序：`gc.mem_free()` → 内部 RAM 分块（S3）→ `select` / `accept` 错误 → 业务逻辑。
 
 ---
 
