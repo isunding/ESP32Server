@@ -290,6 +290,39 @@ video{width:100%;height:100%;display:block;background:#0b0e12}
   .idx .it p{margin:3px 0 0;font-size:11.5px;line-height:1.45;color:var(--fg2)}
   .warn-item .bd{white-space:pre-wrap}
 
+  /* 7 天列表：温度区间条 + 点击展开日详情 */
+  #days .day{flex-wrap:wrap;cursor:pointer;user-select:none;
+    transition:background .15s;border-radius:9px}
+  #days .day:hover{background:var(--bg3)}
+  #days .day.open{background:var(--bg3)}
+  #days .day .i{font-size:18px;width:26px;flex:0 0 26px;text-align:center}
+  #days .day .bar{width:76px;height:5px;border-radius:3px;background:var(--bg3);
+    position:relative;flex:0 0 auto;overflow:hidden}
+  #days .day .bar span{position:absolute;height:100%;border-radius:3px;
+    background:linear-gradient(90deg,var(--cold),var(--warm))}
+  #days .day .arw{font-size:10px;color:var(--fg2);opacity:.5;
+    transition:transform .2s;margin-left:2px}
+  #days .day.open .arw{transform:rotate(90deg)}
+  #days .day .meta{flex:0 0 100%;display:flex;flex-wrap:wrap;gap:6px 10px;
+    font-size:11.5px;color:var(--fg2)}
+  #days .day .meta em{font-style:normal;display:inline-flex;align-items:center;gap:3px}
+  #days .day .meta em.rain{color:#58a6ff}
+  #days .day .detail{flex:0 0 100%;display:none;padding:10px 4px 4px;
+    margin-top:8px;border-top:1px dashed var(--line)}
+  #days .day.open .detail{display:block}
+  .dt-rain{display:flex;align-items:center;gap:8px;margin-bottom:8px;
+    font-size:12px;color:var(--fg2)}
+  .dt-rain b{color:var(--fg);font-weight:600}
+  .dt-rain .rl{height:6px;flex:1;background:var(--bg3);border-radius:3px;overflow:hidden}
+  .dt-rain .rl i{display:block;height:100%;background:#58a6ff;border-radius:3px}
+  .dt-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(108px,1fr));gap:8px}
+  .dt-grid .g{background:var(--bg3);border:1px solid var(--line);
+    border-radius:9px;padding:8px 10px}
+  .dt-grid .g .k{font-size:10.5px;color:var(--fg2)}
+  .dt-grid .g .v{font-size:13.5px;font-weight:600;margin-top:3px}
+  .dt-grid .g .v small{font-size:10.5px;font-weight:400;
+    color:var(--fg2);margin-left:2px}
+
   /* 路由器原始天气页入口 */
   .srcbar{display:flex;align-items:center;gap:10px;padding:12px 14px;margin-top:14px;
     background:var(--bg2);border:1px solid var(--line);border-radius:var(--radius);
@@ -1051,6 +1084,111 @@ function drawAq24(hAir) {
   tip.textContent = "未来 24 小时 AQI · 峰值 " + mx;
 }
 
+/* ---------------- 未来 7 天：列表（温度区间条 + 展开详情） ---------------- */
+function uvText(uv) {
+  var v = +(uv || 0);
+  if (!v) return "无";
+  if (v >= 8) return "很强";
+  if (v >= 6) return "强";
+  if (v >= 3) return "中等";
+  return "弱";
+}
+
+/* 空气预报只覆盖未来 3 天，按 "MM-DD" 建索引，没有的日子不占格子 */
+function aqiByDay(aird) {
+  var m = {};
+  ((aird && aird.days) || []).forEach(function (d) {
+    var ix = pickIdx(d.indexes), z = zoned(d.forecastStartTime);
+    if (!ix || !z) return;
+    m[z.md] = { v: +ix.aqi, txt: ix.aqiDisplay || ix.aqi,
+                cat: ix.category || "", col: AQ_COLOR[aqiLevel(ix.aqi)] };
+  });
+  return m;
+}
+
+function dg(ic, k, v, u) {
+  return '<div class="g"><div class="k">' + ic + " " + k + "</div>" +
+    '<div class="v">' + esc(v == null || v === "" ? "-" : v) +
+    (u ? "<small>" + u + "</small>" : "") + "</div></div>";
+}
+
+function renderDays(ds, aird) {
+  var host = $("days");
+  if (!ds.length) { host.innerHTML = MR.empty("无数据"); return; }
+
+  /* 区间条用 7 天的整体高温/低温做同一把尺子，才能横向比较长短 */
+  var hi = -99, lo = 99, maxPr = 0;
+  ds.forEach(function (d) {
+    hi = Math.max(hi, +d.tempMax);
+    lo = Math.min(lo, +d.tempMin);
+    maxPr = Math.max(maxPr, +(d.precip || 0));
+  });
+  var span = Math.max(1, hi - lo);
+  var anyRain = maxPr > 0;
+  var aq = aqiByDay(aird);
+
+  host.innerHTML = ds.map(function (d, i) {
+    var dt = new Date((d.fxDate || "").replace(/-/g, "/"));
+    var name = i === 0 ? "今天" : (i === 1 ? "明天" : "周" + WEEKS[dt.getDay()]);
+    var tmin = +d.tempMin, tmax = +d.tempMax;
+    var bw = Math.max(6, (tmax - tmin) / span * 100);
+    var bl = Math.min((tmin - lo) / span * 100, 100 - bw);
+
+    var sky = d.textDay || "";
+    if (d.textNight && d.textNight !== d.textDay) sky += "转" + d.textNight;
+
+    var pr = +(d.precip || 0);
+    var pct = maxPr > 0 ? Math.round(pr / maxPr * 100) : 0;
+    var meta = pr > 0 ? '<em class="rain">☂️ ' + pr.toFixed(1) + " mm</em>"
+                      : (anyRain ? "<em>☂️ —</em>" : "");
+
+    var a = aq[(d.fxDate || "").slice(5)];
+    var detail =
+      '<div class="dt-rain"><span>☂️ 降水量</span>' +
+      '<span class="rl"><i style="width:' + pct + '%"></i></span>' +
+      "<b>" + pr.toFixed(1) + " mm</b></div>" +
+      '<div class="dt-grid">' +
+        dg("🌤️", "白天天气", icon(d.iconDay) + " " + (d.textDay || "-"), "") +
+        dg("🌙", "夜间天气", icon(d.iconNight) + " " + (d.textNight || "-"), "") +
+        dg("💧", "湿度", d.humidity, "%") +
+        dg("🌬️", "白天风", (d.windDirDay || "-") + " " +
+           (d.windScaleDay || "-") + "级", "") +
+        dg("🌌", "夜间风", (d.windDirNight || "-") + " " +
+           (d.windScaleNight || "-") + "级", "") +
+        dg("☀️", "紫外线", (d.uvIndex || 0) + "（" + uvText(d.uvIndex) + "）", "") +
+        dg("💨", "气压", d.pressure, "hPa") +
+        dg("📊", "能见度", d.vis, "km") +
+        dg("☁️", "云量", d.cloud, "%") +
+        dg("🌅", "日出", d.sunrise || "-", "") +
+        dg("🌇", "日落", d.sunset || "-", "") +
+        (a ? '<div class="g" style="border-left:3px solid ' + (a.col || "transparent") +
+             '"><div class="k">🫧 空气质量</div><div class="v" style="color:' +
+             (AQ_INK[aqiLevel(a.v)] || "var(--fg2)") + '">AQI ' + esc(a.txt) +
+             "<small>" + esc(a.cat) + "</small></div></div>" : "") +
+      "</div>";
+
+    return '<div class="day" onclick="toggleDay(this)">' +
+      '<div class="d">' + name + "</div>" +
+      '<div class="i">' + icon(d.iconDay) + "</div>" +
+      '<div class="s">' + esc(sky) + "</div>" +
+      '<div class="bar"><span style="left:' + bl.toFixed(1) +
+        "%;width:" + bw.toFixed(1) + '%"></span></div>' +
+      '<div class="r"><b>' + tmax + "°</b> / <i>" + tmin + "°</i></div>" +
+      '<span class="arw">▶</span>' +
+      (meta ? '<div class="meta">' + meta + "</div>" : "") +
+      '<div class="detail">' + detail + "</div></div>";
+  }).join("");
+}
+
+/* 点击展开日详情，同时只留一个展开 */
+function toggleDay(el) {
+  var was = el.classList.contains("open");
+  var all = document.querySelectorAll("#days .day");
+  for (var i = 0; i < all.length; i++) all[i].classList.remove("open");
+  el.classList.remove("open");     // 不依赖 el 一定在查询结果里
+  if (!was) el.classList.add("open");
+}
+
 /* ---------------- 主渲染 ---------------- */
 function render(w) {
   if (!w || !w.ok) {
@@ -1120,12 +1258,7 @@ function render(w) {
 
   /* 7 天 */
   var ds = (w.daily && w.daily.daily) || [];
-  $("days").innerHTML = ds.map(function (d) {
-    var pop = d.pop != null && Number(d.pop) > 0 ? " · 降水 " + d.pop + "%" : "";
-    return '<div class="day"><div class="d">' + MR.mmdd(d.fxDate) + "</div>" +
-      '<div class="s">' + icon(d.iconDay) + " " + esc(d.textDay || "") + pop + "</div>" +
-      '<div class="r"><i>' + esc(d.tempMin) + '°</i> / <b>' + esc(d.tempMax) + "°</b></div></div>";
-  }).join("") || MR.empty("无数据");
+  renderDays(ds, w.aird);
   draw7(ds);
 
   /* 生活指数 */
