@@ -1,0 +1,62 @@
+# ============================================================
+# ESP32 Terminal Server
+# 本文件排除：真实凭据、固件镜像、历史实现、开发过程产物
+# ============================================================
+
+# ---- 板端真实配置（含 WiFi 密码，务必留在本地）----
+esp32/config.json
+
+# ---- 板端运行时数据（自选股 / 缓存，随环境变化）----
+# calendar.json 为农历年度表缓存，首次运行自动生成且带年份（会过期）
+esp32/watch.json
+esp32/weather.json
+esp32/channels.json
+esp32/calendar.json
+
+# ---- 密钥与证书 ----
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+id_rsa*
+id_ed25519*
+
+# ---- 固件镜像 ----
+# 整片 flash 备份内含 config.json（WiFi 密码）与全部板端文件。
+# 固件请从 micropython.org 自行下载。
+firmware/
+*.bin
+
+# ---- 路由器端历史实现 ----
+# 含真实设备凭据、主机密钥指纹、内网拓扑与运维记录。
+legacy/
+
+# ---- 开发过程产物 ----
+esp32/README.md
+esp32/backup/
+esp32/tmp_*
+esp32/__pycache__/
+esp32/build_mpy/
+esp32/tools/
+esp32/docs/screens/
+
+# ---- 已移除功能的实现（历史参考，不参与运行）----
+esp32/alerts.py
+esp32/alertlog.py
+
+# ---- 测试与探测代码 ----
+# 仅保留 scripts/（构建、部署、上传等工程脚本）
+esp32/tests/
+
+# ---- 预编译字节码 ----
+# .mpy 与解释器版本强绑定（当前 .mpy v6.3），易与固件版本错配。
+# 使用 scripts/mpy.py 现场生成。
+esp32/*.mpy
+
+# ---- 其它 ----
+.workbuddy/
+.DS_Store
+Thumbs.db
+*.log
+*.swp

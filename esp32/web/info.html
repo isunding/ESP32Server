@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>本机信息 · ESP32 终端服务器</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="/theme.css?v=20261107d">
+</head>
+<body>
+
+<div id="topbar"></div>
+
+<div class="wrap">
+  <div class="card">
+    <div class="ph" style="justify-content:space-between">
+      <b>设备</b>
+      <a class="btn mini" id="btnRefresh">刷新</a>
+    </div>
+    <table class="kv">
+      <tr><td>主机名</td><td id="host" class="mono">—</td></tr>
+      <tr><td>IP 地址</td><td id="ip" class="mono">—</td></tr>
+      <tr><td>MAC</td><td id="mac" class="mono">—</td></tr>
+      <tr><td>信号强度</td><td id="rssi">—</td></tr>
+      <tr><td>运行时长</td><td id="up">—</td></tr>
+      <tr><td>启动到就绪</td><td id="ready">—</td></tr>
+    </table>
+  </div>
+
+  <div class="card">
+    <h2>资源占用</h2>
+    <div class="meters">
+      <div class="meter"><div class="k">堆内存（空闲）</div><div class="v" id="mem">—</div>
+        <div class="bar"><i id="memBar"></i></div></div>
+      <div class="meter"><div class="k">Flash（可用）</div><div class="v" id="flash">—</div>
+        <div class="bar"><i id="flashBar"></i></div></div>
+    </div>
+    <table class="kv" style="margin-top:12px">
+      <tr><td>堆明细</td><td id="memDetail" class="mono">—</td></tr>
+      <tr><td>Flash 明细</td><td id="flashDetail" class="mono">—</td></tr>
+    </table>
+  </div>
+
+  <div class="card">
+    <h2>固件</h2>
+    <table class="kv">
+      <tr><td>MicroPython</td><td id="fwVer" class="mono">—</td></tr>
+      <tr><td>构建</td><td id="fwBuild" class="mono">—</td></tr>
+      <tr><td>板型</td><td id="fwBoard">—</td></tr>
+      <tr><td>CPU 频率</td><td id="fwFreq">—</td></tr>
+    </table>
+  </div>
+
+  <div class="card">
+    <h2>板上文件 <span class="muted small" id="fsum"></span></h2>
+    <table class="kv" id="files"><tr><td class="muted small">读取中…</td><td></td></tr></table>
+  </div>
+
+  <p class="foot">
+    数据全部读自板子本地（<code>os</code> / <code>gc</code> / <code>machine</code>），
+    <b>不经过路由器、不发任何网络请求</b>，所以这一页不会给路由器添负担。
+  </p>
+</div>
+
+<script src="/ui.js?v=20261107d"></script>
+<script>
+MR.mountTop("本机信息");
+
+function bar(id, pct) {
+  var el = MR.$(id);
+  el.style.width = Math.max(0, Math.min(100, pct)) + "%";
+  el.className = pct >= 90 ? "crit" : pct >= 75 ? "warn" : "";
+}
+
+function render(d) {
+  if (!d || !d.ok) return;
+  var n = d.net || {}, m = d.mem || {}, f = d.flash || {}, fw = d.fw || {};
+
+  MR.$("host").textContent = n.hostname || "—";
+  MR.$("ip").textContent = n.ip || "—";
+  MR.$("mac").textContent = n.mac || "—";
+  MR.$("rssi").textContent = n.rssi != null ? n.rssi + " dBm" : "—";
+  MR.$("up").textContent = MR.fmtDur(d.up || 0);
+  MR.$("ready").textContent = d.ready_ms ? (d.ready_ms / 1000).toFixed(2) + " 秒" : "—";
+
+  var mp = m.total ? m.used * 100 / m.total : 0;
+  MR.$("mem").textContent = MR.fmtBytes(m.free) + " 空闲";
+  bar("memBar", mp);
+  MR.$("memDetail").textContent = m.total
+    ? "总 " + MR.fmtBytes(m.total) + " · 已用 " + MR.fmtBytes(m.used) +
+      " · 空闲 " + MR.fmtBytes(m.free)
+    : "—";
+
+  var fp = f.total ? f.used * 100 / f.total : 0;
+  MR.$("flash").textContent = MR.fmtBytes(f.avail) + " 可用";
+  bar("flashBar", fp);
+  MR.$("flashDetail").textContent = f.total
+    ? "总 " + MR.fmtBytes(f.total) + " · 已用 " + MR.fmtBytes(f.used) +
+      " · 可用 " + MR.fmtBytes(f.avail)
+    : "—";
+
+  MR.$("fwVer").textContent = "v" + (fw.ver || "—");
+  MR.$("fwBuild").textContent = fw.build || "—";
+  MR.$("fwBoard").textContent = fw.board || "—";
+  MR.$("fwFreq").textContent = fw.freq ? (fw.freq / 1000000) + " MHz" : "—";
+
+  var fs = d.files || [], total = 0;
+  var rows = fs.map(function (x) {
+    total += x[1] || 0;
+    return '<tr><td class="mono">' + MR.esc(x[0]) + '</td><td class="mono">' +
+      MR.fmtBytes(x[1]) + "</td></tr>";
+  }).join("");
+  MR.$("files").innerHTML = rows || '<tr><td class="muted small">无文件</td><td></td></tr>';
+  MR.$("fsum").textContent = fs.length + " 个 · 共 " + MR.fmtBytes(total);
+}
+
+function load() {
+  var b = MR.$("btnRefresh");
+  b.disabled = true;
+  return MR.api("/api/info").then(render).catch(function () {
+    MR.$("files").innerHTML = '<tr><td class="muted small">读取失败，点「刷新」重试</td><td></td></tr>';
+  }).then(function () { b.disabled = false; });
+}
+
+MR.$("btnRefresh").addEventListener("click", load);
+load();
+</script>
+</body>
+</html>

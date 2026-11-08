@@ -1,0 +1,847 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>NTP · ESP32 终端服务器</title>
+<link rel="icon" href="data:,">
+<style>
+/* ESP32 终端服务器 · 设计系统
+ * 视觉语言照搬原路由器页面：深色底 + 分层卡片 + 细描边 + 等宽数字
+ */
+:root{
+  --bg:#0f1216; --bg2:#161b22; --bg3:#1c232c; --line:#283141;
+  --fg:#e6edf3; --fg2:#8b98a9; --acc:#ff6a00; --acc2:#3b82f6;
+  --ok:#3fb950; --err:#f85149; --warm:#ffb454; --cold:#58a6ff;
+  --radius:16px;
+}
+@media (prefers-color-scheme:light){
+  :root{
+    --bg:#f2f5f9; --bg2:#ffffff; --bg3:#e9eef4; --line:#d8dee4;
+    --fg:#1f2328; --fg2:#59636e;
+  }
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;padding:0;min-height:100%}
+body{
+  background:radial-gradient(1200px 600px at 50% -10%, #1b2430 0%, var(--bg) 60%);
+  background-attachment:fixed;
+  color:var(--fg);
+  font:15px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+}
+@media (prefers-color-scheme:light){
+  body{background:radial-gradient(1200px 600px at 50% -10%, #ffffff 0%, var(--bg) 55%);}
+}
+a{color:var(--acc);text-decoration:none}
+
+/* ---------- 顶栏 ---------- */
+.top{
+  position:sticky;top:0;z-index:20;display:flex;align-items:center;gap:10px;
+  padding:12px 16px;background:color-mix(in srgb, var(--bg) 86%, transparent);
+  backdrop-filter:blur(10px);border-bottom:1px solid var(--line);
+}
+.top .back{
+  width:32px;height:32px;flex:0 0 32px;border-radius:9px;border:1px solid var(--line);
+  background:var(--bg2);color:var(--fg2);display:flex;align-items:center;justify-content:center;
+  font-size:16px;line-height:1;
+}
+.top .back:hover{color:var(--fg);border-color:var(--acc)}
+.top h1{font-size:16px;margin:0;font-weight:600;flex:1;letter-spacing:.3px;
+  min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.top .st{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--fg2);flex:0 0 auto}
+.dot{width:7px;height:7px;border-radius:50%;background:var(--fg2);flex:0 0 auto}
+.dot.on{background:var(--ok);box-shadow:0 0 8px var(--ok)}
+.dot.err{background:var(--err)}
+
+/* ---------- 页签 ---------- */
+.nav{
+  display:flex;gap:6px;overflow-x:auto;padding:10px 16px;
+  border-bottom:1px solid var(--line);background:color-mix(in srgb, var(--bg) 86%, transparent);
+  backdrop-filter:blur(10px);position:sticky;top:57px;z-index:19;
+}
+.nav a{
+  flex:0 0 auto;font-size:13px;color:var(--fg2);border:1px solid var(--line);
+  background:var(--bg2);border-radius:999px;padding:5px 13px;white-space:nowrap;
+}
+.nav a.on{background:var(--acc);border-color:var(--acc);color:#fff}
+.nav a:hover{color:var(--fg)}
+
+/* ---------- 容器 ---------- */
+.wrap{max-width:760px;margin:0 auto;padding:16px 14px 40px}
+.card{
+  background:var(--bg2);border:1px solid var(--line);border-radius:var(--radius);
+  padding:16px 18px;margin-bottom:12px;
+}
+.card>h2{margin:0 0 12px;font-size:13px;font-weight:600;color:var(--fg2);letter-spacing:.5px}
+.card.flush{padding:6px 18px}
+.muted{color:var(--fg2)}
+.small{font-size:12px}
+.right{margin-left:auto}
+.btn{
+  background:var(--bg3);border:1px solid var(--line);color:var(--fg);
+  border-radius:9px;padding:7px 13px;font:inherit;font-size:13px;cursor:pointer;
+}
+.btn:hover{border-color:var(--acc);color:var(--acc)}
+.btn.primary{background:var(--acc);border-color:var(--acc);color:#fff}
+.btn.primary:hover{color:#fff;filter:brightness(1.08)}
+.btn.mini{padding:4px 10px;font-size:12px;border-radius:7px;text-decoration:none}
+.card>h2.hd{display:flex;align-items:center;gap:8px}
+.card>h2.hd .sp{flex:1}
+
+/* ---------- 门户 ---------- */
+.hero{text-align:center;margin:10px 0 26px}
+.hero h1{margin:0 0 6px;font-size:24px;font-weight:600;letter-spacing:.5px}
+.hero .sub{color:var(--fg2);font-size:13.5px}
+.hero .badge{
+  display:inline-flex;align-items:center;gap:7px;margin-top:12px;
+  background:var(--bg3);border:1px solid var(--line);border-radius:999px;
+  padding:5px 14px;font-size:12.5px;color:var(--fg2);
+}
+.grid{display:grid;gap:14px;grid-template-columns:repeat(auto-fit,minmax(240px,1fr))}
+.tile{
+  display:flex;align-items:center;gap:14px;color:inherit;
+  background:linear-gradient(160deg,var(--bg2),var(--bg3));
+  border:1px solid var(--line);border-radius:var(--radius);
+  padding:18px;transition:.15s;position:relative;overflow:hidden;
+}
+.tile:hover{border-color:var(--acc);transform:translateY(-2px);box-shadow:0 10px 26px rgba(0,0,0,.45)}
+.tile:active{transform:translateY(0)}
+.tile .ico{
+  width:46px;height:46px;flex:0 0 46px;border-radius:12px;display:flex;
+  align-items:center;justify-content:center;background:var(--bg);border:1px solid var(--line);
+}
+.tile .ico svg{width:22px;height:22px;stroke:var(--acc);fill:none;stroke-width:1.7;
+  stroke-linecap:round;stroke-linejoin:round}
+.tile b{display:block;font-size:15.5px;font-weight:600;margin-bottom:2px}
+.tile span{display:block;color:var(--fg2);font-size:12.5px;white-space:nowrap;
+  overflow:hidden;text-overflow:ellipsis}
+.tile .go{position:absolute;right:14px;color:var(--fg2);font-size:18px;opacity:.5}
+.tile:hover .go{color:var(--acc);opacity:1}
+
+/* ---------- 服务状态小格 ---------- */
+.sts{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+@media (min-width:560px){.sts{grid-template-columns:repeat(4,minmax(0,1fr))}}
+.st1{display:grid;grid-template-columns:auto minmax(0,1fr);column-gap:7px;row-gap:1px;
+  align-items:center;background:var(--bg3);border:1px solid var(--line);
+  border-radius:10px;padding:9px 11px;font-size:12.5px}
+.st1 .dot{grid-column:1;grid-row:1;width:8px;height:8px}
+.st1 b{grid-column:2;grid-row:1;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.st1 small{grid-column:2;grid-row:2;font-size:11.5px;color:var(--fg2);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+/* ---------- 天气 ---------- */
+.now{text-align:center;padding:8px 0 4px}
+.now .loc{color:var(--fg2);font-size:14px;margin-bottom:4px}
+.now .big{display:flex;align-items:flex-end;justify-content:center;gap:14px;margin:6px 0}
+.now .temp{font:600 72px/1 ui-monospace,Menlo,Consolas,monospace;letter-spacing:-2px}
+.now .temp .deg{font-size:.38em;font-style:normal;vertical-align:.72em;
+  margin-left:2px;letter-spacing:0;color:var(--fg2)}
+.now .txt{font-size:17px;color:var(--fg2);padding-bottom:9px}
+.now .feels{color:var(--fg2);font-size:13.5px;margin-top:2px}
+.metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:16px}
+.metric{background:var(--bg3);border-radius:11px;padding:9px 4px;text-align:center}
+.metric .k{font-size:11px;color:var(--fg2)}
+.metric .v{font-size:15px;font-weight:600;margin-top:2px}
+
+.aq{display:flex;align-items:center;gap:14px}
+.aq .tile-aqi{
+  min-width:64px;height:64px;border-radius:16px;display:flex;flex-direction:column;
+  align-items:center;justify-content:center;color:#fff;font-weight:700;line-height:1;
+  flex:0 0 64px;
+}
+.aq .tile-aqi b{font-size:24px;letter-spacing:-.5px}
+.aq .tile-aqi small{font-size:10px;font-weight:500;opacity:.92;margin-top:3px;letter-spacing:1px}
+.aq .info{flex:1;min-width:0}
+.aq .cat{font-size:15px;font-weight:600;margin-bottom:3px}
+.aq .adv{font-size:12px;color:var(--fg2);line-height:1.55}
+.poll{display:grid;grid-template-columns:repeat(auto-fit,minmax(78px,1fr));gap:7px;margin-top:12px}
+.poll .p{background:var(--bg3);border-radius:9px;padding:8px 6px;text-align:center}
+.poll .p .n{font-size:10.5px;color:var(--fg2)}
+.poll .p .v{font-size:14.5px;font-weight:600;margin:2px 0 1px}
+.poll .p .u{font-size:9.5px;color:var(--fg2)}
+
+.warn-bar{display:flex;align-items:center;gap:9px;font-size:13px;color:var(--fg2)}
+.warn-bar .ok-dot{width:9px;height:9px;border-radius:50%;background:var(--ok);
+  box-shadow:0 0 0 3px rgba(63,185,80,.16);flex:0 0 9px}
+.warn-item{background:var(--bg3);border-left:3px solid var(--err);border-radius:9px;
+  padding:10px 12px;margin-bottom:9px}
+.warn-item:last-child{margin-bottom:0}
+.warn-item .hd{display:flex;align-items:center;gap:8px;margin-bottom:5px;flex-wrap:wrap}
+.warn-item .lv{font-size:11px;font-weight:600;padding:1px 7px;border-radius:5px;color:#fff}
+.warn-item .ti{font-size:13.5px;font-weight:600}
+.warn-item .bd{font-size:12.5px;line-height:1.6;color:var(--fg)}
+.warn-item .mt{font-size:11px;color:var(--fg2);margin-top:6px}
+
+.hours{display:flex;gap:8px;overflow-x:auto;padding-bottom:6px}
+.hour{flex:0 0 auto;width:58px;text-align:center;background:var(--bg3);
+  border-radius:11px;padding:9px 4px}
+.hour .h{font-size:11.5px;color:var(--fg2)}
+.hour .t{font-size:14px;font-weight:600;margin-top:4px}
+.hour .s{font-size:10.5px;color:var(--fg2);margin-top:2px;white-space:nowrap;
+  overflow:hidden;text-overflow:ellipsis}
+
+.day{display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid var(--line)}
+.day:last-child{border-bottom:0}
+.day .d{width:56px;font-size:13.5px}
+.day .s{flex:1;font-size:13px;color:var(--fg2);min-width:0;overflow:hidden;
+  text-overflow:ellipsis;white-space:nowrap}
+.day .r{font-size:13.5px;font-variant-numeric:tabular-nums;white-space:nowrap}
+.day .r b{color:var(--warm);font-weight:600}
+.day .r i{color:var(--cold);font-style:normal}
+
+.idx{display:grid;grid-template-columns:repeat(auto-fill,minmax(132px,1fr));gap:8px}
+.idx .it{background:var(--bg3);border-radius:10px;padding:9px 11px;font-size:12px}
+.idx .it b{display:block;font-size:13px;margin-bottom:2px}
+.idx .it span{color:var(--fg2)}
+
+/* ---------- 状态 ---------- */
+.meters{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.meter .k{font-size:11px;color:var(--fg2)}
+.meter .v{font-size:19px;font-weight:600;font-variant-numeric:tabular-nums}
+.bar{height:5px;background:var(--line);border-radius:3px;margin-top:6px;overflow:hidden}
+.bar i{display:block;height:100%;width:0;background:var(--acc2);border-radius:3px;transition:width .35s}
+.bar i.warn{background:var(--warm)}
+.bar i.crit{background:var(--err)}
+
+table.kv{width:100%;border-collapse:collapse;font-size:13px}
+table.kv td{padding:8px 0;border-bottom:1px solid var(--line);vertical-align:top}
+table.kv td:first-child{color:var(--fg2);width:42%}
+table.kv tr:last-child td{border-bottom:0}
+table.kv .mono{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12.5px}
+
+/* ---------- 流量 ---------- */
+.dev{display:flex;align-items:center;justify-content:space-between;
+  padding:10px 0;border-bottom:1px solid var(--line)}
+.dev:last-child{border-bottom:0}
+.dev .nm{font-size:13.5px;font-weight:500}
+.dev .ip{color:var(--fg2);font-size:11.5px}
+.dev .vals{text-align:right;white-space:nowrap;
+  font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12.5px}
+.dev .dn{color:var(--ok)}
+.dev .up{color:var(--cold)}
+.rank{display:inline-block;width:20px;color:var(--fg2);font-size:12px}
+
+/* ---------- IPTV ---------- */
+.player{position:relative;background:#0b0e12;border-radius:12px;overflow:hidden;
+  aspect-ratio:16/9;border:1px solid var(--line)}
+video{width:100%;height:100%;display:block;background:#0b0e12}
+.ptip{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+  color:#8b98a9;font-size:13px;text-align:center;padding:0 24px;pointer-events:none}
+.ph{display:flex;align-items:center;gap:10px;margin-bottom:10px}
+.ph b{font-size:14px}
+.search{background:var(--bg3);border:1px solid var(--line);color:var(--fg);
+  border-radius:9px;padding:7px 11px;font:inherit;font-size:13px;width:46%}
+.search:focus{outline:none;border-color:var(--acc)}
+.grp{margin-top:14px}
+.grp h3{margin:0 0 4px;font-size:12px;color:var(--fg2);font-weight:600;letter-spacing:.5px}
+.ch{display:flex;align-items:center;justify-content:space-between;gap:10px;
+  padding:10px 10px;border-radius:9px;font-size:14px;cursor:pointer}
+.ch:hover{background:var(--bg3)}
+.ch.playing{background:var(--bg3);box-shadow:inset 2px 0 0 var(--acc)}
+.ch .tag{font-size:11px;color:var(--fg2);white-space:nowrap}
+.ch .tag.live{color:var(--ok)}
+.ch .tag.live::before{content:"● ";font-size:9px;vertical-align:1px}
+.ch .tag.dead{color:var(--fg2)}
+
+/* ---------- 提示 ---------- */
+.toast{position:fixed;left:50%;bottom:28px;transform:translateX(-50%) translateY(14px);
+  background:#1f2937;border:1px solid var(--line);color:#e6edf3;padding:9px 18px;
+  border-radius:9px;font-size:13px;opacity:0;transition:.25s;pointer-events:none;z-index:60}
+.toast.on{opacity:1;transform:translateX(-50%) translateY(0)}
+.foot{color:var(--fg2);font-size:12px;text-align:center;margin:18px 0 0;line-height:1.9}
+.foot code{background:var(--bg3);border:1px solid var(--line);border-radius:5px;padding:1px 6px;font-size:11.5px}
+
+@media (max-width:520px){
+  .wrap{padding:12px 12px 32px}
+  .nav{gap:4px;padding:9px 10px}
+  .nav a{padding:4px 9px;font-size:12px}
+  .now .temp{font-size:58px}
+  .meters{grid-template-columns:1fr 1fr;gap:10px}
+  .grid{grid-template-columns:1fr}
+}
+
+</style>
+<style>
+  /* 顶部时钟：直接用 ESP32 的时间做基准，本地只负责走秒 */
+  .clk{text-align:center;padding:22px 18px 18px;position:relative;overflow:hidden}
+  .clk .t{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:44px;font-weight:600;
+    line-height:1;letter-spacing:2px;font-variant-numeric:tabular-nums}
+  .clk .t .sfx{font-size:15px;font-weight:400;letter-spacing:0;color:var(--fg2);margin-left:6px}
+  .clk .d{margin-top:9px;font-size:13px;color:var(--fg2);letter-spacing:.5px}
+  /* 公历下方的农历行 + 节气/节日徽标 */
+  .clk .ln{margin-top:5px;font-size:13px;color:var(--fg2);letter-spacing:.5px}
+  .clk .ln b{color:var(--fg);font-weight:600}
+  .clk .lx{margin-top:9px;display:flex;justify-content:center;align-items:center;
+    gap:6px;flex-wrap:wrap;font-size:11.5px;color:var(--fg2)}
+  .clk .lx:empty{display:none}
+  .clk .lx .term{background:rgba(88,166,255,.14);color:var(--cold);
+    border:1px solid rgba(88,166,255,.35);border-radius:999px;padding:2px 9px;font-size:11px}
+  .clk .lx .fest{background:rgba(255,106,0,.14);color:var(--acc);
+    border:1px solid rgba(255,106,0,.35);border-radius:999px;padding:2px 9px;font-size:11px}
+  .clk .s{margin-top:11px;display:inline-flex;align-items:center;gap:7px;font-size:11.5px;
+    color:var(--fg2);background:var(--bg3);border:1px solid var(--line);
+    border-radius:999px;padding:3px 11px}
+  .nrow{display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid var(--line)}
+  .nrow:last-child{border-bottom:0}
+  .nrow .k{font-size:12.5px;color:var(--fg2);flex:0 0 96px}
+  .nrow .v{flex:1;min-width:0;font-size:13px;
+    font-family:ui-monospace,Menlo,Consolas,monospace;
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .nrow .v.plain{font-family:inherit}
+  .tagok{background:rgba(63,185,80,.15);color:var(--ok);border:1px solid rgba(63,185,80,.35)}
+  .tagerr{background:rgba(248,81,73,.14);color:var(--err);border:1px solid rgba(248,81,73,.35)}
+  .hist{display:flex;flex-direction:column;gap:0}
+  .hrow{display:flex;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid var(--line);font-size:12px}
+  .hrow:last-child{border-bottom:0}
+  .hrow .t{flex:0 0 132px;color:var(--fg2);
+    font-family:ui-monospace,Menlo,Consolas,monospace}
+  .hrow .h{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .hrow .m{flex:0 0 auto;color:var(--fg2);font-variant-numeric:tabular-nums;font-size:11.5px}
+  .btns{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+  /* 时区下拉：沿用 .search 的外观，另外让原生弹出层跟随明暗主题 */
+  .tzsel{cursor:pointer;color-scheme:light dark;padding-right:8px}
+  .tzsel option,.tzsel optgroup{background:var(--bg3);color:var(--fg)}
+  .tzhint{margin-top:7px;line-height:1.6}
+  .tzhint b{color:var(--acc);font-weight:600}
+</style>
+</head>
+<body>
+
+<div id="topbar"></div>
+
+<div class="wrap">
+  <div class="card clk">
+    <div class="t" id="clkTime">--:--:--</div>
+    <div class="d" id="clkDate">正在读取 ESP32 时间…</div>
+    <div class="ln" id="clkLunar" style="display:none"></div>
+    <div class="lx" id="clkExtra"></div>
+    <div class="s"><span class="dot" id="clkDot"></span><span id="clkSrc">ESP32 本机时钟</span></div>
+  </div>
+
+  <div class="card">
+    <h2>本机 NTP 服务（ESP32）</h2>
+    <div class="warn-bar" id="stateRow"><span class="dot"></span>读取中…</div>
+    <div style="margin-top:10px">
+      <div class="nrow"><span class="k">监听地址</span><span class="v" id="listen">—</span></div>
+      <div class="nrow"><span class="k">ESP32 时间</span><span class="v" id="espTime">—</span></div>
+      <div class="nrow"><span class="k">已响应请求</span><span class="v" id="served">—</span></div>
+      <div class="nrow"><span class="k">最近请求</span><span class="v" id="lastClient">—</span></div>
+    </div>
+    <div class="btns">
+      <button class="btn primary" id="btnSrvOn">启动服务</button>
+      <button class="btn" id="btnSrvOff">停止服务</button>
+      <button class="btn" id="btnSync">立即同步</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>上次同步记录</h2>
+    <div id="lastBox"><span class="muted small">还没有同步过</span></div>
+    <div class="hist" id="hist" style="margin-top:8px"></div>
+  </div>
+
+  <div class="card">
+    <h2>上游时间源（公网 NTP）</h2>
+    <div id="ups" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px"></div>
+    <input class="search" id="upsInput" style="width:100%"
+      placeholder="逗号分隔，按顺序尝试，例如 ntp.aliyun.com,ntp.tencent.com">
+    <div class="btns">
+      <button class="btn primary" id="btnUps">保存上游</button>
+      <span class="muted small" style="align-self:center">保存后立即重新同步</span>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>参数</h2>
+    <table class="kv">
+      <tr><td>同步间隔（秒）</td><td>
+        <input class="search" id="interval" style="width:100%" inputmode="numeric">
+      </td></tr>
+      <tr><td>本地时区</td><td>
+        <select class="search tzsel" id="tz" style="width:100%"></select>
+        <div class="muted small tzhint" id="tzHint">读取中…</div>
+      </td></tr>
+    </table>
+    <div class="btns">
+      <button class="btn primary" id="btnParams">保存参数</button>
+      <span class="muted small" style="align-self:center">改时区后会立即重新同步</span>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>客户端使用方法</h2>
+    <p class="small muted" style="margin:0 0 10px">局域网任意设备把时间源指向 ESP32：</p>
+    <pre class="mono" id="usage" style="background:var(--bg3);border:1px solid var(--line);
+      border-radius:10px;padding:12px;font-size:12px;margin:0;white-space:pre-wrap;word-break:break-all"></pre>
+  </div>
+
+  <p class="foot">
+    ESP32 <code id="fIp">—</code> 提供 <code>123/udp</code> · 上游为公网 NTP<br>
+    时间同步后再对外服务；断电后首次同步只做校准
+  </p>
+</div>
+
+<script>
+/* ESP32 终端服务器 · 公共前端
+ * 各页面共用：取数、格式化、顶栏与页签、提示条
+ */
+"use strict";
+
+var MR = (function () {
+
+  var PAGES = [
+    { href: "/", title: "首页" },
+    { href: "/weather.html", title: "天气" },
+    { href: "/market.html", title: "行情" },
+    { href: "/radio.html", title: "电台" },
+    { href: "/info.html", title: "本机" },
+    { href: "/ntp.html", title: "NTP" },
+    { href: "/iptv.html", title: "IPTV" }
+  ];
+
+  function $(id) { return document.getElementById(id); }
+
+  function esc(s) {
+    return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+    });
+  }
+
+  function api(path) {
+    return fetch(path, { cache: "no-store" }).then(function (r) {
+      if (!r.ok) throw new Error("HTTP " + r.status);
+      return r.json();
+    });
+  }
+
+  function fmtBytes(n) {
+    n = Number(n) || 0;
+    if (n < 1024) return n + " B";
+    if (n < 1048576) return (n / 1024).toFixed(1) + " KB";
+    if (n < 1073741824) return (n / 1048576).toFixed(1) + " MB";
+    return (n / 1073741824).toFixed(2) + " GB";
+  }
+
+  function fmtDur(sec) {
+    sec = Number(sec) || 0;
+    var d = Math.floor(sec / 86400), h = Math.floor(sec % 86400 / 3600), m = Math.floor(sec % 3600 / 60);
+    if (d) return d + " 天 " + h + " 小时";
+    if (h) return h + " 小时 " + m + " 分";
+    return m + " 分钟";
+  }
+
+  function pad(n) { return n < 10 ? "0" + n : "" + n; }
+  function hhmm(d) { return pad(d.getHours()) + ":" + pad(d.getMinutes()); }
+  function mmdd(s) { return s ? s.substr(5, 5) : "--"; }
+
+  function currentPage() {
+    var p = location.pathname;
+    if (p === "" || p === "/" || p === "/index.html") return "/";
+    return p.replace(/^\/+/, "/");
+  }
+
+  /* 顶栏 + 页签。title 为空时不显示返回键 */
+  function mountTop(title) {
+    var cur = currentPage();
+    var nav = PAGES.map(function (p) {
+      var on = p.href === cur ? " on" : "";
+      return '<a class="' + on.trim() + '" href="' + p.href + '">' + p.title + "</a>";
+    }).join("");
+
+    var back = cur === "/" ? "" :
+      '<a class="back" href="/" title="返回首页">‹</a>';
+
+    var html =
+      '<div class="top">' + back +
+      "<h1>" + esc(title) + "</h1>" +
+      '<div class="st"><span class="dot" id="hDot"></span><span id="hIp">连接中…</span></div>' +
+      "</div>" +
+      '<div class="nav">' + nav + "</div>";
+
+    var host = document.getElementById("topbar");
+    if (host) host.innerHTML = html;
+  }
+
+  function healthTick() {
+    return api("/api/health").then(function (h) {
+      var dot = $("hDot"), ip = $("hIp");
+      if (!dot) return h;
+      dot.className = "dot " + (h.router_ok ? "on" : "err");
+      ip.textContent = h.ip;
+      ip.title = (h.router_ok ? "路由器可达" : "路由器不可达") + " · RSSI " + h.rssi +
+        " · 运行 " + fmtDur(h.up) + " · 空闲内存 " + fmtBytes(h.mem_free);
+      MR.device = h;
+      return h;
+    }).catch(function () {
+      var dot = $("hDot");
+      if (dot) dot.className = "dot err";
+      return null;
+    });
+  }
+
+  var toastTimer = 0;
+  function toast(msg, ms) {
+    var el = document.getElementById("toast");
+    if (!el) {
+      el = document.createElement("div");
+      el.id = "toast";
+      el.className = "toast";
+      document.body.appendChild(el);
+    }
+    el.textContent = msg;
+    el.className = "toast on";
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(function () { el.className = "toast"; }, ms || 2600);
+  }
+
+  function empty(msg) { return '<span class="muted small">' + esc(msg) + "</span>"; }
+
+  return {
+    $: $, esc: esc, api: api, fmtBytes: fmtBytes, fmtDur: fmtDur,
+    hhmm: hhmm, mmdd: mmdd, mountTop: mountTop, healthTick: healthTick,
+    toast: toast, empty: empty, PAGES: PAGES, device: null
+  };
+})();
+
+</script>
+<script>
+MR.mountTop("NTP 时间服务");
+
+var D = null;
+
+/* ---------------- 农历 / 节气 / 节日 ----------------
+ * 板子上是「年度缓存」：一年只算一次，接口只返回今日的小 JSON。
+ * 这里也按「日期字符串」去重，15 秒轮询不会天天打同一个接口。
+ */
+var CAL = null, calDay = "";
+
+function renderCal(c) {
+  var ln = MR.$("clkLunar"), lx = MR.$("clkExtra");
+  if (!c || !c.ok || !c.lunar) {
+    ln.style.display = "none";
+    ln.textContent = "";
+    lx.innerHTML = "";
+    return;
+  }
+  ln.style.display = "block";
+  ln.innerHTML = "农历 <b>" + MR.esc(c.ganzhi) + "</b>年 " +
+    MR.esc(c.lunar) + " · " + MR.esc(c.zodiac) + "年";
+  var p = [];
+  if (c.term) p.push('<span class="term">今日 ' + MR.esc(c.term) + "</span>");
+  (c.festivals || []).forEach(function (n) {
+    p.push('<span class="fest">' + MR.esc(n) + "</span>");
+  });
+  var nx = (c.next || [])[0];
+  if (nx) p.push("<span>距 " + MR.esc(nx.name) + " " + nx.days + " 天</span>");
+  lx.innerHTML = p.join("");
+}
+
+function loadCal() {
+  var k = (D && D.sync && D.sync.esp_time) ? D.sync.esp_time.slice(0, 10) : "";
+  if (k === calDay) return Promise.resolve(CAL);
+  calDay = k;
+  return MR.api("/api/calendar").then(function (c) {
+    CAL = c;
+    renderCal(c);
+    return c;
+  }).catch(function () {
+    calDay = "";          // 失败就允许下次轮询重试
+    renderCal(null);
+    return null;
+  });
+}
+
+/* ---------------- 顶部时钟 ----------------
+ * 以 /api/ntp 的 esp_time 为锚点，之后只累加「浏览器流逝的时间」走秒：
+ * 不对齐浏览器本地时间（两者可能差几分钟），也不每秒打接口（板子是单线程）。
+ * 每次轮询（15s）重新取锚点，秒针抖一下就自动纠回来。
+ */
+var CLK = { base: 0, t0: 0, ok: false, why: "正在读取 ESP32 时间…" };
+var WD = ["日", "一", "二", "三", "四", "五", "六"];
+
+function pad2(n) { return n < 10 ? "0" + n : "" + n; }
+
+/* ---------------- 时区下拉 ----------------
+ * 后端存的是「相对 UTC 的整数分钟」（不是小时）：+5:30 / +5:45 / -3:30
+ * 这类偏移用整数小时表达不了，而 ESP32 是 float32 又不能用小数。
+ * 城市名只是方便定位的提示，实际按固定偏移计算，不自动切换夏令时。
+ */
+var TZ_CITY = [
+  [840,  "基里巴斯（圣诞岛）"],
+  [780,  "汤加 · 萨摩亚"],
+  [720,  "奥克兰 · 惠灵顿 · 斐济"],
+  [660,  "新喀里多尼亚 · 所罗门群岛"],
+  [600,  "悉尼 · 布里斯班 · 关岛"],
+  [540,  "东京 · 首尔 · 札幌"],
+  [480,  "北京 · 上海 · 中国香港 · 中国台北 · 新加坡"],
+  [420,  "曼谷 · 河内 · 雅加达"],
+  [390,  "仰光"],
+  [360,  "达卡 · 阿拉木图"],
+  [345,  "加德满都"],
+  [330,  "新德里 · 孟买 · 科伦坡"],
+  [300,  "卡拉奇 · 塔什干"],
+  [270,  "喀布尔"],
+  [240,  "迪拜 · 阿布扎比 · 巴库"],
+  [210,  "德黑兰"],
+  [180,  "莫斯科 · 伊斯坦布尔 · 利雅得"],
+  [120,  "开罗 · 约翰内斯堡 · 雅典"],
+  [60,   "柏林 · 巴黎 · 罗马 · 拉各斯"],
+  [0,    "伦敦 · 里斯本 · 雷克雅未克（UTC）"],
+  [-60,  "佛得角 · 亚速尔"],
+  [-180, "圣保罗 · 布宜诺斯艾利斯"],
+  [-210, "圣约翰斯（纽芬兰）"],
+  [-240, "圣地亚哥 · 加拉加斯"],
+  [-300, "纽约 · 华盛顿 · 利马（标准时）"],
+  [-360, "芝加哥 · 墨西哥城（标准时）"],
+  [-420, "丹佛 · 凤凰城（标准时）"],
+  [-480, "洛杉矶 · 温哥华（标准时）"],
+  [-540, "安克雷奇（标准时）"],
+  [-570, "马克萨斯群岛"],
+  [-600, "檀香山 · 塔希提"],
+  [-660, "帕果帕果"],
+  [-720, "国际日期变更线（贝克岛）"]
+];
+var TZ_ODD = [765, 630, 585, 525, 390, 345, 330, 270, 210, -210, -570];
+var tzDirty = false;
+
+function tzLabel(m) {
+  var a = Math.abs(m), h = Math.floor(a / 60), mm = a % 60;
+  return "GMT" + (m < 0 ? "-" : "+") + h + (mm ? ":" + pad2(mm) : "");
+}
+function utcLabel(m) {
+  var a = Math.abs(m);
+  return "UTC" + (m < 0 ? "-" : "+") + pad2(Math.floor(a / 60)) + ":" + pad2(a % 60);
+}
+function tzOpt(m, text) {
+  var o = document.createElement("option");
+  o.value = String(m);
+  o.textContent = text;
+  return o;
+}
+function tzHintCur(m) {
+  return "当前 <b>" + tzLabel(m) + "</b>（" + utcLabel(m) +
+    "）· 固定偏移，不自动切换夏令时；选择后点「保存参数」生效";
+}
+function buildTz() {
+  var sel = MR.$("tz"), g, i, h, m;
+  g = document.createElement("optgroup");
+  g.label = "常用城市 / 地区";
+  TZ_CITY.forEach(function (r) {
+    g.appendChild(tzOpt(r[0], tzLabel(r[0]) + " · " + r[1]));
+  });
+  sel.appendChild(g);
+
+  g = document.createElement("optgroup");
+  g.label = "按 GMT 偏移（整点）";
+  for (h = 14; h >= -12; h--) {
+    m = h * 60;
+    g.appendChild(tzOpt(m, tzLabel(m) + " · " + utcLabel(m)));
+  }
+  sel.appendChild(g);
+
+  g = document.createElement("optgroup");
+  g.label = "按 GMT 偏移（:30 / :45）";
+  TZ_ODD.forEach(function (x) {
+    g.appendChild(tzOpt(x, tzLabel(x) + " · " + utcLabel(x)));
+  });
+  sel.appendChild(g);
+}
+buildTz();
+
+function setClock(str, calibrated) {
+  var m = /^(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2}):(\d{2})$/.exec(str || "");
+  if (!m) {
+    CLK.ok = false;
+    CLK.why = calibrated === false ? "等待首次 NTP 同步…" : "时间不可用";
+    return;
+  }
+  if (+m[1] < 2024) {          // RTC 掉电回到 2000 年，这种时间不如不显示
+    CLK.ok = false;
+    CLK.why = "时钟未校准（RTC），等待同步";
+    return;
+  }
+  CLK.base = new Date(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +m[6]).getTime();
+  CLK.t0 = Date.now();
+  CLK.ok = true;
+}
+
+function paintClock() {
+  var dot = MR.$("clkDot");
+  if (!CLK.ok) {
+    MR.$("clkTime").textContent = "--:--:--";
+    MR.$("clkDate").textContent = CLK.why;
+    if (dot) dot.className = "dot err";
+    return;
+  }
+  var d = new Date(CLK.base + (Date.now() - CLK.t0));
+  var hms = pad2(d.getHours()) + ":" + pad2(d.getMinutes()) + ":" + pad2(d.getSeconds());
+  var ymd = d.getFullYear() + "-" + pad2(d.getMonth() + 1) + "-" + pad2(d.getDate());
+  MR.$("clkTime").textContent = hms;
+  MR.$("clkDate").textContent = d.getFullYear() + " 年 " + (d.getMonth() + 1) + " 月 " +
+    d.getDate() + " 日 · 星期" + WD[d.getDay()];
+
+  var cal = !!(D && D.sync && D.sync.calibrated);
+  if (dot) dot.className = "dot " + (cal ? "on" : "");
+  MR.$("clkSrc").textContent = "ESP32 本机时钟 · " + (cal ? "已校准" : "未校准");
+  MR.$("espTime").textContent = ymd + " " + hms;
+}
+
+function post(body) {
+  return fetch("/api/ntp", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body)
+  }).then(function (r) { return r.json(); });
+}
+
+function act(body, okMsg) {
+  post(body).then(function (r) {
+    MR.toast(r.ok ? (okMsg || r.msg || "已下发") : (r.msg || "操作失败"));
+    setTimeout(load, r.ok ? 1800 : 0);
+  }).catch(function () { MR.toast("请求失败"); });
+}
+
+function fmtOffset(ms) {
+  if (ms === null || ms === undefined) return "—";
+  if (ms === 0) return "0 ms";
+  return (ms > 0 ? "+" : "") + ms + " ms";
+}
+
+function render() {
+  if (!D) {
+    MR.$("stateRow").innerHTML = '<span class="dot err"></span>状态不可用';
+    return;
+  }
+  var L = D.local || {};
+  var S = D.sync || {};
+  var last = S.last;
+
+  /* 本机服务 */
+  var on = !!L.running;
+  MR.$("stateRow").innerHTML = '<span class="dot ' + (on ? "on" : "") + '"></span>' +
+    (on ? "ESP32 本机 NTP 服务运行中" : "服务已停止");
+
+  MR.$("listen").textContent = on ? (L.ip + ":123/udp（本机）") : ":123 未监听";
+  setClock(S.esp_time, S.calibrated);
+  paintClock();
+  MR.$("served").textContent = (L.served || 0) + " 次";
+  MR.$("lastClient").textContent = L.last_client
+    ? (L.last_client + (L.last_at ? " · " + L.last_at : ""))
+    : "还没有客户端来请求";
+
+  /* 上次同步 */
+  if (!last) {
+    MR.$("lastBox").innerHTML = '<span class="muted small">还没有同步过</span>';
+  } else {
+    var st = last.ok
+      ? '<span class="tag tagok">成功</span>'
+      : '<span class="tag tagerr">失败</span>';
+    var offTxt = last.first ? "首次同步（校准）" : fmtOffset(last.offset);
+    MR.$("lastBox").innerHTML =
+      '<div class="nrow"><span class="k">结果</span><span class="v plain">' + st + "</span></div>" +
+      '<div class="nrow"><span class="k">时间</span><span class="v">' + MR.esc(last.time || "—") + "</span></div>" +
+      '<div class="nrow"><span class="k">上游</span><span class="v">' + MR.esc(last.host || (last.err || "—")) + "</span></div>" +
+      '<div class="nrow"><span class="k">往返延迟</span><span class="v">' +
+        (last.delay === null || last.delay === undefined ? "—" : last.delay + " ms") + "</span></div>" +
+      '<div class="nrow"><span class="k">时钟偏差</span><span class="v">' + MR.esc(offTxt) + "</span></div>";
+  }
+
+  var hs = (S.history || []).slice().reverse();
+  MR.$("hist").innerHTML = hs.map(function (h) {
+    var dot = h.ok ? "on" : "err";
+    var m = h.ok
+      ? (h.delay === null || h.delay === undefined ? "" : h.delay + "ms") +
+        (h.first || h.offset === null || h.offset === undefined ? "" : " · " + fmtOffset(h.offset))
+      : "失败";
+    return '<div class="hrow"><span class="dot ' + dot + '"></span>' +
+      '<span class="t">' + MR.esc((h.time || "—").substr(5)) + "</span>" +
+      '<span class="h">' + MR.esc(h.host || h.err || "—") + "</span>" +
+      '<span class="m">' + MR.esc(m) + "</span></div>";
+  }).join("");
+
+  /* 上游 */
+  var ups = D.upstream || [];
+  MR.$("ups").innerHTML = ups.length ? ups.map(function (u) {
+    return '<span style="font-size:12px;color:var(--fg2);background:var(--bg3);' +
+      'border:1px solid var(--line);border-radius:999px;padding:3px 10px">' +
+      MR.esc(u) + "</span>";
+  }).join("") : '<span class="muted small">未配置上游</span>';
+  if (document.activeElement !== MR.$("upsInput")) {
+    MR.$("upsInput").value = ups.join(", ");
+  }
+
+  /* 参数 */
+  var secs = Math.round((D.sync_ms || 1800000) / 1000);
+  if (document.activeElement !== MR.$("interval")) MR.$("interval").value = secs;
+  // 兼容旧固件只返回 tz(小时)；新固件返回 tz_min(整数分钟)
+  var tzm = (D.tz_min === undefined || D.tz_min === null)
+    ? (Number(D.tz) * 60 || 0) : Number(D.tz_min);
+  if (!tzDirty) {
+    var sel = MR.$("tz");
+    if (!sel.querySelector('option[value="' + tzm + '"]')) {
+      var old = sel.querySelector("option.custom");
+      if (old) old.remove();
+      var o = tzOpt(tzm, tzLabel(tzm) + " · 当前配置（自定义）");
+      o.className = "custom";
+      sel.appendChild(o);
+    }
+    if (document.activeElement !== sel) sel.value = String(tzm);
+    MR.$("tzHint").innerHTML = tzHintCur(tzm);
+  }
+
+  /* 用法 */
+  var ip = L.ip || (MR.device && MR.device.ip) || "10.0.0.100";
+  MR.$("fIp").textContent = ip;
+  MR.$("usage").textContent =
+    "# Linux / 路由器\n" +
+    "ntpdate " + ip + "\n\n" +
+    "# Windows（管理员）\n" +
+    "w32tm /config /manualpeerlist:" + ip + " /syncfromflags:manual /update\n" +
+    "w32tm /resync\n\n" +
+    "# 客户端配置片段\n" +
+    "server " + ip + " iburst";
+}
+
+function load() {
+  return MR.api("/api/ntp").then(function (r) {
+    D = (r && r.ok) ? r : null;
+    render();
+    // 串行取第二个接口：板子是单线程 HTTP，并发会挤掉请求
+    return loadCal();
+  }).catch(function () {
+    D = null;
+    render();
+    renderCal(null);
+  });
+}
+
+MR.$("btnSrvOn").addEventListener("click", function () { act({ action: "srv", value: "on" }, "服务已启动"); });
+MR.$("btnSrvOff").addEventListener("click", function () { act({ action: "srv", value: "off" }, "服务已停止"); });
+MR.$("btnSync").addEventListener("click", function () { act({ action: "sync" }, "已排队同步"); });
+MR.$("btnUps").addEventListener("click", function () {
+  act({ action: "upstream", value: MR.$("upsInput").value }, "上游已保存");
+});
+MR.$("tz").addEventListener("change", function () {
+  var m = Number(this.value);
+  tzDirty = true;
+  MR.$("tzHint").innerHTML = "将设为 <b>" + tzLabel(m) + "</b>（" + utcLabel(m) + "）· 尚未保存";
+});
+MR.$("btnParams").addEventListener("click", function () {
+  act({ action: "interval", value: MR.$("interval").value.trim() }, "间隔已保存");
+  var m = Number(MR.$("tz").value);
+  post({ action: "tz", value: m }).then(function (r) {
+    MR.toast(r.ok ? (r.msg || "时区已保存") : (r.msg || "操作失败"));
+    if (r.ok) tzDirty = false;
+    setTimeout(load, 1800);
+  }).catch(function () { MR.toast("请求失败"); });
+});
+
+load();
+/* 板子是单线程 HTTP：轮询越长越不容易和后台 CGI / 别的页面抢连接。
+   页面切到后台时不发请求，回来后下一次轮询自然补上。 */
+setInterval(function () { if (!document.hidden) load(); }, 30000);
+setInterval(paintClock, 1000);  // 本地走秒，1 秒一次即可，不产生网络请求
+paintClock();
+</script>
+</body>
+</html>

@@ -1,0 +1,62 @@
+{
+  "_说明": "复制本文件为 config.json 后修改。config.json 已在 .gitignore 里，不会被提交。字段删掉时使用代码内置默认值。",
+
+  "device_name": "客厅终端",
+
+  "wifi": {
+    "_说明": "ssid 留空则开机直接进配网热点模式",
+    "ssid": "YOUR_WIFI_SSID",
+    "password": "YOUR_WIFI_PASSWORD",
+    "hostname": "server",
+    "ap_ssid": "ESP32-Setup",
+    "_ap_pass说明": "配网热点密码，至少 8 位；部署后建议改成自己的",
+    "ap_pass": "esp32setup123"
+  },
+
+  "router": {
+    "_说明": "数据源路由器；需在其上部署 legacy/router 与 legacy/cgi 里的 CGI",
+    "host": "192.168.1.1",
+    "port": 80,
+    "r2h_port": 5140,
+    "udpxy_port": 12123
+  },
+
+  "ntp": {
+    "_说明": "板子自带 NTP 服务端（UDP 123），这里是它的上游与时钟设置",
+    "upstream": [
+      "ntp.aliyun.com",
+      "ntp.tencent.com",
+      "cn.pool.ntp.org"
+    ],
+    "sync_ms": 1800000,
+    "_tz说明": "时区小时数：+8=北京时间，+5.5=印度，-5=美东。注意是小数小时，不是分钟",
+    "tz": 8
+  },
+
+  "poll": {
+    "_说明": "只有缓存 TTL（多久算过期），没有后台轮询任务",
+    "weather_ms": 600000,
+    "channels_ms": 300000
+  },
+
+  "led": {
+    "_说明": "板载蓝灯：启动常亮，就绪后心跳；on=0 时就绪后直接熄灭",
+    "on": 1,
+    "period_ms": 2000,
+    "pulse_ms": 70
+  },
+
+  "quote": {
+    "_说明": "行情页标的。kind 只影响页面分组：index=指数，fx=汇率；code 用新浪行情代码",
+    "on": true,
+    "ttl_ms": 600000,
+    "items": [
+      { "code": "sh000001", "name": "上证指数", "kind": "index" },
+      { "code": "sz399001", "name": "深证成指", "kind": "index" },
+      { "code": "sz399006", "name": "创业板指", "kind": "index" },
+      { "code": "fx_susdcny", "name": "美元 / 人民币", "kind": "fx" },
+      { "code": "fx_seurcny", "name": "欧元 / 人民币", "kind": "fx" },
+      { "code": "fx_shkdcny", "name": "港元 / 人民币", "kind": "fx" }
+    ]
+  }
+}
