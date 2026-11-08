@@ -983,24 +983,46 @@ var LV_COLOR = ["#8b949e", "#1f6feb", "#b8860b", "#e07000", "#d1242f"];
 var LV_NAME = { minor: "蓝色", moderate: "黄色", severe: "橙色", extreme: "红色",
                 blue: "蓝色", yellow: "黄色", orange: "橙色", red: "红色" };
 
+/* 上游可能给四种形状，统一摊平成列表再归一化：
+   裸数组 / {alerts:[...]} / {warning:[...]} / {warning:{alerts:[...]}}
+   少认一种就会把预警整段丢光，页面显示成「无生效预警」。 */
+function alertList(w) {
+  if (!w) return [];
+  if (Array.isArray(w)) return w;
+  if (Array.isArray(w.alerts)) return w.alerts;
+  if (Array.isArray(w.warning)) return w.warning;
+  if (w.warning && Array.isArray(w.warning.alerts)) return w.warning.alerts;
+  if (w.warning && Array.isArray(w.warning.warning)) return w.warning.warning;
+  return [];
+}
+
+/* color 可能是对象 {code:"blue"}，也可能直接是字符串 "Blue"，都要认 */
+function colorKey(a) {
+  var c = a.color;
+  if (c && typeof c === "object") return String(c.code || "").toLowerCase();
+  return String(c || "").toLowerCase();
+}
+
 function normAlerts(w) {
-  var al = (w && w.alerts) || [];
-  return al.map(function (a) {
-    var sev = String(a.severity || "").toLowerCase();
-    var col = (a.color && a.color.code) ? String(a.color.code).toLowerCase() : "";
+  return alertList(w).map(function (a) {
+    var sev = String(a.severity || a.level || "").toLowerCase();
+    var col = colorKey(a);
+    /* 颜色码优先，其次才是 severity；两者都认不出才退到 2（黄色） */
     var lv = LV[col] != null ? LV[col] : (LV[sev] != null ? LV[sev] : 2);
     var ev = a.eventType;
-    var typeName = (ev && ev.name) ? ev.name : (a.eventName || "");
+    var typeName = (ev && ev.name) ? ev.name
+                 : (typeof ev === "string" ? ev : (a.eventName || a.typeName || ""));
     var head = a.headline || a.title || "";
     return {
       lv: lv,
-      lvName: LV_NAME[col] || LV_NAME[sev] || "预警",
+      lvName: a.severityColor || a.colorName ||
+              LV_NAME[col] || LV_NAME[sev] || "预警",
       title: head || (typeName ? typeName + "预警" : "气象预警"),
       text: a.description || a.text || a.instruction || "",
       typeName: typeName,
-      pub: (a.issuedTime || a.issueTime || "").replace("T", " ").substr(0, 16),
-      start: (a.onsetTime || a.effectiveTime || "").replace("T", " ").substr(0, 16),
-      end: (a.expireTime || "").replace("T", " ").substr(0, 16)
+      pub: (a.issuedTime || a.issueTime || a.pubTime || "").replace("T", " ").substr(0, 16),
+      start: (a.onsetTime || a.effectiveTime || a.startTime || "").replace("T", " ").substr(0, 16),
+      end: (a.expireTime || a.endTime || "").replace("T", " ").substr(0, 16)
     };
   });
 }
