@@ -1,0 +1,116 @@
+#!/bin/sh
+# 地震数据代理 CGI — 30 分钟缓存 + 单飞锁
+#   数据源 cn.apihz.cn（转发中国地震台网），免费版只限制每分钟调用次数
+#   ?a=list      最近 30 条，原样透传上游 JSON（由页面解析）
+#   ?a=cache     缓存状态
+#   ?a=flush     清缓存
+#
+# 凭据放在 /data/iptv/etc/quake.conf（chmod 600）：
+#   Q_ID=你的数字ID
+#   Q_KEY=你的KEY
+
+CONF=${QUAKE_CONF:-/data/iptv/etc/quake.conf}
+CACHE=${QUAKE_CACHE:-/tmp/quake_cache.json}
+CACHE_TS=$CACHE.ts
+LOCK=/tmp/quake.lock
+TTL=1800
+Q_ID=""
+Q_KEY=""
+[ -f "$CONF" ] && . "$CONF"
+
+hdr() {
+  printf 'Content-Type: application/json; charset=utf-8\r\n'
+  printf 'Cache-Control: no-store\r\n\r\n'
+}
+getp() {
+  printf '%s' "$QUERY_STRING" | tr '&' '\n' | grep "^$1=" | head -1 | cut -d= -f2- \
+    | sed 's/+/ /g'
+}
+
+fetch() {
+  curl -s -m 15 -H 'User-Agent: ra81-iptv' \
+    "https://cn.apihz.cn/api/tianqi/dizhen.php?id=$Q_ID&key=$Q_KEY" 2>/dev/null
+}
+
+fresh() {
+  [ -s "$CACHE" ] && [ -f "$CACHE_TS" ] || return 1
+  now=$(date +%s)
+  ts=$(cat "$CACHE_TS" 2>/dev/null || echo 0)
+  [ $((now - ts)) -lt "$TTL" ]
+}
+
+wait_cache() {
+  n=0
+  while [ $n -lt 3 ]; do
+    [ -s "$CACHE" ] && return 0
+    sleep 1
+    n=$((n + 1))
+  done
+  [ -s "$CACHE" ]
+}
+
+case "$(getp a)" in
+  cache)
+    hdr
+    if [ -s "$CACHE" ]; then
+      printf '{"ok":1,"bytes":%s,"age":%s,"ttl":%s,"conf":%s}\n' \
+        "$(wc -c < "$CACHE" | tr -d ' ')" \
+        "$(( $(date +%s) - $(cat "$CACHE_TS" 2>/dev/null || echo 0) ))" \
+        "$TTL" "$([ -n "$Q_KEY" ] && echo true || echo false)"
+    else
+      printf '{"ok":1,"bytes":0,"ttl":%s,"conf":%s}\n' \
+        "$TTL" "$([ -n "$Q_KEY" ] && echo true || echo false)"
+    fi
+    ;;
+  flush)
+    rm -f "$CACHE" "$CACHE_TS"
+    rmdir "$LOCK" 2>/dev/null
+    hdr
+    printf '{"ok":1,"msg":"缓存已清"}\n'
+    ;;
+  *)
+    if [ -z "$Q_ID" ] || [ -z "$Q_KEY" ]; then
+      hdr
+      printf '{"code":400,"msg":"未配置凭据，见 /data/iptv/etc/quake.conf"}\n'
+      exit 0
+    fi
+    if fresh; then
+      hdr
+      cat "$CACHE"
+      exit 0
+    fi
+    if mkdir "$LOCK" 2>/dev/null; then
+      trap 'rmdir "$LOCK" 2>/dev/null' EXIT INT TERM
+      body=$(fetch)
+      # 上游是格式化过的 JSON（"code": 200 带空格），先把空白压掉再判断，
+      # 否则永远匹配不上，缓存也就永远写不进去
+      flat=$(printf '%s' "$body" | tr -d ' \t\r\n')
+      case "$flat" in
+        *'"code":200'*)
+          printf '%s' "$body" > "$CACHE.tmp" && mv -f "$CACHE.tmp" "$CACHE"
+          date +%s > "$CACHE_TS"
+          hdr
+          printf '%s' "$body"
+          exit 0
+          ;;
+      esac
+      # 频次超限 / 网络失败：有旧数据就继续给旧的
+      hdr
+      if [ -s "$CACHE" ]; then
+        cat "$CACHE"
+      elif [ -n "$body" ]; then
+        printf '%s' "$body"
+      else
+        printf '{"code":-1,"msg":"上游取数失败"}\n'
+      fi
+    else
+      if wait_cache; then
+        hdr
+        cat "$CACHE"
+      else
+        hdr
+        printf '{"code":-2,"msg":"上游正在取数，请稍后刷新"}\n'
+      fi
+    fi
+    ;;
+esac

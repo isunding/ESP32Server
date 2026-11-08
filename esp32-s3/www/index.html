@@ -376,6 +376,8 @@ var MR = (function () {
     { href: "/", title: "首页" },
     { href: "/weather.html", title: "天气" },
     { href: "/market.html", title: "行情" },
+    { href: "/news.html", title: "财联社" },
+    { href: "/quake.html", title: "地震" },
     { href: "/radio.html", title: "电台" },
     { href: "/info.html", title: "本机" },
     { href: "/ntp.html", title: "NTP" },
@@ -525,18 +527,23 @@ var ICONS = {
   market: '<svg viewBox="0 0 24 24"><path d="M3 16l5-6 4 3 6-8"/><path d="M3 21h18"/></svg>',
   radio: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="2.5"/><path d="M7.5 7.5a6.4 6.4 0 0 0 0 9M16.5 7.5a6.4 6.4 0 0 1 0 9"/><path d="M4.5 4.5a10.6 10.6 0 0 0 0 15M19.5 4.5a10.6 10.6 0 0 1 0 15"/></svg>',
   ntp: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2"/></svg>',
-  iptv: '<svg viewBox="0 0 24 24"><rect x="3" y="7" width="18" height="12" rx="2"/><path d="M8 3l4 4 4-4"/></svg>'
+  iptv: '<svg viewBox="0 0 24 24"><rect x="3" y="7" width="18" height="12" rx="2"/><path d="M8 3l4 4 4-4"/></svg>',
+  news: '<svg viewBox="0 0 24 24"><rect x="3" y="5" width="13" height="14" rx="2"/><path d="M16 9h3a2 2 0 0 1 2 2v6a2 2 0 0 1-2 2h-3"/><path d="M6.5 9.5h6M6.5 13h6M6.5 16.5h4"/></svg>',
+  quake: '<svg viewBox="0 0 24 24"><path d="M2 12h3.5l2-6 3 12 3-9 2 3H22"/></svg>'
 };
 
 /* 顺序按「功能相近、左右成对」排：网格是 2 列（760px 容器、minmax 240px），
    所以数组里每两个相邻项就是视觉上的一行：
      天气 · 行情   —— 每天要看的实时数据看板
+     财联社 · 地震 —— 资讯流（一条一条往下滚的）
      IPTV · 电台   —— 音视频娱乐，都是浏览器直连取流
      本机 · NTP    —— 设备与网络 / 时间（NTP 页里也有农历节气）
    手机单列时按同一顺序纵向排列，相邻的仍然是同一类。 */
 var TILES = [
   { key: "weather", href: "/weather.html", title: "天气", sub: "实况 · 24 小时 · 7 天 · 空气" },
   { key: "market", href: "/market.html", title: "行情", sub: "指数 · 汇率 · 自选股" },
+  { key: "news", href: "/news.html", title: "财联社", sub: "电报 · 重要度 · 主题 · 加自选" },
+  { key: "quake", href: "/quake.html", title: "地震", sub: "近 7 天 · 震级 · 位置" },
   { key: "iptv", href: "/iptv.html", title: "IPTV", sub: "频道列表 · 网页播放" },
   { key: "radio", href: "/radio.html", title: "电台", sub: "网络收音机 · 浏览器直连" },
   { key: "info", href: "/info.html", title: "本机", sub: "固件 · 内存 · Flash · 文件" },

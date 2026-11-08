@@ -1,0 +1,226 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>财联社电报 · ESP32 终端服务器</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="/theme.css?v=20261108b">
+<style>
+  .chips{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px}
+  .chips button{font-size:12px;padding:4px 10px;border-radius:999px;cursor:pointer;
+    border:1px solid var(--line);background:var(--bg3);color:var(--fg2);font-family:inherit}
+  .chips button.on{border-color:var(--acc);color:var(--acc);background:rgba(255,106,0,.12)}
+  .chips .lbl{font-size:11.5px;color:var(--fg2);align-self:center;margin-right:2px}
+
+  .it{padding:11px 0;border-top:1px solid var(--line)}
+  .it:first-child{border-top:0}
+  .it .h{display:flex;align-items:baseline;gap:8px}
+  .it .t{font-size:11.5px;color:var(--fg2);font-variant-numeric:tabular-nums}
+  .it .lv{font-size:10.5px;border-radius:5px;padding:1px 5px;flex:0 0 auto}
+  .lv.A{background:rgba(230,60,60,.16);color:#e23c3c}
+  .lv.B{background:rgba(240,160,40,.16);color:#d98a1a}
+  .lv.C{background:var(--bg3);color:var(--fg2)}
+  .it .bd{margin:5px 0 0;font-size:13.5px;line-height:1.6;white-space:pre-wrap;
+    display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+  .it.open .bd{-webkit-line-clamp:unset;display:block}
+  .it .ft{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px;align-items:center}
+  .tag{font-size:11px;color:var(--fg2);border:1px solid var(--line);
+    border-radius:999px;padding:1px 7px}
+  .stk{font-size:11px;border:1px solid var(--line);border-radius:999px;
+    padding:1px 7px;cursor:pointer;background:var(--bg2);color:var(--fg2);font-family:inherit}
+  .stk.added{border-color:var(--ok);color:var(--ok)}
+  .empty{padding:20px 0;text-align:center}
+</style>
+</head>
+<body>
+
+<div id="topbar"></div>
+
+<div class="wrap">
+  <div class="pgtop">
+    <span class="upd" id="updAt">加载中…</span>
+    <button class="btn" id="btnRefresh"><span class="ic">↻</span>刷新</button>
+  </div>
+
+  <div class="chips" id="lvChips">
+    <span class="lbl">等级</span>
+    <button data-lv="" class="on">全部</button>
+    <button data-lv="A">重要 A</button>
+    <button data-lv="B">一般 B</button>
+    <button data-lv="C">普通 C</button>
+  </div>
+  <div class="chips" id="subChips"><span class="lbl">主题</span></div>
+
+  <div class="card">
+    <div id="list"><div class="skel"></div><div class="skel"></div><div class="skel"></div></div>
+  </div>
+
+  <p class="foot">
+    数据经路由器转发的财联社电报，本地按天存 CSV、只留 7 天。
+    点条目展开全文，点股票代码可加入自选（行情页可见）。
+  </p>
+</div>
+
+<script src="/ui.js?v=20261108b"></script>
+<script>
+"use strict";
+MR.mountTop("财联社电报");
+
+var $ = MR.$, esc = MR.esc;
+var ALL = [];            // [{key,ctime,lv,subj,stk,title,text,subjects[]}]
+var LV = "", SUB = "";
+
+/* CSV 行拆字段：字段可能用双引号包裹，里面的逗号不算分隔符 */
+function csvLine(s) {
+  var out = [], cur = "", q = false, i, c;
+  for (i = 0; i < s.length; i++) {
+    c = s.charAt(i);
+    if (q) {
+      if (c === '"') {
+        if (s.charAt(i + 1) === '"') { cur += '"'; i++; }
+        else q = false;
+      } else cur += c;
+    } else if (c === '"') {
+      q = true;
+    } else if (c === ",") {
+      out.push(cur); cur = "";
+    } else cur += c;
+  }
+  out.push(cur);
+  return out;
+}
+
+function pad2(n) { return n < 10 ? "0" + n : "" + n; }
+function hhmm(ts) {
+  var d = new Date(ts * 1000);
+  return pad2(d.getMonth() + 1) + "-" + pad2(d.getDate()) + " " +
+    pad2(d.getHours()) + ":" + pad2(d.getMinutes());
+}
+
+/* 猜交易所前缀：6→sh，0/3→sz，4/8→bj */
+function mkt(code) {
+  var c = String(code || "");
+  if (/^6/.test(c)) return "sh" + c;
+  if (/^[03]/.test(c)) return "sz" + c;
+  if (/^[48]/.test(c)) return "bj" + c;
+  return c;
+}
+
+function render() {
+  var items = ALL.filter(function (x) {
+    if (LV && x.lv !== LV) return false;
+    if (SUB && x.subjects.indexOf(SUB) < 0) return false;
+    return true;
+  });
+  if (!items.length) {
+    $("list").innerHTML = '<div class="empty muted small">' +
+      (ALL.length ? "没有符合筛选条件的电报" : "暂无数据，稍后自动刷新") + "</div>";
+    return;
+  }
+  $("list").innerHTML = items.map(function (x) {
+    var stk = "";
+    if (x.stk) {
+      stk = x.stk.split(" ").filter(Boolean).map(function (s) {
+        var code = s.replace(/[^0-9]/g, ""), name = s.replace(/[0-9]/g, "");
+        return '<button class="stk" data-code="' + esc(code) + '">' +
+          esc(name || code) + " " + esc(code) + "</button>";
+      }).join("");
+    }
+    return '<div class="it" data-k="' + esc(x.key) + '">' +
+      '<div class="h"><span class="t">' + hhmm(x.ctime) + "</span>" +
+      '<span class="lv ' + esc(x.lv || "C") + '">' + esc(x.lv || "C") + "</span></div>" +
+      '<div class="bd">' + esc(x.text || "") + "</div>" +
+      '<div class="ft">' + x.subjects.map(function (s) {
+        return '<span class="tag">' + esc(s) + "</span>";
+      }).join("") + stk + "</div></div>";
+  }).join("");
+}
+
+function subChips() {
+  var cnt = {}, i;
+  for (i = 0; i < ALL.length; i++) {
+    ALL[i].subjects.forEach(function (s) { cnt[s] = (cnt[s] || 0) + 1; });
+  }
+  var names = Object.keys(cnt).sort(function (a, b) { return cnt[b] - cnt[a]; }).slice(0, 6);
+  $("subChips").innerHTML = '<span class="lbl">主题</span><button data-sub="" class="on">不限</button>' +
+    names.map(function (s) {
+      return '<button data-sub="' + esc(s) + '">' + esc(s) + "</button>";
+    }).join("");
+}
+
+function load(force) {
+  var b = $("btnRefresh");
+  b.disabled = true;
+  return MR.api("/api/news" + (force ? "?force=1" : "")).then(function (d) {
+    if (!d.ok) {
+      $("updAt").textContent = d.msg || "准备中…";
+      setTimeout(function () { load(true); }, 4000);
+      return;
+    }
+    var rows = d.rows || [];
+    ALL = rows.map(function (line) {
+      var f = csvLine(line);
+      return {
+        key: f[0], ctime: Number(f[1]) || 0, lv: f[2] || "C",
+        subjects: String(f[3] || "").split(" ").filter(Boolean),
+        stk: f[4] || "", title: f[5] || "", text: f[6] || f[5] || ""
+      };
+    }).sort(function (a, b) { return b.ctime - a.ctime; });
+    $("updAt").textContent = "更新于 " + (ALL.length ? hhmm(ALL[0].ctime) : "—") +
+      " · 共 " + ALL.length + " 条";
+    subChips();
+    render();
+  }).catch(function () {
+    $("updAt").textContent = "读取失败";
+    $("list").innerHTML = '<div class="empty muted small">接口无响应，点刷新重试</div>';
+  }).then(function () { b.disabled = false; });
+}
+
+/* 交互：等级 / 主题 / 展开 / 加自选 */
+$("lvChips").addEventListener("click", function (e) {
+  var t = e.target;
+  if (t.tagName !== "BUTTON") return;
+  LV = t.getAttribute("data-lv") || "";
+  [].forEach.call(this.querySelectorAll("button"), function (b) { b.className = ""; });
+  t.className = "on";
+  render();
+});
+
+$("subChips").addEventListener("click", function (e) {
+  var t = e.target;
+  if (t.tagName !== "BUTTON") return;
+  SUB = t.getAttribute("data-sub") || "";
+  [].forEach.call(this.querySelectorAll("button"), function (b) { b.className = ""; });
+  t.className = "on";
+  render();
+});
+
+$("list").addEventListener("click", function (e) {
+  var btn = e.target.closest ? e.target.closest(".stk") : null;
+  if (btn) {
+    e.stopPropagation();
+    var code = mkt(btn.getAttribute("data-code"));
+    fetch("/api/watch", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ op: "add", code: code })
+    }).then(function (r) { return r.json(); }).then(function (r) {
+      if (r.ok) { btn.className = "stk added"; MR.toast("已加入自选 " + code); }
+      else MR.toast(r.msg || "加入失败");
+    }).catch(function () { MR.toast("请求失败"); });
+    return;
+  }
+  var it = e.target.closest ? e.target.closest(".it") : null;
+  if (it) it.classList.toggle("open");
+});
+
+$("btnRefresh").addEventListener("click", function () {
+  $("updAt").textContent = "刷新中…";
+  load(true);
+});
+
+load(false);
+setInterval(function () { load(true); }, 300000);   // 5 分钟自动刷
+</script>
+</body>
+</html>

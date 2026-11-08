@@ -9,6 +9,7 @@
 
 import gc
 import json
+import os
 import time
 import machine
 
@@ -130,7 +131,10 @@ DEFAULT_CFG = {
         "ap_ssid": "ESP32-Setup",
         "ap_pass": "esp32setup123",
     },
-    "router": {"host": "10.0.0.1", "port": 80, "r2h_port": 5140, "udpxy_port": 12123},
+    "router": {"host": "10.0.0.1", "port": 80, "r2h_port": 5140, "udpxy_port": 12123,
+               # 路由器 uhttpd 自己的端口。nginx 只对白名单里的 /cgi-bin/xxx 做了
+               # 反代，新加 CGI 不想动 nginx 就走这个口直连
+               "aux_port": 8088},
     "ntp": {
         "upstream": ["ntp.aliyun.com", "ntp.tencent.com", "cn.pool.ntp.org"],
         "sync_ms": 1800000,   # 30 分钟同步一次
@@ -138,7 +142,7 @@ DEFAULT_CFG = {
     },
     # 只留「缓存 TTL」：数据多久算过期。没有任何周期性后台采集了。
     "poll": {"weather_ms": 600000, "weatherhist_ms": 43200000,
-             "channels_ms": 300000},
+             "channels_ms": 300000, "news_ms": 300000, "quake_ms": 10800000},
     # 板载蓝灯：启动时常亮，就绪后按此节奏心跳（0 = 关闭，就绪后熄灭）
     "led": {"on": 0, "period_ms": 2000, "pulse_ms": 70},
     # 空闲降频：连续 idle_after_s 秒没有任何 HTTP 请求就把 CPU 降到 idle_mhz，
@@ -172,6 +176,8 @@ P_WHIST = "/cgi-bin/weatherhist?a=history"
 P_CHANNELS = "/cgi-bin/iptv?a=list"
 P_SVC = "/cgi-bin/svcstat?port=%d"
 P_NTP = "/cgi-bin/ntpctl?a=status"
+P_NEWS = "/cgi-bin/news?a=list"
+P_QUAKE = "/cgi-bin/quake?a=list"
 
 WEATHER_FILE = "weather.json"   # 天气太大，落盘后由 HTTP 层流式吐出
 WHIST_FILE = "whist.json"        # 过去 7 天历史（约 34KB），同样落盘
@@ -187,6 +193,41 @@ DEFAULT_WATCH = [
     {"code": "sh600036", "name": "招商银行"},
 ]
 PM_LOG_MAX = 24   # 休眠区间最多留 24 条（每次降频一条，占不了几百字节）
+
+# ---- 新闻 / 地震的本地缓存 ----
+# 每天一个 CSV，增量追加，只留最近 7 天（第 8 天早上把最老的删掉）。
+# 第一列是去重键，并且保证不含逗号 —— 重启后靠它从当天文件里恢复已收录集合。
+# 涨跌/地震这类数据一天几十上百条，7 天全量也就几百 KB。
+CSV_KEEP_DAYS = 7
+NEWS_ROWS_MAX = 120     # 一次最多吐多少条给页面（约 30KB 响应，和天气页一个量级）
+QUAKE_ROWS_MAX = 120
+
+
+def _csv_q(s):
+    """CSV 字段：去掉换行、引号翻倍、整体加引号。反正是给自家页面读的。"""
+    s = str(s or "").replace("\r", " ").replace("\n", " ")
+    return '"' + s.replace('"', '""') + '"'
+
+
+def _ymd(back=0):
+    """本地日期 YYYYMMDD，back 为往前推的天数"""
+    t = time.localtime(time.time() - back * 86400)
+    return "%04d%02d%02d" % (t[0], t[1], t[2])
+
+
+def _csv_prune(prefix):
+    """删掉 7 天之前的日文件。目录里就几十个文件，直接扫。"""
+    keep = set("%s-%s.csv" % (prefix, _ymd(i)) for i in range(CSV_KEEP_DAYS))
+    try:
+        for name in os.listdir():
+            if (name.startswith(prefix + "-") and name.endswith(".csv")
+                    and name not in keep):
+                try:
+                    os.remove(name)
+                except OSError:
+                    pass
+    except OSError:
+        pass
 
 
 def load_watch():
@@ -380,6 +421,12 @@ class App:
         # 没有这个回调时，一次 1.2 秒的 CGI 会把别的请求整段卡住（实测 1.63s）。
         self.api = rap.RouterAPI(r["host"], r["port"],
                                  yield_cb=lambda: self.web.poll(1))
+        # 新闻／地震的 CGI 走 uhttpd 端口直连：nginx 只反代了白名单里的
+        # /cgi-bin/xxx，加新 CGI 不想改它。超时放宽到 8 秒 —— 冷缓存时
+        # 路由器要现去 HTTPS 上游取数，实测 0.5~3 秒。
+        self.api_aux = rap.RouterAPI(r["host"], r.get("aux_port", 8088),
+                                     timeout=8.0,
+                                     yield_cb=lambda: self.web.poll(1))
         self.web = httpsrv.HttpSrv(80)
 
         self.status = None
@@ -406,6 +453,16 @@ class App:
         self.watch = load_watch()   # 自选股（列表 + 行情各一份缓存）
         self.watch_quotes = None
         self.watch_ts = 0
+
+        # 新闻 / 地震：只在有人看页面且过期时才取，取回增量追加到当天 CSV
+        self.news_due = False
+        self.news_ts = 0
+        self.news_fail_ts = 0
+        self.news_ids = set()
+        self.quake_due = False
+        self.quake_ts = 0
+        self.quake_fail_ts = 0
+        self.quake_ids = set()
 
         self.t_wifi = 0
         self.reboot_at = 0
@@ -545,6 +602,8 @@ class App:
         w.serve_file("/market.html", "www/market.html")
         w.serve_file("/ntp.html", "www/ntp.html")
         w.serve_file("/iptv.html", "www/iptv.html")
+        w.serve_file("/news.html", "www/news.html")
+        w.serve_file("/quake.html", "www/quake.html")
         # 资源
         w.serve_file("/theme.css", "www/theme.css")
         w.serve_file("/ui.js", "www/ui.js")
@@ -565,6 +624,8 @@ class App:
         w.route("POST", "/api/watch", self.h_watch_action)
         w.route("POST", "/api/ntp", self.h_ntp_action)
         w.route("GET", "/api/config", self.h_get_cfg)
+        w.route("GET", "/api/news", self.h_news)
+        w.route("GET", "/api/quake", self.h_quake)
         w.route("POST", "/api/config", self.h_set_cfg)
 
     def poll_services(self):
@@ -1158,6 +1219,160 @@ class App:
         self.reboot_at = time.ticks_ms()
         return httpsrv.json_resp({"ok": 1, "msg": "已保存，设备即将重启", "reboot": 1})
 
+    # ---------------- 新闻 / 地震（CSV 日文件） ----------------
+    def _daily_ids(self, prefix):
+        """重启后从当天、昨天的日文件里恢复去重键（第一列，保证无逗号）"""
+        ids = set()
+        for back in (0, 1):
+            fn = "%s-%s.csv" % (prefix, _ymd(back))
+            if not self._file_ok(fn):
+                continue
+            try:
+                with open(fn) as f:
+                    for line in f:
+                        k = line.split(",", 1)[0].strip()
+                        if k:
+                            ids.add(k)
+            except OSError:
+                pass
+        return ids
+
+    def _h_daily(self, prefix, ttl_key, cap, force=False):
+        """把最近几天的 CSV 行原样拼成 JSON 吐给页面。
+
+        行是 CSV 原文（字段可能带引号），页面自己按引号规则拆 —— 这样板子
+        不用二次编码，也省一份内存。只吐前 cap 行，避免单次响应过大。
+        """
+        ttl = self.cfg["poll"].get(ttl_key, 300000)
+        ts = getattr(self, prefix + "_ts")
+        if force:
+            setattr(self, prefix + "_due", True)
+        if not ts or time.ticks_diff(time.ticks_ms(), ts) >= ttl:
+            fail = getattr(self, prefix + "_fail_ts")
+            if not fail or time.ticks_diff(time.ticks_ms(), fail) >= 60000:
+                setattr(self, prefix + "_due", True)
+        rows = []
+        for back in range(CSV_KEEP_DAYS):
+            fn = "%s-%s.csv" % (prefix, _ymd(back))
+            if not self._file_ok(fn):
+                continue
+            try:
+                with open(fn) as f:
+                    for line in f:
+                        line = line.strip()
+                        if line:
+                            rows.append(line)
+            except OSError:
+                pass
+            if len(rows) >= cap:
+                break
+        if not rows:
+            return httpsrv.json_resp({"ok": 0, "pending": 1,
+                                      "msg": "正在取数，几秒后自动刷新"})
+        return httpsrv.json_resp({"ok": 1, "rows": rows[:cap]})
+
+    def h_news(self, req):
+        return self._h_daily("news", "news_ms", NEWS_ROWS_MAX,
+                             req.arg("force") == "1")
+
+    def h_quake(self, req):
+        return self._h_daily("quake", "quake_ms", QUAKE_ROWS_MAX,
+                             req.arg("force") == "1")
+
+    def refresh_news(self):
+        """财联社电报：取 20 条，按 id 去重后追加到当天 CSV。"""
+        self.news_due = False
+        t0 = time.ticks_ms()
+        try:
+            d = self.api_aux.get_json(P_NEWS, 65536)
+        except Exception as e:
+            print("[news]", e)
+            self.news_fail_ts = time.ticks_ms()
+            return False
+        rd = ((d or {}).get("data") or {}).get("roll_data") or []
+        if not rd:
+            self.news_fail_ts = time.ticks_ms()
+            return False
+        if not self.news_ids:
+            self.news_ids = self._daily_ids("news")
+        fn = "news-%s.csv" % _ymd()
+        added = 0
+        try:
+            with open(fn, "a") as f:
+                for n in rd:
+                    nid = n.get("id")
+                    if nid is None:
+                        continue
+                    k = str(nid)
+                    if k in self.news_ids:
+                        continue
+                    self.news_ids.add(k)
+                    subj = " ".join((s.get("subject_name") or "")
+                                    for s in (n.get("subjects") or [])[:2])
+                    stk = " ".join(((s.get("StockID") or s.get("stock_id") or "")
+                                    + (s.get("name") or ""))
+                                   for s in (n.get("stock_list") or [])[:3])
+                    f.write("%s,%s,%s,%s,%s,%s,%s\n" % (
+                        k, n.get("ctime") or 0, n.get("level") or "",
+                        _csv_q(subj), _csv_q(stk),
+                        _csv_q(n.get("title") or n.get("brief") or ""),
+                        _csv_q((n.get("content") or "")[:400])))
+                    added += 1
+        except OSError as e:
+            print("[news] write", e)
+            self.news_fail_ts = time.ticks_ms()
+            return False
+        self.news_ts = time.ticks_ms()
+        _csv_prune("news")
+        print("[news] +%d 条 共%d %dms" % (added, len(self.news_ids),
+                                          time.ticks_diff(self.news_ts, t0)))
+        return True
+
+    def refresh_quake(self):
+        """地震：取最近 30 条，按「时间_震级」去重后追加到当天 CSV。"""
+        self.quake_due = False
+        t0 = time.ticks_ms()
+        try:
+            d = self.api_aux.get_json(P_QUAKE, 32768)
+        except Exception as e:
+            print("[quake]", e)
+            self.quake_fail_ts = time.ticks_ms()
+            return False
+        rows = (d or {}).get("data") or []
+        if not rows:
+            self.quake_fail_ts = time.ticks_ms()
+            return False
+        if not self.quake_ids:
+            self.quake_ids = self._daily_ids("quake")
+        fn = "quake-%s.csv" % _ymd()
+        added = 0
+        try:
+            with open(fn, "a") as f:
+                for n in rows:
+                    addtime = str(n.get("addtime") or "")
+                    leve = str(n.get("leve") or "")
+                    if not addtime:
+                        continue
+                    k = addtime.replace(" ", "_").replace(":", "") + "_" + leve
+                    if k in self.quake_ids:
+                        continue
+                    self.quake_ids.add(k)
+                    f.write("%s,%s,%s,%s,%s,%s,%s\n" % (
+                        k, leve, _csv_q(addtime),
+                        _csv_q(n.get("weizhi") or ""),
+                        n.get("shendu") or "", n.get("weidu") or "",
+                        n.get("jingdu") or ""))
+                    added += 1
+        except OSError as e:
+            print("[quake] write", e)
+            self.quake_fail_ts = time.ticks_ms()
+            return False
+        self.quake_ts = time.ticks_ms()
+        _csv_prune("quake")
+        print("[quake] +%d 条 共%d %dms" % (added, len(self.quake_ids),
+                                           time.ticks_diff(self.quake_ts, t0)))
+        return True
+
     # ---------------- 空闲降频 ----------------
     def _set_freq(self, hz):
         """切换 CPU 频率。切不动就永久关掉这个功能，不要每轮刷日志。"""
@@ -1284,6 +1499,10 @@ class App:
             if self.svc_due:
                 self.svc_due = False
                 self.poll_services()
+            if self.news_due:
+                self.refresh_news()
+            if self.quake_due:
+                self.refresh_quake()
 
             if time.ticks_diff(now, self.t_wifi) >= 30000:
                 self.t_wifi = now

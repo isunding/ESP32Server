@@ -1,0 +1,129 @@
+#!/bin/sh
+# 财联社电报代理 CGI — 5 分钟缓存 + 单飞锁
+#   ?a=list      最近一页（20 条），原样透传上游 JSON（由页面解析）
+#   ?a=cache     缓存状态（调试用）
+#   ?a=flush     清缓存
+#
+# 签名规则（与财联社 web 端一致）：
+#   参数按 key 字典序拼成 k=v&k=v（含空值 category=），
+#   先 sha1 取十六进制串，再对该字符串做 md5。错一个字节就是 errno=10012。
+#
+# 注意：接口已从 nodeapi/telegraphList 迁到 v1/roll/get_roll_list，
+# 旧路径现在返回 404。
+
+CACHE=${NEWS_CACHE:-/tmp/news_cache.json}
+CACHE_TS=$CACHE.ts
+LOCK=/tmp/news.lock
+TTL=300
+SV=8.4.6
+UA='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'
+
+hdr() {
+  printf 'Content-Type: application/json; charset=utf-8\r\n'
+  printf 'Cache-Control: no-store\r\n\r\n'
+}
+getp() {
+  printf '%s' "$QUERY_STRING" | tr '&' '\n' | grep "^$1=" | head -1 | cut -d= -f2- \
+    | sed 's/+/ /g'
+}
+
+# 路由器上没有 sha1sum（busybox 只编了 md5sum），退回 openssl。
+# 两个都要能出「裸十六进制小写串」，格式不同所以分别 strip。
+sha1_hex() {
+  if command -v sha1sum >/dev/null 2>&1; then
+    printf '%s' "$1" | sha1sum | cut -d' ' -f1
+  else
+    printf '%s' "$1" | openssl dgst -sha1 | sed 's/.*= *//'
+  fi
+}
+md5_hex() {
+  if command -v md5sum >/dev/null 2>&1; then
+    printf '%s' "$1" | md5sum | cut -d' ' -f1
+  else
+    printf '%s' "$1" | openssl dgst -md5 | sed 's/.*= *//'
+  fi
+}
+
+fetch() {
+  # 参数顺序必须与下面拼的字符串完全一致（字典序）
+  q="app=CailianpressWeb&category=&last_time=$(date +%s)&os=web&refresh_type=1&rn=20&sv=$SV"
+  sign=$(md5_hex "$(sha1_hex "$q")")
+  curl -s -m 15 \
+    -H "User-Agent: $UA" \
+    -H 'Referer: https://www.cls.cn/telegraph' \
+    -H 'Accept: application/json, text/plain, */*' \
+    "https://www.cls.cn/v1/roll/get_roll_list?$q&sign=$sign" 2>/dev/null
+}
+
+fresh() {
+  [ -s "$CACHE" ] && [ -f "$CACHE_TS" ] || return 1
+  now=$(date +%s)
+  ts=$(cat "$CACHE_TS" 2>/dev/null || echo 0)
+  [ $((now - ts)) -lt "$TTL" ]
+}
+
+# 别的进程正在取数时，最多等 3 秒看缓存能不能出来
+wait_cache() {
+  n=0
+  while [ $n -lt 3 ]; do
+    [ -s "$CACHE" ] && return 0
+    sleep 1
+    n=$((n + 1))
+  done
+  [ -s "$CACHE" ]
+}
+
+case "$(getp a)" in
+  cache)
+    hdr
+    if [ -s "$CACHE" ]; then
+      printf '{"ok":1,"bytes":%s,"age":%s,"ttl":%s}\n' \
+        "$(wc -c < "$CACHE" | tr -d ' ')" \
+        "$(( $(date +%s) - $(cat "$CACHE_TS" 2>/dev/null || echo 0) ))" "$TTL"
+    else
+      printf '{"ok":1,"bytes":0,"ttl":%s}\n' "$TTL"
+    fi
+    ;;
+  flush)
+    rm -f "$CACHE" "$CACHE_TS"
+    rmdir "$LOCK" 2>/dev/null
+    hdr
+    printf '{"ok":1,"msg":"缓存已清"}\n'
+    ;;
+  *)
+    if fresh; then
+      hdr
+      cat "$CACHE"
+      exit 0
+    fi
+    # 单飞：同一时刻只放一个进程去打上游，避免并发时堆一堆 curl
+    if mkdir "$LOCK" 2>/dev/null; then
+      trap 'rmdir "$LOCK" 2>/dev/null' EXIT INT TERM
+      body=$(fetch)
+      case "$body" in
+        *'"errno":0'*)
+          printf '%s' "$body" > "$CACHE.tmp" && mv -f "$CACHE.tmp" "$CACHE"
+          date +%s > "$CACHE_TS"
+          hdr
+          printf '%s' "$body"
+          exit 0
+          ;;
+      esac
+      # 上游变了 / 被拦 / 签名失效：有旧缓存就吐旧的，别让页面空白
+      hdr
+      if [ -s "$CACHE" ]; then
+        cat "$CACHE"
+      else
+        printf '{"errno":-1,"msg":"上游取数失败"}\n'
+      fi
+    else
+      if wait_cache; then
+        hdr
+        cat "$CACHE"
+      else
+        hdr
+        printf '{"errno":-2,"msg":"上游正在取数，请稍后刷新"}\n'
+      fi
+    fi
+    ;;
+esac
