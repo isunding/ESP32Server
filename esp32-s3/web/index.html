@@ -114,14 +114,14 @@ var ICONS = {
 /* 顺序按「功能相近、左右成对」排：网格是 2 列（760px 容器、minmax 240px），
    所以数组里每两个相邻项就是视觉上的一行：
      天气 · 行情   —— 每天要看的实时数据看板
-     财联社 · 地震 —— 资讯流（一条一条往下滚的）
+     新闻 · 地震   —— 资讯流（一条一条往下滚的）
      IPTV · 电台   —— 音视频娱乐，都是浏览器直连取流
      本机 · NTP    —— 设备与网络 / 时间（NTP 页里也有农历节气）
    手机单列时按同一顺序纵向排列，相邻的仍然是同一类。 */
 var TILES = [
   { key: "weather", href: "/weather.html", title: "天气", sub: "实况 · 24 小时 · 7 天 · 空气" },
   { key: "market", href: "/market.html", title: "行情", sub: "指数 · 汇率 · 自选股" },
-  { key: "news", href: "/news.html", title: "财联社", sub: "电报 · 重要度 · 主题 · 加自选" },
+  { key: "news", href: "/news.html", title: "新闻", sub: "电报 · 重要度 · 主题 · 加自选" },
   { key: "quake", href: "/quake.html", title: "地震", sub: "近 7 天 · 震级 · 位置" },
   { key: "iptv", href: "/iptv.html", title: "IPTV", sub: "频道列表 · 网页播放" },
   { key: "radio", href: "/radio.html", title: "电台", sub: "网络收音机 · 浏览器直连" },

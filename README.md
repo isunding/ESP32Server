@@ -27,8 +27,8 @@
 | 天气 | `/weather.html` | 实况、24 小时、7 天预报、空气质量、生活指数 |
 | 行情 | `/market.html` | 三大指数、汇率、自选股（存于板上） |
 | 电台 | `/radio.html` | 67 个电台 / 9 个分类，支持搜索与折叠 |
-| 财联社 | `/news.html` | 电报流、按重要度与主题筛选、含股票代码可一键加自选（仅 S3） |
-| 地震 | `/quake.html` | 近 7 天地震、按震级筛选与配色（仅 S3） |
+| 新闻 | `/news.html` | 财联社电报流、按重要度与主题筛选、`【】` 标题加粗、股票标签点选加入 / 移出自选（仅 S3） |
+| 地震 | `/quake.html` | 近 7 天地震、按震级筛选与配色、经纬度标注 N/S/E/W（仅 S3） |
 | 本机 | `/info.html` | 固件、板型、CPU、芯片温度、内部 RAM 分块、MAC、堆、Flash、休眠记录与时间轴 |
 | NTP | `/ntp.html` | 板载 NTP 服务端状态、上游同步、时区设置、农历 |
 | IPTV | `/iptv.html` | 频道库浏览与网页播放 |
@@ -151,7 +151,7 @@ python esp32-s3/scripts/flash.py esp32-s3/main.py esp32-s3/www/index.html ...
 | GET | `/api/services` | rtp2httpd / udpxy 运行状态 |
 | GET | `/api/calendar` | 农历、节气、节日 |
 | GET | `/api/quote` | 指数与汇率，10 分钟 TTL，`?force=1` 强制刷新 |
-| GET | `/api/watch` | 自选股行情 |
+| GET | `/api/watch` | 自选股行情（`?a=codes` 只返回代码清单，不查行情） |
 | POST | `/api/watch` | `{"op":"add"/"del","code":"sh600519"}`，上限 20 支 |
 | GET | `/api/ntp` | NTP 状态、上游、时区 |
 | POST | `/api/ntp` | `sync` / `srv` / `upstream` / `interval` / `tz` |

@@ -704,6 +704,11 @@ class App:
         与行情页同一套限制：只有人打开页面才联网，`?force=1` 15 秒内最多一次，
         取失败先给旧值。名称由前端用 GBK 解码（固件里没有 gbk 编码表）。
         """
+        # 只查代码清单（新闻页标注「已在自选」用）：不联网、不查行情，
+        # 行情源挂掉时也能返回，且与行情页的 items 结构解耦。
+        if req.arg("a") == "codes":
+            return httpsrv.json_resp({"ok": 1,
+                                      "codes": [x["code"] for x in self.watch]})
         now = time.ticks_ms()
         force = req.arg("force") == "1"
         age = None

@@ -333,7 +333,7 @@ video{width:100%;height:100%;display:block;background:#0b0e12}
   <p class="foot">
     数据经路由器转发中国地震台网（apihz 接口），本地按天存 CSV、只留 7 天。
     震级配色：<b style="color:#b8901a">M4</b> / <b style="color:#e07a1f">M5</b> /
-    <b style="color:#e23c3c">M6+</b>。
+    <b style="color:#e23c3c">M6+</b>。经纬度 N/S 为北 / 南纬，E/W 为东 / 西经。
   </p>
 </div>
 
@@ -349,7 +349,7 @@ var MR = (function () {
     { href: "/", title: "首页" },
     { href: "/weather.html", title: "天气" },
     { href: "/market.html", title: "行情" },
-    { href: "/news.html", title: "财联社" },
+    { href: "/news.html", title: "新闻" },
     { href: "/quake.html", title: "地震" },
     { href: "/radio.html", title: "电台" },
     { href: "/info.html", title: "本机" },
@@ -525,6 +525,18 @@ function magCls(m) {
   return "m0";
 }
 
+/* 上游给的是带符号十进制：北纬 / 东经为正，南纬 / 西经为负。
+   转成 34.23°N, 88.14°E，一眼能看出在哪个半球。 */
+function hemi(v, pos, neg) {
+  var n = Number(v);
+  if (isNaN(n)) return "—";
+  return Math.abs(n).toFixed(2) + "°" + (n < 0 ? neg : pos);
+}
+function coord(lat, lon) {
+  if (String(lat) === "" || String(lon) === "") return "";
+  return "经纬度：" + hemi(lat, "N", "S") + ", " + hemi(lon, "E", "W");
+}
+
 function render() {
   var items = ALL.filter(function (x) { return x.mag >= MIN; });
   if (!items.length) {
@@ -533,13 +545,14 @@ function render() {
     return;
   }
   $("list").innerHTML = items.map(function (x) {
+    var meta = "时间：" + (x.time || "—") +
+               " · 深度：" + (x.depth || "—") + " km";
+    var co = coord(x.lat, x.lon);
+    if (co) meta += " · " + co;
     return '<div class="q"><div class="mag ' + magCls(x.mag) + '">' +
       (x.mag ? x.mag.toFixed(1) : "—") + "</div>" +
       '<div class="mi"><div class="pl">' + esc(x.place || "位置未知") + "</div>" +
-      '<div class="mt">' + esc(x.time) + " · 深 " + esc(x.depth || "—") + " km · " +
-      // 经纬度保留两位就够看，省得一行太长
-      (x.lat ? Number(x.lat).toFixed(1) + ", " + Number(x.lon).toFixed(1) : "") +
-      "</div></div></div>";
+      '<div class="mt">' + esc(meta) + "</div></div></div>";
   }).join("");
 }
 

@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>财联社电报 · ESP32 终端服务器</title>
+<title>新闻 · ESP32 终端服务器</title>
 <link rel="icon" href="data:,">
 <link rel="stylesheet" href="/theme.css?v=20261108b">
 <style>
@@ -24,6 +24,7 @@
   .it .bd{margin:5px 0 0;font-size:13.5px;line-height:1.6;white-space:pre-wrap;
     display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
   .it.open .bd{-webkit-line-clamp:unset;display:block}
+  .it .bd b{font-weight:600;color:var(--fg)}
   .it .ft{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px;align-items:center}
   .tag{font-size:11px;color:var(--fg2);border:1px solid var(--line);
     border-radius:999px;padding:1px 7px}
@@ -58,18 +59,25 @@
 
   <p class="foot">
     数据经路由器转发的财联社电报，本地按天存 CSV、只留 7 天。
-    点条目展开全文，点股票代码可加入自选（行情页可见）。
+    点条目展开全文；点股票标签加入自选，再点一次移除（行情页可见）。
   </p>
 </div>
 
 <script src="/ui.js?v=20261108b"></script>
 <script>
 "use strict";
-MR.mountTop("财联社电报");
+MR.mountTop("新闻");
 
 var $ = MR.$, esc = MR.esc;
 var ALL = [];            // [{key,ctime,lv,subj,stk,title,text,subjects[]}]
 var LV = "", SUB = "";
+var WATCH = {};          // 已在自选的代码：{ "sh600519": true }
+
+/* 先转义再插标签：财联社正文习惯用【小标题】开头，把括号内的字加粗。
+   只认成对的全角括号，跨不过「】」就不会误吞后面的正文。 */
+function boldBracket(s) {
+  return esc(String(s || "")).replace(/【([^】]*)】/g, "【<b>$1</b>】");
+}
 
 /* CSV 行拆字段：字段可能用双引号包裹，里面的逗号不算分隔符 */
 function csvLine(s) {
@@ -122,15 +130,18 @@ function render() {
     var stk = "";
     if (x.stk) {
       stk = x.stk.split(" ").filter(Boolean).map(function (s) {
-        var code = s.replace(/[^0-9]/g, ""), name = s.replace(/[0-9]/g, "");
-        return '<button class="stk" data-code="' + esc(code) + '">' +
-          esc(name || code) + " " + esc(code) + "</button>";
+        var raw = s.replace(/[^0-9]/g, ""), name = s.replace(/[0-9]/g, "");
+        var code = mkt(raw), added = !!WATCH[code];
+        return '<button class="stk' + (added ? " added" : "") +
+          '" data-code="' + esc(code) + '" title="' +
+          (added ? "已在自选，点击移除" : "点击加入自选") + '">' +
+          esc(name || raw) + " " + esc(raw) + "</button>";
       }).join("");
     }
     return '<div class="it" data-k="' + esc(x.key) + '">' +
       '<div class="h"><span class="t">' + hhmm(x.ctime) + "</span>" +
       '<span class="lv ' + esc(x.lv || "C") + '">' + esc(x.lv || "C") + "</span></div>" +
-      '<div class="bd">' + esc(x.text || "") + "</div>" +
+      '<div class="bd">' + boldBracket(x.text || x.title || "") + "</div>" +
       '<div class="ft">' + x.subjects.map(function (s) {
         return '<span class="tag">' + esc(s) + "</span>";
       }).join("") + stk + "</div></div>";
@@ -171,6 +182,7 @@ function load(force) {
       " · 共 " + ALL.length + " 条";
     subChips();
     render();
+    loadWatch();                 // 标出哪些股票已在自选
   }).catch(function () {
     $("updAt").textContent = "读取失败";
     $("list").innerHTML = '<div class="empty muted small">接口无响应，点刷新重试</div>';
@@ -196,18 +208,54 @@ $("subChips").addEventListener("click", function (e) {
   render();
 });
 
+/* 同一支股票可能出现在多条电报里，状态要一起改 */
+function syncBtn(b, added) {
+  b.className = added ? "stk added" : "stk";
+  b.title = added ? "已在自选，点击移除" : "点击加入自选";
+}
+function markStock(code, added) {
+  [].forEach.call(document.querySelectorAll(".stk"), function (b) {
+    if (b.getAttribute("data-code") === code) syncBtn(b, added);
+  });
+}
+
+/* 只查代码清单，不触发行情请求。行情页那边增删后，新闻页刷新也能跟上 */
+function loadWatch() {
+  return MR.api("/api/watch?a=codes").then(function (d) {
+    WATCH = {};
+    var codes = d.codes || [];
+    for (var i = 0; i < codes.length; i++) WATCH[codes[i]] = 1;
+    [].forEach.call(document.querySelectorAll(".stk"), function (b) {
+      syncBtn(b, !!WATCH[b.getAttribute("data-code")]);
+    });
+  }).catch(function () { /* 标注拿不到也不影响看新闻 */ });
+}
+
 $("list").addEventListener("click", function (e) {
   var btn = e.target.closest ? e.target.closest(".stk") : null;
   if (btn) {
     e.stopPropagation();
-    var code = mkt(btn.getAttribute("data-code"));
+    var code = btn.getAttribute("data-code");
+    var added = !!WATCH[code];       // 已在自选 → 这次是删除
+    btn.disabled = true;
     fetch("/api/watch", {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ op: "add", code: code })
+      body: JSON.stringify({ op: added ? "del" : "add", code: code,
+                             name: btn.textContent.split(" ")[0] })
     }).then(function (r) { return r.json(); }).then(function (r) {
-      if (r.ok) { btn.className = "stk added"; MR.toast("已加入自选 " + code); }
-      else MR.toast(r.msg || "加入失败");
-    }).catch(function () { MR.toast("请求失败"); });
+      btn.disabled = false;
+      if (!r.ok) { MR.toast(r.msg || "操作失败"); return; }
+      if (r.codes) {                 // 以固件返回的完整清单为准
+        WATCH = {};
+        for (var i = 0; i < r.codes.length; i++) WATCH[r.codes[i]] = 1;
+      } else if (added) delete WATCH[code];
+      else WATCH[code] = 1;
+      markStock(code, !added);
+      MR.toast(added ? "已从自选移除 " + code : "已加入自选 " + code);
+    }).catch(function () {
+      btn.disabled = false;
+      MR.toast("请求失败，请重试");
+    });
     return;
   }
   var it = e.target.closest ? e.target.closest(".it") : null;

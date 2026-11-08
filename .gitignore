@@ -62,6 +62,15 @@ esp32/tests/
 # .mpy 与解释器版本强绑定（当前 .mpy v6.3），易与固件版本错配。
 # 使用 scripts/mpy.py 现场生成。
 esp32/*.mpy
+esp32-s3/*.mpy
+
+# ---- 本机维护脚本（内嵌硬件 InstanceId / 序列号，仅本地执行）----
+clean-com-ports.ps1
+clean-com-ports.bat
+
+# ---- 路由器端凭据文件（真实 ID / KEY，权限 600，绝不入库）----
+router/etc/
+*.conf.local
 
 # ---- 其它 ----
 .workbuddy/
