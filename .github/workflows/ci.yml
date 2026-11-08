@@ -10,6 +10,9 @@ on:
 permissions:
   contents: read
 
+env:
+  BOARDS: esp32 esp32-s3
+
 jobs:
   check:
     name: 静态检查
@@ -22,54 +25,79 @@ jobs:
           python-version: "3.12"
 
       - name: Python 语法
-        run: python -m compileall -q esp32/*.py esp32/scripts
+        run: |
+          for b in $BOARDS; do
+            python -m compileall -q $b/*.py $b/scripts
+            echo "$b OK"
+          done
 
       - name: 配置模板为合法 JSON
         run: |
           python - <<'PY'
           import json, pathlib
-          p = pathlib.Path("esp32/config.example.json")
-          data = json.loads(p.read_text(encoding="utf-8"))
-          required = {"wifi", "router", "ntp", "poll", "led", "quote"}
-          missing = required - set(data)
-          if missing:
-              raise SystemExit("config.example.json 缺少字段: %s" % missing)
-          print("config.example.json OK, 字段:", sorted(data))
+          base = {"wifi", "router", "ntp", "poll", "led", "quote"}
+          for board in ("esp32", "esp32-s3"):
+              p = pathlib.Path(board) / "config.example.json"
+              data = json.loads(p.read_text(encoding="utf-8"))
+              required = set(base) | ({"power"} if board == "esp32-s3" else set())
+              missing = required - set(data)
+              if missing:
+                  raise SystemExit("%s 缺少字段: %s" % (p, missing))
+              print("%s OK, 字段: %s" % (p, sorted(data)))
           PY
 
       - name: 页面构建与 web/ 同步
         run: |
-          python esp32/scripts/build.py
-          if ! git diff --quiet -- 'esp32/www/*.html'; then
-            echo "::error::esp32/www/ 与 esp32/web/ 不同步，请运行 python esp32/scripts/build.py 后提交"
-            git diff --stat -- 'esp32/www/*.html'
-            exit 1
-          fi
-          echo "www/ 与 web/ 一致"
+          fail=0
+          for b in $BOARDS; do
+            python $b/scripts/build.py
+            if ! git diff --quiet -- $b/www; then
+              echo "::error::$b/www 与 $b/web 不同步，请运行 python $b/scripts/build.py 后提交"
+              git diff --stat -- $b/www
+              fail=1
+            else
+              echo "$b/www 与 web/ 一致"
+            fi
+          done
+          exit $fail
 
       - name: 页面内联脚本语法
         run: |
           python - <<'PY'
           import re, pathlib, subprocess, tempfile, os
           failed = []
-          for html in sorted(pathlib.Path("esp32/web").glob("*.html")):
-              text = html.read_text(encoding="utf-8")
-              for i, js in enumerate(re.findall(r"<script>(.*?)</script>", text, re.S)):
-                  with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False,
-                                                  encoding="utf-8") as f:
-                      f.write(js); tmp = f.name
-                  r = subprocess.run(["node", "--check", tmp], capture_output=True, text=True)
-                  os.unlink(tmp)
-                  if r.returncode != 0:
-                      failed.append("%s script#%d: %s" % (html.name, i, r.stderr.strip().splitlines()[0]))
+          for board in ("esp32", "esp32-s3"):
+              for html in sorted(pathlib.Path(board, "web").glob("*.html")):
+                  text = html.read_text(encoding="utf-8")
+                  for i, js in enumerate(re.findall(r"<script>(.*?)</script>", text, re.S)):
+                      with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False,
+                                                      encoding="utf-8") as f:
+                          f.write(js); tmp = f.name
+                      r = subprocess.run(["node", "--check", tmp], capture_output=True, text=True)
+                      os.unlink(tmp)
+                      if r.returncode != 0:
+                          failed.append("%s/%s script#%d: %s" % (
+                              board, html.name, i, r.stderr.strip().splitlines()[0]))
           if failed:
               print("\n".join(failed)); raise SystemExit(1)
           print("内联脚本语法 OK")
           PY
 
+      - name: 板级目录结构一致
+        run: |
+          # 两个板级目录的模块、页面、构建产物必须同名，防止只改一边
+          a=$(git ls-files esp32    | sed 's|^esp32/||'    | sort)
+          b=$(git ls-files esp32-s3 | sed 's|^esp32-s3/||' | sort)
+          if [ "$a" != "$b" ]; then
+            echo "::error::esp32/ 与 esp32-s3/ 文件清单不一致"
+            diff <(echo "$a") <(echo "$b") || true
+            exit 1
+          fi
+          echo "目录结构一致（$(echo "$a" | wc -l) 个文件）"
+
       - name: 敏感文件未入库
         run: |
-          banned='^(esp32/config\.json|esp32/(watch|weather|channels|calendar)\.json|firmware/|legacy/|esp32/tests/|esp32/backup/)|\.(pem|bin|mpy)$'
+          banned='^(esp32|esp32-s3)/(config\.json|(watch|weather|channels|calendar|whist)\.json|tests/|backup/|build_mpy/|factory/)|^(firmware|legacy)/|\.(pem|bin|mpy)$'
           if git ls-files | grep -E "$banned"; then
             echo "::error::检测到不应提交的文件（凭据 / 固件 / 开发产物）"
             exit 1
