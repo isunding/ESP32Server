@@ -56,7 +56,9 @@ var MR = (function () {
     return p.replace(/^\/+/, "/");
   }
 
-  /* 顶栏 + 页签。title 为空时不显示返回键 */
+  /* 顶栏 + 页签。title 为空时不显示返回键。
+     挂载完就自动开始心跳：以前要求每页自己调 healthTick()，漏掉一页
+     右上角就永远停在初始文案「连接中…」。 */
   function mountTop(title) {
     var cur = currentPage();
     var nav = PAGES.map(function (p) {
@@ -75,24 +77,50 @@ var MR = (function () {
       '<div class="nav">' + nav + "</div>";
 
     var host = document.getElementById("topbar");
-    if (host) host.innerHTML = html;
+    if (host) {
+      host.innerHTML = html;
+      startBeat();
+    }
   }
 
+  var tickBusy = null, tickAt = 0, tickTimer = 0;
+
+  /* 心跳：取一次 /api/health，把 IP 与状态点刷到顶栏。
+     重复调用复用同一次请求，多页共用一个 15 秒定时器。 */
   function healthTick() {
-    return api("/api/health").then(function (h) {
+    if (tickBusy) return tickBusy;
+    if (MR.device && Date.now() - tickAt < 800) return Promise.resolve(MR.device);
+    tickBusy = api("/api/health").then(function (h) {
       var dot = $("hDot"), ip = $("hIp");
-      if (!dot) return h;
-      dot.className = "dot " + (h.router_ok ? "on" : "err");
-      ip.textContent = h.ip;
-      ip.title = (h.router_ok ? "路由器可达" : "路由器不可达") + " · RSSI " + h.rssi +
-        " · 运行 " + fmtDur(h.up) + " · 空闲内存 " + fmtBytes(h.mem_free);
+      if (dot) dot.className = "dot beat " + (h.router_ok ? "on" : "err");
+      if (ip) {
+        ip.textContent = h.ip;
+        ip.title = (h.router_ok ? "路由器可达" : "路由器不可达") + " · RSSI " + h.rssi +
+          " · 运行 " + fmtDur(h.up) + " · 空闲内存 " + fmtBytes(h.mem_free);
+      }
       MR.device = h;
       return h;
     }).catch(function () {
-      var dot = $("hDot");
-      if (dot) dot.className = "dot err";
+      var dot = $("hDot"), ip = $("hIp");
+      if (dot) dot.className = "dot beat err";
+      // 掉了也别把 IP 抹成占位文案，留着最后已知的地址更有用
+      if (ip) {
+        ip.textContent = MR.device ? MR.device.ip : "离线";
+        ip.title = "设备无响应";
+      }
       return null;
+    }).then(function (r) {
+      tickBusy = null;
+      tickAt = Date.now();
+      return r;
     });
+    return tickBusy;
+  }
+
+  function startBeat() {
+    if (tickTimer) return;
+    healthTick();
+    tickTimer = setInterval(healthTick, 15000);
   }
 
   var toastTimer = 0;
@@ -115,6 +143,7 @@ var MR = (function () {
   return {
     $: $, esc: esc, api: api, fmtBytes: fmtBytes, fmtDur: fmtDur,
     hhmm: hhmm, mmdd: mmdd, mountTop: mountTop, healthTick: healthTick,
+    startBeat: startBeat,
     toast: toast, empty: empty, PAGES: PAGES, device: null
   };
 })();

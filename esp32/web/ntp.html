@@ -412,8 +412,9 @@ function render() {
     MR.$("tzHint").innerHTML = tzHintCur(tzm);
   }
 
-  /* 用法 */
-  var ip = L.ip || (MR.device && MR.device.ip) || "10.0.0.100";
+  /* 用法：优先用接口给的 IP，其次设备自身信息，最后退回当前访问地址
+     （不再写死某一台板子的 IP，换了地址示例就是错的） */
+  var ip = L.ip || (MR.device && MR.device.ip) || location.hostname;
   MR.$("fIp").textContent = ip;
   MR.$("usage").textContent =
     "# Linux / 路由器\n" +

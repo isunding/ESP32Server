@@ -7,10 +7,7 @@
 <link rel="icon" href="data:,">
 <link rel="stylesheet" href="/theme.css?v=20261108a">
 <style>
-  .pgtop{display:flex;align-items:center;gap:10px;margin:0 0 10px}
-  .pgtop .upd{margin-left:auto;font-size:11.5px;color:var(--fg2)}
-  #btnRefresh{flex:0 0 auto;display:inline-flex;align-items:center;gap:6px}
-  #btnRefresh .ic{display:inline-block;font-size:14px;line-height:1}
+  /* .pgtop / .btn 走 theme.css 的公共样式，这里只留刷新按钮的转圈动画 */
   #btnRefresh.spin{opacity:.65;pointer-events:none}
   #btnRefresh.spin .ic{animation:sp .8s linear infinite}
   @keyframes sp{to{transform:rotate(360deg)}}
@@ -171,6 +168,8 @@
 
 var $ = MR.$, esc = MR.esc;
 
+/* 顶栏（标题 + 页签 + 心跳）。漏了这一步整页就没有标题和导航。 */
+MR.mountTop("天气");
 /* 路由器地址从 /api/health 动态取：换网段、改配置都不用动页面 */
 MR.healthTick().then(function (h) {
   var host = (h && h.router && h.router.host) || "10.0.0.1";

@@ -52,6 +52,10 @@ a{color:var(--acc);text-decoration:none}
 .dot{width:7px;height:7px;border-radius:50%;background:var(--fg2);flex:0 0 auto}
 .dot.on{background:var(--ok);box-shadow:0 0 8px var(--ok)}
 .dot.err{background:var(--err)}
+/* 心跳：每 15 秒刷一次 /api/health，点跟着呼吸一下，表示还在轮询 */
+.dot.beat{animation:beat 2s ease-in-out infinite}
+@keyframes beat{0%,100%{opacity:1}50%{opacity:.3}}
+@media (prefers-reduced-motion: reduce){.dot.beat{animation:none}}
 
 /* ---------- 页签 ---------- */
 .nav{
@@ -87,6 +91,15 @@ a{color:var(--acc);text-decoration:none}
 .btn.mini{padding:4px 10px;font-size:12px;border-radius:7px;text-decoration:none}
 .card>h2.hd{display:flex;align-items:center;gap:8px}
 .card>h2.hd .sp{flex:1}
+
+/* ---------- 页内工具条（更新时间 + 刷新按钮） ---------- */
+/* 原先只写在 weather.html 的内联样式里，行情页用了同一个 class
+   却拿不到样式，按钮就跑到左边去了。 */
+.pgtop{display:flex;align-items:center;gap:10px;margin:0 0 10px}
+.pgtop .upd{margin-left:auto;font-size:11.5px;color:var(--fg2);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pgtop .btn{flex:0 0 auto;display:inline-flex;align-items:center;gap:6px}
+.pgtop .btn .ic{display:inline-block;font-size:14px;line-height:1}
 
 /* ---------- 门户 ---------- */
 .hero{text-align:center;margin:10px 0 26px}
@@ -440,7 +453,9 @@ var MR = (function () {
     return p.replace(/^\/+/, "/");
   }
 
-  /* 顶栏 + 页签。title 为空时不显示返回键 */
+  /* 顶栏 + 页签。title 为空时不显示返回键。
+     挂载完就自动开始心跳：以前要求每页自己调 healthTick()，漏掉一页
+     右上角就永远停在初始文案「连接中…」。 */
   function mountTop(title) {
     var cur = currentPage();
     var nav = PAGES.map(function (p) {
@@ -459,24 +474,50 @@ var MR = (function () {
       '<div class="nav">' + nav + "</div>";
 
     var host = document.getElementById("topbar");
-    if (host) host.innerHTML = html;
+    if (host) {
+      host.innerHTML = html;
+      startBeat();
+    }
   }
 
+  var tickBusy = null, tickAt = 0, tickTimer = 0;
+
+  /* 心跳：取一次 /api/health，把 IP 与状态点刷到顶栏。
+     重复调用复用同一次请求，多页共用一个 15 秒定时器。 */
   function healthTick() {
-    return api("/api/health").then(function (h) {
+    if (tickBusy) return tickBusy;
+    if (MR.device && Date.now() - tickAt < 800) return Promise.resolve(MR.device);
+    tickBusy = api("/api/health").then(function (h) {
       var dot = $("hDot"), ip = $("hIp");
-      if (!dot) return h;
-      dot.className = "dot " + (h.router_ok ? "on" : "err");
-      ip.textContent = h.ip;
-      ip.title = (h.router_ok ? "路由器可达" : "路由器不可达") + " · RSSI " + h.rssi +
-        " · 运行 " + fmtDur(h.up) + " · 空闲内存 " + fmtBytes(h.mem_free);
+      if (dot) dot.className = "dot beat " + (h.router_ok ? "on" : "err");
+      if (ip) {
+        ip.textContent = h.ip;
+        ip.title = (h.router_ok ? "路由器可达" : "路由器不可达") + " · RSSI " + h.rssi +
+          " · 运行 " + fmtDur(h.up) + " · 空闲内存 " + fmtBytes(h.mem_free);
+      }
       MR.device = h;
       return h;
     }).catch(function () {
-      var dot = $("hDot");
-      if (dot) dot.className = "dot err";
+      var dot = $("hDot"), ip = $("hIp");
+      if (dot) dot.className = "dot beat err";
+      // 掉了也别把 IP 抹成占位文案，留着最后已知的地址更有用
+      if (ip) {
+        ip.textContent = MR.device ? MR.device.ip : "离线";
+        ip.title = "设备无响应";
+      }
       return null;
+    }).then(function (r) {
+      tickBusy = null;
+      tickAt = Date.now();
+      return r;
     });
+    return tickBusy;
+  }
+
+  function startBeat() {
+    if (tickTimer) return;
+    healthTick();
+    tickTimer = setInterval(healthTick, 15000);
   }
 
   var toastTimer = 0;
@@ -499,6 +540,7 @@ var MR = (function () {
   return {
     $: $, esc: esc, api: api, fmtBytes: fmtBytes, fmtDur: fmtDur,
     hhmm: hhmm, mmdd: mmdd, mountTop: mountTop, healthTick: healthTick,
+    startBeat: startBeat,
     toast: toast, empty: empty, PAGES: PAGES, device: null
   };
 })();
@@ -789,8 +831,9 @@ function render() {
     MR.$("tzHint").innerHTML = tzHintCur(tzm);
   }
 
-  /* 用法 */
-  var ip = L.ip || (MR.device && MR.device.ip) || "10.0.0.100";
+  /* 用法：优先用接口给的 IP，其次设备自身信息，最后退回当前访问地址
+     （不再写死某一台板子的 IP，换了地址示例就是错的） */
+  var ip = L.ip || (MR.device && MR.device.ip) || location.hostname;
   MR.$("fIp").textContent = ip;
   MR.$("usage").textContent =
     "# Linux / 路由器\n" +

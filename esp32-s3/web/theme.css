@@ -44,6 +44,10 @@ a{color:var(--acc);text-decoration:none}
 .dot{width:7px;height:7px;border-radius:50%;background:var(--fg2);flex:0 0 auto}
 .dot.on{background:var(--ok);box-shadow:0 0 8px var(--ok)}
 .dot.err{background:var(--err)}
+/* 心跳：每 15 秒刷一次 /api/health，点跟着呼吸一下，表示还在轮询 */
+.dot.beat{animation:beat 2s ease-in-out infinite}
+@keyframes beat{0%,100%{opacity:1}50%{opacity:.3}}
+@media (prefers-reduced-motion: reduce){.dot.beat{animation:none}}
 
 /* ---------- 页签 ---------- */
 .nav{
@@ -79,6 +83,15 @@ a{color:var(--acc);text-decoration:none}
 .btn.mini{padding:4px 10px;font-size:12px;border-radius:7px;text-decoration:none}
 .card>h2.hd{display:flex;align-items:center;gap:8px}
 .card>h2.hd .sp{flex:1}
+
+/* ---------- 页内工具条（更新时间 + 刷新按钮） ---------- */
+/* 原先只写在 weather.html 的内联样式里，行情页用了同一个 class
+   却拿不到样式，按钮就跑到左边去了。 */
+.pgtop{display:flex;align-items:center;gap:10px;margin:0 0 10px}
+.pgtop .upd{margin-left:auto;font-size:11.5px;color:var(--fg2);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pgtop .btn{flex:0 0 auto;display:inline-flex;align-items:center;gap:6px}
+.pgtop .btn .ic{display:inline-block;font-size:14px;line-height:1}
 
 /* ---------- 门户 ---------- */
 .hero{text-align:center;margin:10px 0 26px}

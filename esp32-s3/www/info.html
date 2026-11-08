@@ -52,6 +52,10 @@ a{color:var(--acc);text-decoration:none}
 .dot{width:7px;height:7px;border-radius:50%;background:var(--fg2);flex:0 0 auto}
 .dot.on{background:var(--ok);box-shadow:0 0 8px var(--ok)}
 .dot.err{background:var(--err)}
+/* 心跳：每 15 秒刷一次 /api/health，点跟着呼吸一下，表示还在轮询 */
+.dot.beat{animation:beat 2s ease-in-out infinite}
+@keyframes beat{0%,100%{opacity:1}50%{opacity:.3}}
+@media (prefers-reduced-motion: reduce){.dot.beat{animation:none}}
 
 /* ---------- 页签 ---------- */
 .nav{
@@ -87,6 +91,15 @@ a{color:var(--acc);text-decoration:none}
 .btn.mini{padding:4px 10px;font-size:12px;border-radius:7px;text-decoration:none}
 .card>h2.hd{display:flex;align-items:center;gap:8px}
 .card>h2.hd .sp{flex:1}
+
+/* ---------- 页内工具条（更新时间 + 刷新按钮） ---------- */
+/* 原先只写在 weather.html 的内联样式里，行情页用了同一个 class
+   却拿不到样式，按钮就跑到左边去了。 */
+.pgtop{display:flex;align-items:center;gap:10px;margin:0 0 10px}
+.pgtop .upd{margin-left:auto;font-size:11.5px;color:var(--fg2);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pgtop .btn{flex:0 0 auto;display:inline-flex;align-items:center;gap:6px}
+.pgtop .btn .ic{display:inline-block;font-size:14px;line-height:1}
 
 /* ---------- 门户 ---------- */
 .hero{text-align:center;margin:10px 0 26px}
@@ -261,6 +274,32 @@ video{width:100%;height:100%;display:block;background:#0b0e12}
 }
 
 </style>
+<style>
+  /* 休眠记录：状态数字 + 时间轴 + 区间列表 */
+  .pms{display:flex;gap:20px;flex-wrap:wrap;margin-bottom:12px}
+  .pms .k{font-size:11.5px;color:var(--fg2)}
+  .pms .v{font-size:15px;font-weight:600;margin-top:2px}
+  .pmtl{position:relative;height:30px;background:var(--bg3);border:1px solid var(--line);
+    border-radius:7px;overflow:hidden}
+  .pmtl .seg{position:absolute;top:0;bottom:0;background:#2f9e6b}
+  .pmtl .seg.live{background:repeating-linear-gradient(45deg,#2f9e6b,#2f9e6b 6px,#48c78e 6px,#48c78e 12px)}
+  .pmtl-empty{display:flex;align-items:center;justify-content:center;height:100%}
+  .pmaxis{display:flex;justify-content:space-between;font-size:11px;color:var(--fg2);margin-top:4px}
+  .pmaxis .mid{margin:0 auto}
+  .pmlegend{display:flex;gap:14px;flex-wrap:wrap;font-size:11.5px;color:var(--fg2);margin-top:8px}
+  .pmlegend .sw{display:inline-block;width:10px;height:10px;border-radius:2px;
+    margin-right:4px;vertical-align:middle}
+  .pmlegend .sw.sleep{background:#2f9e6b}
+  .pmlegend .sw.busy{background:var(--bg3);border:1px solid var(--line)}
+  .pmlegend .sw.live{background:repeating-linear-gradient(45deg,#2f9e6b,#2f9e6b 3px,#48c78e 3px,#48c78e 6px)}
+  .pmlist{margin-top:10px}
+  .pmlist .r{display:flex;gap:8px;align-items:baseline;padding:5px 0;
+    border-top:1px dashed var(--line);font-size:12.5px}
+  .pmlist .r:first-child{border-top:0}
+  .pmlist .r .t{font-family:ui-monospace,SFMono-Regular,monospace}
+  .pmlist .r .d{margin-left:auto;color:var(--fg2);white-space:nowrap}
+  .pmlist .r.now .d{color:var(--ok)}
+</style>
 </head>
 <body>
 
@@ -310,6 +349,23 @@ video{width:100%;height:100%;display:block;background:#0b0e12}
       <tr><td>代码优化</td><td id="chipOpt" class="mono">—</td></tr>
       <tr><td>内部 RAM 分块</td><td id="chipBlocks" class="mono">—</td></tr>
     </table>
+  </div>
+
+  <div class="card">
+    <h2>休眠记录 <span class="muted small" id="pmSub"></span></h2>
+    <div class="pms">
+      <div><div class="k">当前状态</div><div class="v" id="pmCur">—</div></div>
+      <div><div class="k">累计休眠</div><div class="v" id="pmTotal">—</div></div>
+      <div><div class="k">休眠次数</div><div class="v" id="pmCnt">—</div></div>
+    </div>
+    <div class="pmtl" id="pmTl"><div class="pmtl-empty muted small">读取中…</div></div>
+    <div class="pmaxis"><span id="pmAx0">—</span><span id="pmAx1">—</span></div>
+    <div class="pmlegend">
+      <span><i class="sw sleep"></i>休眠（已降频）</span>
+      <span><i class="sw busy"></i>满频运行</span>
+      <span><i class="sw live"></i>正在休眠</span>
+    </div>
+    <div class="pmlist" id="pmList"></div>
   </div>
 
   <div class="card">
@@ -392,7 +448,9 @@ var MR = (function () {
     return p.replace(/^\/+/, "/");
   }
 
-  /* 顶栏 + 页签。title 为空时不显示返回键 */
+  /* 顶栏 + 页签。title 为空时不显示返回键。
+     挂载完就自动开始心跳：以前要求每页自己调 healthTick()，漏掉一页
+     右上角就永远停在初始文案「连接中…」。 */
   function mountTop(title) {
     var cur = currentPage();
     var nav = PAGES.map(function (p) {
@@ -411,24 +469,50 @@ var MR = (function () {
       '<div class="nav">' + nav + "</div>";
 
     var host = document.getElementById("topbar");
-    if (host) host.innerHTML = html;
+    if (host) {
+      host.innerHTML = html;
+      startBeat();
+    }
   }
 
+  var tickBusy = null, tickAt = 0, tickTimer = 0;
+
+  /* 心跳：取一次 /api/health，把 IP 与状态点刷到顶栏。
+     重复调用复用同一次请求，多页共用一个 15 秒定时器。 */
   function healthTick() {
-    return api("/api/health").then(function (h) {
+    if (tickBusy) return tickBusy;
+    if (MR.device && Date.now() - tickAt < 800) return Promise.resolve(MR.device);
+    tickBusy = api("/api/health").then(function (h) {
       var dot = $("hDot"), ip = $("hIp");
-      if (!dot) return h;
-      dot.className = "dot " + (h.router_ok ? "on" : "err");
-      ip.textContent = h.ip;
-      ip.title = (h.router_ok ? "路由器可达" : "路由器不可达") + " · RSSI " + h.rssi +
-        " · 运行 " + fmtDur(h.up) + " · 空闲内存 " + fmtBytes(h.mem_free);
+      if (dot) dot.className = "dot beat " + (h.router_ok ? "on" : "err");
+      if (ip) {
+        ip.textContent = h.ip;
+        ip.title = (h.router_ok ? "路由器可达" : "路由器不可达") + " · RSSI " + h.rssi +
+          " · 运行 " + fmtDur(h.up) + " · 空闲内存 " + fmtBytes(h.mem_free);
+      }
       MR.device = h;
       return h;
     }).catch(function () {
-      var dot = $("hDot");
-      if (dot) dot.className = "dot err";
+      var dot = $("hDot"), ip = $("hIp");
+      if (dot) dot.className = "dot beat err";
+      // 掉了也别把 IP 抹成占位文案，留着最后已知的地址更有用
+      if (ip) {
+        ip.textContent = MR.device ? MR.device.ip : "离线";
+        ip.title = "设备无响应";
+      }
       return null;
+    }).then(function (r) {
+      tickBusy = null;
+      tickAt = Date.now();
+      return r;
     });
+    return tickBusy;
+  }
+
+  function startBeat() {
+    if (tickTimer) return;
+    healthTick();
+    tickTimer = setInterval(healthTick, 15000);
   }
 
   var toastTimer = 0;
@@ -451,6 +535,7 @@ var MR = (function () {
   return {
     $: $, esc: esc, api: api, fmtBytes: fmtBytes, fmtDur: fmtDur,
     hhmm: hhmm, mmdd: mmdd, mountTop: mountTop, healthTick: healthTick,
+    startBeat: startBeat,
     toast: toast, empty: empty, PAGES: PAGES, device: null
   };
 })();
@@ -545,6 +630,79 @@ function render(d) {
   }).join("");
   MR.$("files").innerHTML = rows || '<tr><td class="muted small">无文件</td><td></td></tr>';
   MR.$("fsum").textContent = fs.length + " 个 · 共 " + MR.fmtBytes(total);
+
+  pmRender(d);
+}
+
+/* ---------------- 休眠记录 ---------------- */
+function pad2(n) { return n < 10 ? "0" + n : "" + n; }
+
+function pmRender(d) {
+  var pm = d.pm;
+  if (!pm) {                       // 老固件没有这个字段
+    MR.$("pmSub").textContent = "当前固件未记录";
+    MR.$("pmTl").innerHTML =
+      '<div class="pmtl-empty muted small">固件不支持休眠记录</div>';
+    return;
+  }
+
+  var up = d.up || 0;
+  var live = pm.down_at > 0;       // 正在进行的那一段
+
+  MR.$("pmSub").textContent = pm.on
+    ? "空闲 " + pm.idle_after + " 秒降频到 " + pm.mhz + " MHz"
+    : "降频未启用";
+  MR.$("pmCur").textContent = (live ? "休眠中 · " : "满频 · ") + pm.cur + " MHz";
+  MR.$("pmCur").style.color = live ? "var(--ok)" : "";
+  MR.$("pmTotal").textContent = pm.sleep_total > 0 ? MR.fmtDur(pm.sleep_total) : "—";
+  MR.$("pmCnt").textContent = (pm.downs || 0) + " 次";
+
+  /* 设备记录的是「相对开机的秒」。用页面时钟倒推开机时刻换算成本地时间；
+     若设备时钟还没同步（1970），退回「开机 N 分」的相对写法。 */
+  var base = Date.now() - up * 1000;
+  var clocked = base > 1577836800000;        // 2020-01-01 之后才算对过时
+  function stamp(sec) {
+    if (clocked) {
+      var t = new Date(base + sec * 1000);
+      return pad2(t.getHours()) + ":" + pad2(t.getMinutes()) + ":" + pad2(t.getSeconds());
+    }
+    return "开机 " + MR.fmtDur(sec);
+  }
+
+  var segs = (pm.log || []).slice(-6).map(function (s) { return [s[0], s[1]]; });
+  if (live) segs.push([pm.down_at, up]);
+
+  if (!segs.length) {
+    MR.$("pmTl").innerHTML = '<div class="pmtl-empty muted small">还没有休眠记录，' +
+      "连续 " + pm.idle_after + " 秒没人访问就会出现一段</div>";
+    MR.$("pmAx0").textContent = "";
+    MR.$("pmAx1").textContent = "";
+    MR.$("pmList").innerHTML = "";
+    return;
+  }
+
+  // 时间轴：只画最近这几段，"空档"就是满频区间，用底色表示
+  var t0 = segs[0][0], t1 = segs[segs.length - 1][1];
+  var span = Math.max(t1 - t0, 60);
+  var html = "";
+  segs.forEach(function (s, i) {
+    var left = (s[0] - t0) / span * 100;
+    var width = Math.max((s[1] - s[0]) / span * 100, 0.8);   // 短段也留一条缝
+    html += '<div class="seg' + (live && i === segs.length - 1 ? " live" : "") +
+      '" style="left:' + left.toFixed(2) + "%;width:" + width.toFixed(2) + '%" title="' +
+      stamp(s[0]) + " → " + stamp(s[1]) + '"></div>';
+  });
+  MR.$("pmTl").innerHTML = html;
+  MR.$("pmAx0").textContent = stamp(t0);
+  MR.$("pmAx1").textContent = stamp(t1) + (live ? "（至今）" : "");
+
+  var rows = segs.slice().reverse().map(function (s, i) {
+    var isLive = live && i === 0;
+    return '<div class="r' + (isLive ? " now" : "") + '"><span class="t">' +
+      stamp(s[0]) + " → " + (isLive ? "至今" : stamp(s[1])) + '</span>' +
+      '<span class="d">' + (isLive ? "休眠中" : MR.fmtDur(s[1] - s[0])) + "</span></div>";
+  }).join("");
+  MR.$("pmList").innerHTML = rows;
 }
 
 function load() {

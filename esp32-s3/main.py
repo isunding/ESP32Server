@@ -186,6 +186,7 @@ DEFAULT_WATCH = [
     {"code": "sz300750", "name": "宁德时代"},
     {"code": "sh600036", "name": "招商银行"},
 ]
+PM_LOG_MAX = 24   # 休眠区间最多留 24 条（每次降频一条，占不了几百字节）
 
 
 def load_watch():
@@ -441,6 +442,11 @@ class App:
         self.pm_n = 0                # 上次看到的 web.accepted
         self.pm_ts = BOOT_MS         # 最近一次有请求的时刻
         self.pm_downs = 0            # 累计降频次数（info 页看有没有生效）
+        # 休眠区间记录：[[起, 止], ...]，单位是「相对 BOOT_MS 的秒」。
+        # 用相对秒而不是 epoch：NTP 没对上时 epoch 是错的，相对秒永远自洽。
+        self.pm_log = []
+        self.pm_down_at = 0          # 当前这次休眠的开始秒，0 = 当前满频
+        self.pm_sleep_total = 0      # 累计休眠秒数
 
     # ---------------- 采集（只在有人请求时触发） ----------------
     def poll_status(self):
@@ -816,6 +822,14 @@ class App:
                     "pm_name": PM_CN.get(_pm, "—")},
             "chip": {"temp": temp, "reset": _rc,
                      "reset_name": RESET_CN.get(_rc, str(_rc))},
+            "pm": {"on": self.pm_on,
+                   "max": self.freq_max // 1000000,
+                   "cur": self.pm_cur // 1000000,
+                   "mhz": (self.pm_hz // 1000000) if self.pm_on else 0,
+                   "idle_after": self.pm_after // 1000,
+                   "downs": self.pm_downs, "down_at": self.pm_down_at,
+                   "sleep_total": self.pm_sleep_total,
+                   "log": self.pm_log[-12:]},
             "heap": {"data": heap_data, "exec": heap_exec},
             "mem": {"free": free, "used": alloc, "total": free + alloc},
             "flash": {"total": v[2] * bs, "avail": v[3] * bs,
@@ -1171,8 +1185,16 @@ class App:
             return
         if hz < self.freq_max:
             self.pm_downs += 1
+            self.pm_down_at = time.ticks_diff(time.ticks_ms(), BOOT_MS) // 1000
             print("[pm] idle ->", hz // 1000000, "MHz")
         else:
+            if self.pm_down_at:
+                now_s = time.ticks_diff(time.ticks_ms(), BOOT_MS) // 1000
+                self.pm_log.append((self.pm_down_at, now_s))
+                self.pm_sleep_total += now_s - self.pm_down_at
+                if len(self.pm_log) > PM_LOG_MAX:
+                    del self.pm_log[0]
+                self.pm_down_at = 0
             print("[pm] busy ->", hz // 1000000, "MHz")
 
     def idle_power(self, now):
