@@ -1,0 +1,77 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: 静态检查
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Python 语法
+        run: python -m compileall -q esp32/*.py esp32/scripts
+
+      - name: 配置模板为合法 JSON
+        run: |
+          python - <<'PY'
+          import json, pathlib
+          p = pathlib.Path("esp32/config.example.json")
+          data = json.loads(p.read_text(encoding="utf-8"))
+          required = {"wifi", "router", "ntp", "poll", "led", "quote"}
+          missing = required - set(data)
+          if missing:
+              raise SystemExit("config.example.json 缺少字段: %s" % missing)
+          print("config.example.json OK, 字段:", sorted(data))
+          PY
+
+      - name: 页面构建与 web/ 同步
+        run: |
+          python esp32/scripts/build.py
+          if ! git diff --quiet -- 'esp32/www/*.html'; then
+            echo "::error::esp32/www/ 与 esp32/web/ 不同步，请运行 python esp32/scripts/build.py 后提交"
+            git diff --stat -- 'esp32/www/*.html'
+            exit 1
+          fi
+          echo "www/ 与 web/ 一致"
+
+      - name: 页面内联脚本语法
+        run: |
+          python - <<'PY'
+          import re, pathlib, subprocess, tempfile, os
+          failed = []
+          for html in sorted(pathlib.Path("esp32/web").glob("*.html")):
+              text = html.read_text(encoding="utf-8")
+              for i, js in enumerate(re.findall(r"<script>(.*?)</script>", text, re.S)):
+                  with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False,
+                                                  encoding="utf-8") as f:
+                      f.write(js); tmp = f.name
+                  r = subprocess.run(["node", "--check", tmp], capture_output=True, text=True)
+                  os.unlink(tmp)
+                  if r.returncode != 0:
+                      failed.append("%s script#%d: %s" % (html.name, i, r.stderr.strip().splitlines()[0]))
+          if failed:
+              print("\n".join(failed)); raise SystemExit(1)
+          print("内联脚本语法 OK")
+          PY
+
+      - name: 敏感文件未入库
+        run: |
+          banned='^(esp32/config\.json|esp32/(watch|weather|channels|calendar)\.json|firmware/|legacy/|esp32/tests/|esp32/backup/)|\.(pem|bin|mpy)$'
+          if git ls-files | grep -E "$banned"; then
+            echo "::error::检测到不应提交的文件（凭据 / 固件 / 开发产物）"
+            exit 1
+          fi
+          echo "未发现敏感文件"

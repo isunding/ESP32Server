@@ -1,17 +1,14 @@
-"""把运行模块预编译成 .mpy 并部署到板子（或回退回 .py）。
+"""把运行模块预编译成 .mpy 并部署到设备（或回退为 .py）。
 
-为什么需要它：MicroPython 实测**优先加载 .py**，.mpy 只有在同名 .py 不
-存在时才会被用上。所以部署 .mpy 必须同时删掉板上对应的 .py，只传文件
-是没用的（__file__ 会仍然指向 .py）。这套「编译 → 上传 → 删 .py → 重启」
-的流程容易漏步骤，固化成一条命令：
+MicroPython 优先加载 .py，.mpy 仅在无同名 .py 时生效。部署 .mpy 需同时删除
+设备上对应的 .py，否则改动不会生效。本脚本串起完整流程：
 
-    python tests/mpy.py            # 切到 .mpy（推荐）
-    python tests/mpy.py --revert   # 回退到 .py（出问题时用）
+    python esp32/scripts/mpy.py            # 编译、上传、删除 .py、重启
+    python esp32/scripts/mpy.py --revert   # 回退为 .py
 
-boot.py / main.py 不能预编译（固件直接 exec 源码），所以始终保留 .py。
+boot.py / main.py 由固件直接执行源码，不参与预编译。
 
-实测收益（ESP32-D0WD-V3，6 个模块）：
-    模块导入 1.74s -> 0.97s，服务就绪提前约 1.6s。
+6 个模块预编译后，导入耗时约 1.7s 降至 1.0s，服务就绪时间减少约 1.6 秒。
 """
 import glob
 import os
