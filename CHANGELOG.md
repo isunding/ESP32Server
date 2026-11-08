@@ -13,6 +13,12 @@
   WS2812 指示灯可彻底关闭、WiFi 关闭 modem sleep）
 - 空闲降频（`power` 配置）：连续 `idle_after_s` 秒没有 HTTP 请求就把 CPU
   从 240MHz 降到 `idle_mhz`（默认 80），下一个请求到达立刻回满频
+- 休眠记录：降频时记下开始秒、升频时记下结束秒，最多保留 24 条；
+  `/api/info` 新增 `pm`（当前状态、累计休眠、区间列表）
+- 本机页「休眠记录」卡片：当前状态、累计时长、彩色时间轴（休眠 / 满频 /
+  进行中三色区分）与区间明细
+- 顶栏心跳：`mountTop()` 挂载后自动每 15 秒刷 `/api/health`，
+  状态点呼吸、IP 实时更新（原先要求每页自己调，漏一页就永远显示「连接中」）
 - `/api/info`：新增芯片卡片（温度、复位原因、优化级别、内部 RAM 分块）
   与 WiFi 详情（SSID/信道/发射功率/省电模式）
 - `README.md`：项目说明、页面清单、架构图、部署指引
@@ -30,12 +36,17 @@
 ### 变更
 - `config.example.json`：补齐 `led`、`tz` 字段，移除废弃字段 `tz_min`、`first_source`
 - `config.example.json`：新增 `poll.weatherhist_ms`
+- `.pgtop`（页内工具条：更新时间 + 刷新按钮）样式从天气页内联移到 `theme.css`，成为公共组件
 - `esp32/README.md` 不再随仓库发布
 - 天气页预警改为解析 `warning.alerts`（`headline` / `description` /
   `eventType.name` / `issuedTime`），此前读取的字段名不存在，导致有预警时仍显示「无生效预警」
 - 天气页体积 8.7 KB → 15.6 KB（gzip）
 
 ### 修复
+- 天气页没有标题与导航：页面漏调 `MR.mountTop()`，整块顶栏未渲染
+- 电台 / 本机 / NTP / 首页右上角恒显示「连接中…」：这些页只挂顶栏、没启动心跳
+- 行情页刷新按钮位置错乱：`.pgtop` 的 flex 样式只写在天气页的内联样式里，
+  行情页用了同名 class 却拿不到样式，按钮没有靠右
 - 天气页预警恒显示为空
 - 天气页预警解析只认 `{alerts:[]}`，上游返回裸数组 / `{warning:[]}` 时整段丢弃；
   现兼容四种形状，`severity` 与 `color.code` 统一按小写查表（`Minor` 等首字母大写也能命中）
