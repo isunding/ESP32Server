@@ -6,9 +6,15 @@
 ## 项目
 
 ESP32 + MicroPython 的无头终端服务器：单线程 HTTP 服务，向局域网提供 7 个页面与一组 API，
-数据来自路由器的 CGI 接口。固件源码在 `esp32/`，文档在 `docs/`。
+数据来自路由器的 CGI 接口。固件源码有两份板级副本——`esp32/`（ESP32-D0WD-V3）与
+`esp32-s3/`（ESP32-S3 N16R8），逻辑一致，差异只在 LED 驱动、WiFi 省电、内存布局与频率管理。
+文档在 `docs/`。
 
-运行环境约束：单线程、可用 TCP PCB 约 10 个、堆约 70KB。
+运行环境约束：单线程、可用 TCP PCB 约 10 个；ESP32 版堆约 70KB，
+S3 版 Python 堆在 8MB PSRAM、内部 SRAM 留给 WiFi 与 lwIP。
+
+**两个目录要同步改**：页面、路由、API 的改动必须同时落到 `esp32/` 与 `esp32-s3/`，
+除非改动本身是板级差异（LED / 频率 / 内存）。
 
 ---
 
@@ -27,6 +33,8 @@ ESP32 + MicroPython 的无头终端服务器：单线程 HTTP 服务，向局域
 | `rap.py` 落盘 | 写 `.tmp` 后 rename，优先覆盖 | 先删旧再改名会留下空窗，并发读拿到 404 |
 | `main.py` 主循环 | 无周期性取数 | 路由器 CGI 需 1~1.6 秒，后台轮询会阻塞单线程主循环 |
 | `main.py` `h_weatherhist()` | 只吐落盘文件，取数交给 `refresh_weather_history()` | 历史天气要串行汇总 7 天，冷启动 5~15 秒，放进请求路径会堵死主循环 |
+| `main.py` `idle_power()`（S3） | `idle_mhz` 不低于 80，调用点放在 `web.poll()` 之后 | 80MHz 是 WiFi 的 APB 与 Octal PSRAM 时序的下限，更低会断网或崩堆；放在 poll 之前会漏掉本轮 accept |
+| `main.py` 频率基准 | 满频取配置 `power.max_mhz`，不读 `machine.freq()` | `esp_pm` 的时钟配置不随软复位恢复，读到的可能是上次留下的低频，会把满频误判成 80MHz 从此不再升频 |
 
 页面侧同样有约束：
 
@@ -37,8 +45,9 @@ ESP32 + MicroPython 的无头终端服务器：单线程 HTTP 服务，向局域
 
 ## 禁止
 
-1. **不要直接修改 `esp32/www/`**。它由 `esp32/web/` 经 `esp32/scripts/build.py` 生成，下次构建会被覆盖。
-2. **不要提交** `esp32/config.json`、`*.pem`、`*.bin`、`firmware/`、`legacy/`、`esp32/tests/`。前四项含真实凭据或设备数据。
+1. **不要直接修改 `esp32/www/` 或 `esp32-s3/www/`**。它们由各自的 `web/` 经 `scripts/build.py` 生成，下次构建会被覆盖。
+2. **不要提交** `esp32/config.json`、`esp32-s3/config.json`、`*.pem`、`*.bin`、`firmware/`、`legacy/`、
+   `esp32/tests/`、`esp32-s3/factory/`、`*/build_mpy/`。前两项含真实 WiFi 凭据，`firmware/` 与 `legacy/` 含设备数据。
 3. **不要引入** `asyncio`、`thread`、`_thread`、第三方库。运行环境不支持且有额外内存开销。
 4. **不要在请求处理中做超过 1 秒的阻塞操作**（除非配合 TTL 缓存）。
 5. **不要在页面中引用 CDN**（外部 CSS/JS/字体/图片）。
@@ -52,8 +61,9 @@ ESP32 + MicroPython 的无头终端服务器：单线程 HTTP 服务，向局域
 ### 改页面
 
 ```bash
-# 改 esp32/web/*.html、theme.css、ui.js
+# 改 esp32/web/*.html 与 esp32-s3/web/*.html、theme.css、ui.js
 python esp32/scripts/build.py          # 生成 esp32/www/（内联 + gzip）
+python esp32-s3/scripts/build.py       # 生成 esp32-s3/www/
 # 提交时 web/ 与 www/ 一起提交
 ```
 
@@ -62,12 +72,12 @@ python esp32/scripts/build.py          # 生成 esp32/www/（内联 + gzip）
 
 ### 改固件模块
 
-直接改 `esp32/*.py`。部署时若板上有 `.mpy`，需重新执行 `esp32/scripts/mpy.py`，
-否则 `.py` 不生效（MicroPython 优先加载 `.py`，但板上若只剩 `.mpy` 则不会更新）。
+直接改 `esp32/*.py`（或 `esp32-s3/*.py`）。部署时若板上有 `.mpy`，需重新执行对应的
+`scripts/mpy.py`，否则 `.py` 不生效（MicroPython 优先加载 `.py`，但板上若只剩 `.mpy` 则不会更新）。
 
 ### 改配置项
 
-三处同步：`main.py` 的 `DEFAULT_CFG`（必须有默认值）、`esp32/config.example.json`、`docs/CONFIG.md`。
+四处同步：各板 `main.py` 的 `DEFAULT_CFG`（必须有默认值）、`config.example.json`、`docs/CONFIG.md`。
 
 ### 改 API
 
@@ -85,14 +95,16 @@ python esp32/scripts/build.py          # 生成 esp32/www/（内联 + gzip）
 ## 验证
 
 ```bash
-# Python 语法
-python -m compileall -q esp32/*.py esp32/scripts
+# Python 语法（两个板级目录）
+python -m compileall -q esp32/*.py esp32/scripts esp32-s3/*.py esp32-s3/scripts
 
 # 配置模板有效
 python -c "import json; json.load(open('esp32/config.example.json', encoding='utf-8'))"
+python -c "import json; json.load(open('esp32-s3/config.example.json', encoding='utf-8'))"
 
 # 页面构建可重现（www/ 应与 web/ 同步）
-python esp32/scripts/build.py && git diff --exit-code -- esp32/www
+python esp32/scripts/build.py    && git diff --exit-code -- esp32/www
+python esp32-s3/scripts/build.py && git diff --exit-code -- esp32-s3/www
 ```
 
 仓库内不含测试代码与硬件测试。涉及运行时行为的改动（HTTP 服务、内存、连接管理）

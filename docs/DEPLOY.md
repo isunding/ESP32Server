@@ -1,28 +1,34 @@
 # 烧写与部署
 
-适用于 Windows + esptool + mpremote。
+适用于 Windows + esptool + mpremote。两个板级目录（`esp32/`、`esp32-s3/`）的部署流程一致，
+差异只在固件变体、烧写偏移与 USB 串口形态。
 
 ---
 
 ## 一、前置条件
 
-| 项 | 要求 |
-|---|---|
-| 开发板 | ESP32，4MB flash 起 |
-| 固件 | MicroPython ≥ v1.22，本方案基于 v1.26.1（`ESP32_GENERIC-20250911-v1.26.1.bin`） |
-| 工具 | `pip install esptool mpremote` |
-| 网络 | ESP32 与路由器同一局域网 |
+| 项 | ESP32 版（`esp32/`） | S3 版（`esp32-s3/`） |
+|---|---|---|
+| 开发板 | ESP32-D0WD-V3，4MB flash | ESP32-S3 N16R8，16MB flash + 8MB Octal PSRAM |
+| 固件 | `ESP32_GENERIC-20250911-v1.26.1.bin` | `ESP32_GENERIC_S3-SPIRAM_OCT-20260824-v1.29.0.bin` |
+| 烧写偏移 | `0x1000` | `0x0` |
+| 串口 | CH9102 / CP2102 | 原生 USB-Serial/JTAG |
+| 下载模式 | 按住 BOOT → 点 EN → 松 BOOT | 按住 BOOT → 点 RST → 松 BOOT |
 
-固件从 [micropython.org/download/esp32](https://micropython.org/download/esp32/) 下载
-`ESP32_GENERIC` 变体，不使用 spiram / d2wd / unicore / ota 变体。
+工具：`pip install esptool mpremote`。设备与路由器需在同一局域网。
+
+固件从 [micropython.org/download](https://micropython.org/download/) 下载：
+ESP32 用 `ESP32_GENERIC` 变体（不用 spiram / d2wd / unicore / ota）；
+S3 必须用 `ESP32_GENERIC_S3-SPIRAM_OCT` 变体——板载 8MB Octal PSRAM 只有这个变体带驱动。
 
 ---
 
 ## 二、烧写
 
 ```bash
-# 进下载模式：按住 BOOT → 点一下 EN → 松开 BOOT
+# 进下载模式：按住 BOOT → 点一下 EN（S3 是 RST）→ 松开 BOOT
 
+# ---------- ESP32 ----------
 # 1. 备份整片
 esptool.py --port COM3 --before no-reset read-flash 0 0x400000 backup-4MB.bin
 
@@ -30,15 +36,24 @@ esptool.py --port COM3 --before no-reset read-flash 0 0x400000 backup-4MB.bin
 esptool.py --port COM3 --before no-reset --after hard-reset \
   --baud 230400 write-flash --erase-all --compress --flash-size 4MB \
   0x1000 ESP32_GENERIC-20250911-v1.26.1.bin
+
+# ---------- ESP32-S3 ----------
+esptool.py --chip esp32s3 --port COM3 erase-flash
+esptool.py --chip esp32s3 --port COM3 --baud 460800 --after hard-reset \
+  write-flash -z 0x0 ESP32_GENERIC_S3-SPIRAM_OCT-20260824-v1.29.0.bin
 ```
 
-波特率 230400 较稳定（1.7MB 固件约 51 秒）；921600 在部分 CH9102 上会中断。
+ESP32 波特率 230400 较稳定（1.7MB 固件约 51 秒）；921600 在部分 CH9102 上会中断。
+S3 用 460800 即可（2.4MB 固件约 20 秒）。
+
+S3 注意两点：**偏移是 `0x0`**（写入 bootloader 起点，用 `0x1000` 会起不来）；
+`--after hard-reset` 对原生 USB 无效，刷完可能要手动按 RST 或执行 `esptool.py run`。
 
 ---
 
 ## 三、两项注意
 
-### 1. 射频校准数据
+### 1. 射频校准数据（ESP32 版）
 
 `0xF000` 处的 4KB 为出厂射频校准数据。`--erase-all` 会将其一并擦除，导致：
 
@@ -54,6 +69,9 @@ mpremote connect COM3 exec "import esp; esp.flash_write(0xf000, open('phy_init.b
 ```
 
 校验：`esp.flash_read(0xf000, 4)` 返回 `b'PHYI'`。
+
+S3 版没有这个位置：射频参数在独立分区，整片擦除后首次启动自行做完整校准（首启略慢），
+无需手工恢复。
 
 另：热点开启状态下 `scan()` 同样返回空，排查 WiFi 时先关闭 AP 模式：
 `network.WLAN(network.AP_IF).active(False)`。
@@ -74,6 +92,9 @@ python esp32/scripts/flash.py --no-upload
 ---
 
 ## 四、部署代码
+
+以下命令以 ESP32 版为例。S3 版把 `esp32/` 全部换成 `esp32-s3/`，串口换成 S3 的口
+（运行模式是原生 USB，下载模式是另一个 PID/端口号，换口时注意区分）。
 
 ### 方式 A：逐个上传
 
@@ -164,7 +185,8 @@ curl --noproxy "*" -s -o /dev/null -w "%{http_code} %{time_total}s\n" http://<�
 for i in $(seq 15); do curl -s -o /dev/null -w "%{http_code} " http://<设备IP>/; done
 ```
 
-判定标准：全部 200，单页 0.35~0.55s，`/api/health` 的 `mem_free` 保持 60KB 以上。
+判定标准：全部 200，单页 0.35~0.55s（受客户端网络影响较大，局域网内波动属正常）；
+`/api/health` 的 `mem_free`：ESP32 版保持 60KB 以上，S3 版在 7MB 以上（Python 堆在 PSRAM）。
 
 ---
 
@@ -173,8 +195,12 @@ for i in $(seq 15); do curl -s -o /dev/null -w "%{http_code} " http://<设备IP>
 固件：
 
 ```bash
+# ESP32
 esptool.py --port COM3 --before no-reset write-flash --erase-all --compress \
   0x1000 backup-4MB.bin
+
+# ESP32-S3
+esptool.py --chip esp32s3 --port COM3 write-flash -z 0x0 backup-8MB.bin
 ```
 
 代码：使用本地保留的 `backup/ok-YYYYMMDD-HHMMSS/` 快照，按相同流程上传覆盖。
@@ -194,6 +220,10 @@ esptool.py --port COM3 --before no-reset write-flash --erase-all --compress \
 | 打开多个页面后无响应 | 空闲堆低于 20KB | 串口查看 `gc.mem_free()` |
 | `incompatible .mpy file` | `.mpy` 与固件版本不匹配 | 重新执行 `scripts/mpy.py` 或 `--revert` |
 | 上传报 `could not enter raw repl` | 设备仍在启动 | 等待 3 秒重试 |
+| S3 刷完无任何输出 | 烧写偏移写成 `0x1000` | 用 `0x0` 重刷 |
+| S3 刷完不自动运行 | 原生 USB 的 `--after hard-reset` 无效 | 手动按 RST，或 `esptool.py run` |
+| 空闲后首个请求偏慢 | 空闲降频停在低频没回升 | 看 `/api/info` 的 `fw.freq` / `fw.pm_downs`；可先 `power.on=false` 关掉降频对比 |
+| S3 能连上但收发失败 | 内部 RAM 最大连续块过小（Python 堆在 PSRAM，不占内部 RAM） | `/api/info` 看内部 RAM 分块，最大连续块应 ≥64KB；低于 16KB 需断电重启 |
 
 ### 串口诊断
 

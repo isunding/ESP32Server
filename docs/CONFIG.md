@@ -2,10 +2,12 @@
 
 ## 一、配置文件
 
-板端配置文件为 `/config.json`（文件系统根目录）。仓库内仅提供脱敏模板：
+板端配置文件为 `/config.json`（文件系统根目录）。仓库内仅提供脱敏模板，
+两块板各有一份（字段完全相同，只有 `led` 的默认值不同）：
 
 ```bash
-cp esp32/config.example.json esp32/config.json
+cp esp32/config.example.json    esp32/config.json       # ESP32
+cp esp32-s3/config.example.json esp32-s3/config.json    # ESP32-S3
 ```
 
 `config.json` 已在 `.gitignore` 中，不会被提交。
@@ -62,6 +64,13 @@ cp esp32/config.example.json esp32/config.json
     "pulse_ms": 70
   },
 
+  "power": {
+    "on": true,                     // 空闲降频开关
+    "max_mhz": 240,                 // 开机拉回的满频
+    "idle_mhz": 80,                 // 空闲时降到多少 MHz
+    "idle_after_s": 20              // 连续多少秒无请求算空闲
+  },
+
   "quote": {
     "on": true,
     "ttl_ms": 600000,
@@ -111,6 +120,30 @@ cp esp32/config.example.json esp32/config.json
 
 板载 LED（GPIO2）指示：上电常亮，服务就绪后按 `period_ms` 闪烁 `pulse_ms` 毫秒。
 `on: 0` 时就绪后熄灭。部分开发板 LED 未连接 GPIO2，此时无显示。
+
+S3 版改为单颗 WS2812（GPIO48），用 `kind` 区分驱动方式：
+
+```json
+"led": { "on": 0, "kind": "np", "pin": 48, "color": [0, 127, 0] }
+```
+
+`kind: "np"` 走 neopixel（RMT），`kind: "gpio"` 走普通引脚电平。
+`on: 0` 时上电写一次黑色之后全程不再驱动，指示灯彻底不亮。
+
+### `power`
+
+空闲降频。单线程主循环在没人访问时纯空转，把 CPU 降下来可以省电流、降几度芯片温度。
+
+- 连续 `idle_after_s` 秒没有任何 HTTP 请求 → `machine.freq(idle_mhz)`
+- 下一个连接被 accept 时立刻回满频，正常响应
+- `idle_mhz` 下限 80：WiFi 需要 80MHz 的 APB 时钟，Octal PSRAM 时序也按它配置，
+  填更低的值会被忽略并按「不开启」处理
+- `max_mhz` 必须写死（别指望读 `machine.freq()`）：时钟配置不随软复位恢复，
+  软复位时如果正处在低频，读到的就是低频，会被误当成满频而再也不升频
+- 板级不支持改频（`esp_pm` 未启用）时，首次切换失败即自动关闭该功能并在串口打一行日志
+
+判断「有没有人来」用的是 HTTP 服务的 accept 计数，NTP、TCP 握手之类的零散流量
+不会把 CPU 拉满，也不会被当成访问活动。
 
 ### `quote`
 

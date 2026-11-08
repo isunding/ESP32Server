@@ -3,11 +3,19 @@
 基于 ESP32 + MicroPython 的无头终端服务器。运行单线程 HTTP 服务，向局域网提供页面与 API，
 数据来自路由器上的 CGI 接口。
 
-![MicroPython](https://img.shields.io/badge/MicroPython-v1.26.1-2b2728?logo=python&logoColor=white)
-![Platform](https://img.shields.io/badge/ESP32-D0WD--V3-e7352c)
-![Flash](https://img.shields.io/badge/flash-4MB-blue)
+![MicroPython](https://img.shields.io/badge/MicroPython-v1.26.1%20%2F%20v1.29.0-2b2728?logo=python&logoColor=white)
+![Platform](https://img.shields.io/badge/ESP32-D0WD--V3%20%7C%20S3-e7352c)
 ![License](https://img.shields.io/badge/license-MIT-green)
 ![Release](https://img.shields.io/github/v/release/isunding/ESP32Server)
+
+两个板级目录，同一套逻辑：
+
+| 目录 | 板型 | CPU | Flash / RAM | 差异 |
+|---|---|---|---|---|
+| `esp32/` | ESP32-D0WD-V3 | 160 MHz | 4MB / 520KB | 基线版本，GPIO2 单色指示灯 |
+| `esp32-s3/` | ESP32-S3 N16R8 | 240 MHz | 16MB / 8MB PSRAM | Python 堆在 PSRAM、原生 USB 串口、WS2812 指示灯、空闲降频 |
+
+两者仅在 LED 驱动、WiFi 省电、内存布局与频率管理上有差异，页面、路由、API 完全相同。
 
 ---
 
@@ -19,7 +27,7 @@
 | 天气 | `/weather.html` | 实况、24 小时、7 天预报、空气质量、生活指数 |
 | 行情 | `/market.html` | 三大指数、汇率、自选股（存于板上） |
 | 电台 | `/radio.html` | 67 个电台 / 9 个分类，支持搜索与折叠 |
-| 本机 | `/info.html` | 固件、板型、CPU、MAC、堆、Flash、文件清单 |
+| 本机 | `/info.html` | 固件、板型、CPU、芯片温度、内部 RAM 分块、MAC、堆、Flash、文件清单 |
 | NTP | `/ntp.html` | 板载 NTP 服务端状态、上游同步、时区设置、农历 |
 | IPTV | `/iptv.html` | 频道库浏览与网页播放 |
 
@@ -30,14 +38,16 @@
 
 ## 硬件与依赖
 
-| 项 | 要求 |
-|---|---|
-| 主控 | ESP32（4MB flash 起） |
-| 固件 | MicroPython v1.26.1 `ESP32_GENERIC`，[下载](https://micropython.org/download/esp32/) |
-| 串口 | CH9102 / CP2102 |
-| 数据源 | 可运行 CGI 的路由器，见 [docs/CONFIG.md](docs/CONFIG.md) |
+| 项 | ESP32 版（`esp32/`） | S3 版（`esp32-s3/`） |
+|---|---|---|
+| 主控 | ESP32-D0WD-V3，4MB flash | ESP32-S3 N16R8，16MB flash + 8MB Octal PSRAM |
+| 固件 | MicroPython v1.26.1 `ESP32_GENERIC` | MicroPython v1.29.0 `ESP32_GENERIC_S3-SPIRAM_OCT` |
+| 烧写偏移 | `0x1000` | `0x0` |
+| 串口 | CH9102 / CP2102（USB 转串口） | 原生 USB-Serial/JTAG |
+| 指示灯 | GPIO2 单色 | GPIO48 WS2812（可彻底关闭） |
 
-不需要 SD 卡、PSRAM 或外设。
+都不需要 SD 卡与外设。S3 版把 Python 堆放在 PSRAM，内部 SRAM 全部留给 WiFi 与 lwIP。
+数据源为可运行 CGI 的路由器，见 [docs/CONFIG.md](docs/CONFIG.md)。
 
 ---
 
@@ -83,19 +93,25 @@ flowchart LR
 ### 1. 烧写固件
 
 ```bash
-# 进下载模式：按住 BOOT → 点一下 EN → 松开 BOOT
+# 进下载模式：按住 BOOT → 点一下 EN/RST → 松开 BOOT
 
-pip install esptool
-esptool.py --chip esp32 --port COM3 erase_flash
-esptool.py --chip esp32 --port COM3 --baud 460800 write_flash -z 0x1000 ESP32_GENERIC-20250911-v1.26.1.bin
+# ESP32 / ESP32-D0WD-V3
+esptool.py --chip esp32  --port COM3 erase_flash
+esptool.py --chip esp32  --port COM3 --baud 460800 write_flash -z 0x1000 \
+  ESP32_GENERIC-20250911-v1.26.1.bin
+
+# ESP32-S3 N16R8（偏移是 0x0，不是 0x1000）
+esptool.py --chip esp32s3 --port COM3 erase_flash
+esptool.py --chip esp32s3 --port COM3 --baud 460800 write_flash -z 0x0 \
+  ESP32_GENERIC_S3-SPIRAM_OCT-20260824-v1.29.0.bin
 ```
 
-注意保留 `0xF000` 处的射频校准数据，详见 [docs/DEPLOY.md](docs/DEPLOY.md)。
+ESP32 版注意保留 `0xF000` 处的射频校准数据，详见 [docs/DEPLOY.md](docs/DEPLOY.md)。
 
 ### 2. 配置
 
 ```bash
-cp esp32/config.example.json esp32/config.json
+cp esp32/config.example.json esp32/config.json          # 或 esp32-s3/config.example.json
 # 编辑 wifi.ssid / wifi.password / router.host
 ```
 
@@ -105,14 +121,18 @@ cp esp32/config.example.json esp32/config.json
 
 ```bash
 pip install mpremote
-python esp32/scripts/build.py
-python esp32/scripts/up_batch.py esp32/main.py esp32/www/index.html ...
-python esp32/scripts/flash.py --no-upload
+export ESP32_PORT=COM3            # 串口
+export ESP32_HOST=192.168.1.50    # 设备 IP
+
+python esp32-s3/scripts/build.py                       # 改过页面就要重建 www/
+python esp32-s3/scripts/flash.py esp32-s3/main.py esp32-s3/www/index.html ...
 ```
 
-可选：`python esp32/scripts/mpy.py` 将 6 个模块预编译为 `.mpy`，启动时间缩短约 1.6 秒。
+`flash.py` 传完文件后自动复位、抓启动日志、请求 `/api/health` 自检；
+文件多时用 `scripts/up_batch.py` 分批（每批 4 个）。
+可选：`scripts/mpy.py` 把 6 个核心模块预编译成 `.mpy`，启动时间缩短约 1.6 秒。
 
-完整步骤见 [docs/DEPLOY.md](docs/DEPLOY.md)。
+两个板级目录的脚本用法完全一致，把路径前缀换掉即可。完整步骤见 [docs/DEPLOY.md](docs/DEPLOY.md)。
 
 ---
 
@@ -122,7 +142,7 @@ python esp32/scripts/flash.py --no-upload
 |---|---|---|
 | GET | `/api/health` | IP、RSSI、运行时长、剩余堆、路由器可达性 |
 | GET | `/api/home` | 健康状态、服务状态、今日历法 |
-| GET | `/api/info` | 固件、板型、CPU、MAC、堆、Flash、文件清单 |
+| GET | `/api/info` | 固件、板型、CPU 频率、芯片温度、复位原因、内部 RAM 分块、MAC、堆、Flash、文件清单 |
 | GET | `/api/weather` | 天气聚合数据（实况 / 24 小时 / 7 天 / 空气 / 预警 / 指数） |
 | GET | `/api/weatherhist` | 过去 7 天历史（首次请求返回 `pending`，由主循环后台取回后再提供） |
 | GET | `/api/channels` | 频道库 |
@@ -142,7 +162,7 @@ python esp32/scripts/flash.py --no-upload
 
 ```
 .
-├── esp32/
+├── esp32/                 ESP32-D0WD-V3 版（基线）
 │   ├── boot.py            上电：连接 WiFi / 启动配网热点
 │   ├── main.py            路由、缓存、状态、API
 │   ├── httpsrv.py         单线程非阻塞 HTTP 服务
@@ -155,6 +175,7 @@ python esp32/scripts/flash.py --no-upload
 │   ├── web/               页面源码
 │   ├── www/               构建产物（部署此目录）
 │   └── scripts/           构建、上传、刷机、预编译
+├── esp32-s3/              ESP32-S3 N16R8 版（目录结构、页面、API 与 esp32/ 一致）
 └── docs/
     ├── ARCHITECTURE.md
     ├── CONFIG.md
@@ -175,6 +196,8 @@ python esp32/scripts/flash.py --no-upload
 | select 超时 | 30ms | 零超时会让 lwIP 任务得不到调度 |
 | 单次分配上限 | 8KB | GC 不压缩内存，大块分配易失败 |
 | 落盘方式 | 写 `.tmp` 后 rename | 避免并发读取到不完整文件 |
+| 空闲降频下限 | 80 MHz | WiFi 需要 80MHz 的 APB 时钟，Octal PSRAM 时序也按它配置；更低会断网或崩堆 |
+| 满频基准 | 写死在配置里 | `esp_pm` 的时钟配置不随 Ctrl-D 软复位恢复，读 `machine.freq()` 会把当时的低频误当满频 |
 
 ---
 
@@ -195,11 +218,11 @@ python esp32/scripts/flash.py --no-upload
 |---|---|
 | `scripts/build.py` | 页面构建：内联 CSS/JS、生成 gzip（单页：`build.py weather`） |
 | `scripts/up_batch.py` | 分批上传到设备，每批 4 个文件 |
-| `scripts/flash.py` | 复位设备、捕获启动日志、请求 `/api/health` 自检 |
+| `scripts/flash.py` | 上传 + 复位设备、捕获启动日志、请求 `/api/health` 自检 |
 | `scripts/mpy.py` | 模块预编译为 `.mpy`（`--revert` 回退 .py） |
 | `scripts/gen_calendar_data.py` | 重建农历年度数据表 |
 
-串口与设备地址通过环境变量指定：
+两个板级目录各有一份，用法相同。串口与设备地址通过环境变量指定：
 
 ```bash
 export ESP32_PORT=COM3
