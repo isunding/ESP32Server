@@ -1,0 +1,255 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>行情 · ESP32 终端服务器</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="/theme.css?v=20261107d">
+<style>
+  /* 行情行：左侧名称+时间，右侧价格+涨跌。价格用等宽数字，跳动时不抖。 */
+  .mkrow{
+    display:grid;grid-template-columns:1fr auto;align-items:center;
+    gap:2px 14px;padding:13px 0;border-bottom:1px solid var(--line);
+  }
+  .mkrow:last-child{border-bottom:0}
+  .mkrow .nm{font-size:14.5px;font-weight:600;letter-spacing:.2px}
+  .mkrow .sub{font-size:11px;color:var(--fg2);letter-spacing:.3px}
+  .mkrow .pv{
+    font:600 21px/1.15 ui-monospace,Menlo,Consolas,monospace;
+    letter-spacing:-.4px;text-align:right;font-variant-numeric:tabular-nums;
+  }
+  .mkrow .ch{
+    font:600 12px/1.2 ui-monospace,Menlo,Consolas,monospace;
+    text-align:right;margin-top:3px;
+  }
+  /* A 股习惯：涨红、跌绿、平灰 */
+  .mkrow.up .pv,.mkrow.up .ch{color:var(--err)}
+  .mkrow.down .pv,.mkrow.down .ch{color:var(--ok)}
+  .mkrow.flat .pv,.mkrow.flat .ch{color:var(--fg2)}
+  .bank{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--fg2);margin:14px 2px 0}
+  .bank b{font-weight:600}
+  .skel{height:44px;border-radius:10px;background:var(--bg3);opacity:.5;margin:8px 0}
+  /* 自选股：加/删都只改板上的 watch.json，不重启 */
+  .addrow{display:flex;gap:8px;margin-top:12px}
+  .addrow input{flex:1;min-width:0;background:var(--bg3);border:1px solid var(--line);
+    color:var(--fg);border-radius:9px;padding:8px 11px;font:inherit;font-size:13px}
+  .addrow input:focus{outline:none;border-color:var(--acc)}
+  .wdel{color:var(--fg2);font-size:13px;padding:2px 6px;cursor:pointer;text-decoration:none}
+  .wdel:hover{color:var(--err)}
+</style>
+</head>
+<body>
+
+<div id="topbar"></div>
+
+<div class="wrap">
+  <div class="pgtop">
+    <span class="upd" id="updAt">加载中…</span>
+    <button class="btn" id="btnRefresh"><span class="ic">↻</span>刷新</button>
+  </div>
+
+  <div class="card" id="cardWatch">
+    <h2>自选股 <span class="muted small" id="wCnt"></span></h2>
+    <div id="listWatch"><div class="skel"></div><div class="skel"></div></div>
+    <div class="addrow">
+      <input id="wCode" placeholder="sh600519 / sz000001" autocomplete="off">
+      <a class="btn primary" id="wAdd">添加</a>
+    </div>
+  </div>
+
+  <div class="card" id="cardIndex">
+    <h2>指数</h2>
+    <div id="listIndex"><div class="skel"></div><div class="skel"></div></div>
+  </div>
+
+  <div class="card" id="cardFx">
+    <h2>汇率</h2>
+    <div id="listFx"><div class="skel"></div><div class="skel"></div></div>
+  </div>
+
+  <p class="foot" id="foot">
+    数据来自新浪财经 <code>hq.sinajs.cn</code>，一次批量取 · 未打开本页时不联网
+  </p>
+</div>
+
+<script src="/ui.js?v=20261107d"></script>
+<script>
+MR.mountTop("行情");
+MR.healthTick();
+
+/* 价格精度按量级定：指数上千用 2 位，汇率 6 点多要用 4 位，
+   否则 6.67 四舍五入成 6.67 会把 0.04% 的波动抹平。 */
+function fmtPrice(v) {
+  var n = Number(v);
+  if (!isFinite(n)) return "—";
+  if (n >= 100) return n.toFixed(2);
+  if (n >= 10) return n.toFixed(3);
+  return n.toFixed(4);
+}
+
+function signed(v, digits) {
+  var n = Number(v) || 0;
+  return (n > 0 ? "+" : "") + n.toFixed(digits);
+}
+
+function rowHTML(d) {
+  var pct = Number(d.pct) || 0;
+  var cls = pct > 0 ? "up" : (pct < 0 ? "down" : "flat");
+  var digits = Math.abs(Number(d.price) || 0) >= 100 ? 2 : 4;
+  var when = (d.date || "") + (d.time ? " " + d.time : "");
+  return '<div class="mkrow ' + cls + '">' +
+    '<div><div class="nm">' + MR.esc(d.name || d.code) + '</div>' +
+    '<div class="sub">' + MR.esc(when) + '</div></div>' +
+    '<div><div class="pv">' + fmtPrice(d.price) + '</div>' +
+    '<div class="ch">' + signed(d.chg, digits) + " · " + signed(pct, 2) + "%</div></div>" +
+  '</div>';
+}
+
+var lastTxt = "";
+
+function render(q) {
+  if (!q || !q.ok) {
+    MR.$("updAt").textContent = (q && q.msg) || "行情不可用";
+    return;
+  }
+  var items = q.items || [];
+  var idx = [], fx = [];
+  items.forEach(function (d) {
+    (d.kind === "fx" ? fx : idx).push(d);
+  });
+
+  MR.$("listIndex").innerHTML = idx.length
+    ? idx.map(rowHTML).join("")
+    : '<span class="muted small">暂无数据</span>';
+  MR.$("listFx").innerHTML = fx.length
+    ? fx.map(rowHTML).join("")
+    : '<span class="muted small">暂无数据</span>';
+
+  MR.$("cardIndex").style.display = idx.length ? "" : "none";
+  MR.$("cardFx").style.display = fx.length ? "" : "none";
+
+  var age = Number(q.age) || 0;
+  lastTxt = (q.stale ? "旧数据 · " : "") +
+    (age < 60 ? age + " 秒前更新" : Math.round(age / 60) + " 分钟前更新");
+  MR.$("updAt").textContent = lastTxt;
+}
+
+/* ---------- 自选股 ---------- */
+/* 板子把股票名以 GBK 字节的 hex 返回（固件里没有 gbk 码表），这里用浏览器解码 */
+function gbkName(hex) {
+  if (!hex) return "";
+  try {
+    var n = hex.length >> 1, a = new Uint8Array(n);
+    for (var i = 0; i < n; i++) a[i] = parseInt(hex.substr(i * 2, 2), 16);
+    return new TextDecoder("gbk").decode(a);
+  } catch (e) { return ""; }
+}
+
+function watchRow(d) {
+  var pct = Number(d.pct) || 0;
+  var cls = pct > 0 ? "up" : (pct < 0 ? "down" : "flat");
+  var digits = Math.abs(Number(d.price) || 0) >= 100 ? 2 : 3;
+  var name = (d.name && d.name !== d.code) ? d.name : (gbkName(d.n) || d.code);
+  return '<div class="mkrow ' + cls + '">' +
+    '<div><div class="nm">' + MR.esc(name) + '</div>' +
+    '<div class="sub">' + MR.esc(d.code) + '</div></div>' +
+    '<div style="display:flex;align-items:center;gap:8px">' +
+    '<div><div class="pv">' + fmtPrice(d.price) + '</div>' +
+    '<div class="ch">' + signed(d.chg, digits) + " · " + signed(pct, 2) + "%</div></div>" +
+    '<a class="wdel" data-del="' + MR.esc(d.code) + '" title="从自选移除">✕</a>' +
+    "</div></div>";
+}
+
+function renderWatch(w) {
+  if (!w || !w.ok) {
+    MR.$("listWatch").innerHTML =
+      '<span class="muted small">' + MR.esc((w && w.msg) || "行情源不可用") + "</span>";
+    MR.$("wCnt").textContent = "";
+    return;
+  }
+  var items = w.items || [];
+  MR.$("listWatch").innerHTML = items.length
+    ? items.map(watchRow).join("")
+    : '<span class="muted small">还没有自选，下面输入代码添加</span>';
+  MR.$("wCnt").textContent = items.length + " 支 · " +
+    (w.stale ? "旧数据" : (Number(w.age) ? Math.round(w.age / 60) + " 分钟前" : "刚刚"));
+  var dels = MR.$("listWatch").querySelectorAll("[data-del]");
+  for (var i = 0; i < dels.length; i++) {
+    dels[i].addEventListener("click", function () {
+      watchOp("del", this.getAttribute("data-del"));
+    });
+  }
+}
+
+function loadWatch(force) {
+  return MR.api(force ? "/api/watch?force=1" : "/api/watch")
+    .then(renderWatch).catch(function () {
+      MR.$("listWatch").innerHTML = '<span class="muted small">读取失败</span>';
+    });
+}
+
+function watchOp(op, code) {
+  return fetch("/api/watch", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ op: op, code: code })
+  }).then(function (r) { return r.json(); }).then(function (d) {
+    if (!d || !d.ok) { MR.toast((d && d.msg) || "操作失败"); return; }
+    MR.toast(op === "add" ? "已添加" : "已移除");
+    return loadWatch(false);
+  }).catch(function () { MR.toast("操作失败，检查连接"); });
+}
+
+MR.$("wAdd").addEventListener("click", function () {
+  var v = MR.$("wCode").value.trim().toLowerCase();
+  if (!/^(sh|sz|bj)\d{6}$/.test(v)) {
+    MR.toast("代码格式：sh600519 / sz000001");
+    return;
+  }
+  MR.$("wCode").value = "";
+  watchOp("add", v);
+});
+MR.$("wCode").addEventListener("keydown", function (e) {
+  if (e.key === "Enter") MR.$("wAdd").click();
+});
+
+function load(force) {
+  var p = force ? "/api/quote?force=1" : "/api/quote";
+  return MR.api(p).then(render).catch(function () {
+    MR.$("updAt").textContent = "取数失败，稍后重试";
+  });
+}
+
+MR.$("btnRefresh").addEventListener("click", function () {
+  var b = this;
+  b.disabled = true;
+  MR.$("updAt").textContent = "取数中…";
+  load(true).then(function () { return loadWatch(true); }).then(function () {
+    b.disabled = false;
+  });
+});
+
+/* 串行：先指数/汇率，再自选股——单线程板子别同时被两次外网请求占住 */
+load(false).then(function () { return loadWatch(false); });
+/* 页面停留时每 60 秒静默取一次：板子有 10 分钟 TTL，
+   绝大多数请求直接命中缓存，不会真的联网。 */
+var tick = setInterval(function () {
+  if (document.hidden) return;
+  load(false).then(function () { return loadWatch(false); });
+}, 60000);
+
+/* 切走页面就停掉定时器，别让后台标签页一直发请求 */
+document.addEventListener("visibilitychange", function () {
+  if (document.hidden) {
+    clearInterval(tick);
+  } else {
+    load(false).then(function () { return loadWatch(false); });
+    tick = setInterval(function () {
+      if (!document.hidden) load(false).then(function () { return loadWatch(false); });
+    }, 60000);
+  }
+});
+</script>
+</body>
+</html>

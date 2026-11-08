@@ -1,0 +1,285 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>ESP32 终端服务器</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="/theme.css?v=20261107d">
+<style>
+  /* 首页「今日」卡：静态公历 + 农历。刻意不做走秒时钟（见下方脚本注释） */
+  .todaycard{display:block;color:inherit;text-decoration:none;text-align:center;
+    background:linear-gradient(150deg,var(--bg2),var(--bg3));
+    border:1px solid var(--line);border-radius:var(--radius);
+    padding:13px 18px;margin-bottom:14px;transition:.15s}
+  .todaycard:hover{border-color:var(--acc)}
+  .todaycard .dt{font-size:14.5px;font-weight:600}
+  .todaycard .dt em,.todaycard .lu em{font-style:normal;font-weight:400;font-size:12px;
+    color:var(--fg2);margin-left:7px}
+  .todaycard .lu{margin-top:4px;font-size:14.5px;font-weight:600}
+  .todaycard .ex{margin-top:9px;display:flex;align-items:center;justify-content:center;
+    gap:6px;flex-wrap:wrap;font-size:11.5px}
+  .todaycard .ex:empty{display:none}
+  .todaycard .ex .tag{border-radius:999px;padding:2px 9px;font-size:11px}
+  .todaycard .ex .tag.term{background:rgba(88,166,255,.14);color:var(--cold);
+    border:1px solid rgba(88,166,255,.35)}
+  .todaycard .ex .tag.fest{background:rgba(255,106,0,.14);color:var(--acc);
+    border:1px solid rgba(255,106,0,.35)}
+  .todaycard .ex .soon{color:var(--fg2)}
+
+  /* 首页天气实况卡片 */
+  .wxnow{display:block;color:inherit;text-decoration:none;
+    background:linear-gradient(150deg,var(--bg2),var(--bg3));
+    border:1px solid var(--line);border-radius:var(--radius);
+    padding:16px 18px;margin-bottom:14px;transition:.15s}
+  .wxnow:hover{border-color:var(--acc)}
+  /* 标题与主温区居中；下面 .wxgrid / .wxaqi 刻意保持原来的铺满 / 左图右文，不跟着居中 */
+  .wxnow .wxhd{display:flex;align-items:center;justify-content:center;gap:8px;margin-bottom:10px}
+  .wxnow .wxhd b{font-size:13px;font-weight:600;color:var(--fg2);letter-spacing:.5px}
+  .wxnow .wxhd .loc{font-size:12px;color:var(--fg2)}
+  .wxnow .wxhd .loc::before{content:"·";margin-right:8px;color:var(--fg2)}
+  .wxnow .wxmain{display:flex;align-items:center;justify-content:center;gap:18px}
+  .wxnow .wxtemp{font:600 44px/1 ui-monospace,Menlo,Consolas,monospace;letter-spacing:-1px}
+  .wxnow .wxtemp i{font-style:normal;font-size:.5em;color:var(--fg2);vertical-align:.7em}
+  /* 不设 flex:1，否则这一组会撑满卡片宽度，主温区永远没法真正居中 */
+  .wxnow .wxside{min-width:0}
+  .wxnow .wxside .txt{font-size:16px;font-weight:600}
+  .wxnow .wxside .feels{font-size:12px;color:var(--fg2);margin-top:2px}
+  .wxnow .wxgrid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:14px}
+  .wxnow .wgm{background:var(--bg);border:1px solid var(--line);border-radius:10px;
+    padding:8px 6px;text-align:center}
+  .wxnow .wgm .k{font-size:10.5px;color:var(--fg2)}
+  .wxnow .wgm .v{font-size:13.5px;font-weight:600;margin-top:3px;
+    font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .wxnow .wxaqi{display:flex;align-items:center;gap:10px;margin-top:12px}
+  .wxnow .aqi-tile{min-width:48px;height:48px;border-radius:12px;display:flex;flex-direction:column;
+    align-items:center;justify-content:center;color:#fff;font-weight:700;line-height:1;flex:0 0 48px}
+  .wxnow .aqi-tile b{font-size:19px;letter-spacing:-.5px}
+  .wxnow .aqi-tile small{font-size:9px;font-weight:500;opacity:.9;margin-top:2px}
+  .wxnow .wxaqi .info{flex:1;min-width:0}
+  .wxnow .wxaqi .cat{font-size:13.5px;font-weight:600}
+  .wxnow .wxaqi .sub{font-size:11.5px;color:var(--fg2);margin-top:2px;line-height:1.5}
+  .wxnow .wxmore{display:block;text-align:center;font-size:11.5px;color:var(--fg2);
+    border-top:1px solid var(--line);margin-top:12px;padding-top:9px}
+  .wxnow:hover .wxmore{color:var(--acc)}
+</style>
+</head>
+<body>
+
+<div id="topbar"></div>
+
+<div class="wrap">
+  <div class="hero">
+    <h1 id="devName">ESP32 终端服务器</h1>
+    <div class="sub" id="devSub">正在读取设备信息…</div>
+    <div class="badge"><span class="dot" id="pDot"></span><span id="pText">检查中…</span></div>
+  </div>
+
+  <a class="todaycard" href="/ntp.html" id="todayCard" style="display:none">
+    <div class="dt" id="tdDate">—</div>
+    <div class="lu" id="tdLunar">—</div>
+    <div class="ex" id="tdExtra"></div>
+  </a>
+
+  <a class="wxnow" href="/weather.html" id="wxnow" style="display:none"></a>
+
+  <div class="grid" id="tiles"></div>
+
+  <section style="margin-top:26px">
+    <h2 style="font-size:13px;font-weight:600;color:var(--fg2);letter-spacing:1px;margin:0 0 10px">服务状态</h2>
+    <div class="sts" id="svc"></div>
+  </section>
+
+  <p class="foot">
+    设备 <code id="fIp">—</code> · 运行 <code id="fUp">—</code> · 空闲内存 <code id="fMem">—</code><br>
+    数据来自路由器 <code>/cgi-bin/*</code>，视频由浏览器直连 <code>:5140</code>
+  </p>
+</div>
+
+<script src="/ui.js?v=20261107d"></script>
+<script>
+MR.mountTop("ESP32 终端服务器");
+
+var ICONS = {
+  weather: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M19.1 4.9l-1.4 1.4M6.3 17.7l-1.4 1.4"/></svg>',
+  info: '<svg viewBox="0 0 24 24"><rect x="5" y="5" width="14" height="14" rx="2"/><path d="M9 2v3M15 2v3M9 19v3M15 19v3M2 9h3M2 15h3M19 9h3M19 15h3"/></svg>',
+  market: '<svg viewBox="0 0 24 24"><path d="M3 16l5-6 4 3 6-8"/><path d="M3 21h18"/></svg>',
+  radio: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="2.5"/><path d="M7.5 7.5a6.4 6.4 0 0 0 0 9M16.5 7.5a6.4 6.4 0 0 1 0 9"/><path d="M4.5 4.5a10.6 10.6 0 0 0 0 15M19.5 4.5a10.6 10.6 0 0 1 0 15"/></svg>',
+  ntp: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2"/></svg>',
+  iptv: '<svg viewBox="0 0 24 24"><rect x="3" y="7" width="18" height="12" rx="2"/><path d="M8 3l4 4 4-4"/></svg>'
+};
+
+/* 顺序按「功能相近、左右成对」排：网格是 2 列（760px 容器、minmax 240px），
+   所以数组里每两个相邻项就是视觉上的一行：
+     天气 · 行情   —— 每天要看的实时数据看板
+     IPTV · 电台   —— 音视频娱乐，都是浏览器直连取流
+     本机 · NTP    —— 设备与网络 / 时间（NTP 页里也有农历节气）
+   手机单列时按同一顺序纵向排列，相邻的仍然是同一类。 */
+var TILES = [
+  { key: "weather", href: "/weather.html", title: "天气", sub: "实况 · 24 小时 · 7 天 · 空气" },
+  { key: "market", href: "/market.html", title: "行情", sub: "指数 · 汇率 · 自选股" },
+  { key: "iptv", href: "/iptv.html", title: "IPTV", sub: "频道列表 · 网页播放" },
+  { key: "radio", href: "/radio.html", title: "电台", sub: "网络收音机 · 浏览器直连" },
+  { key: "info", href: "/info.html", title: "本机", sub: "固件 · 内存 · Flash · 文件" },
+  { key: "ntp", href: "/ntp.html", title: "NTP", sub: "时间服务 · 上游 · 时区" },
+];
+
+function renderTiles(subs) {
+  MR.$("tiles").innerHTML = TILES.map(function (t) {
+    var sub = (subs && subs[t.key]) || t.sub;
+    return '<a class="tile" href="' + t.href + '">' +
+      '<div class="ico">' + ICONS[t.key] + "</div>" +
+      '<div class="txt"><b>' + t.title + "</b><span>" + MR.esc(sub) + "</span></div>" +
+      '<span class="go">›</span></a>';
+  }).join("");
+}
+
+function setSvc(id, ok, text, hint) {
+  var sub = [hint, text].filter(function (x) { return x !== "" && x != null; }).join(" · ");
+  return '<div class="st1"><span class="dot ' + (ok ? "on" : "err") + '"></span>' +
+    "<b>" + MR.esc(id) + "</b><small>" + MR.esc(sub) + "</small></div>";
+}
+
+renderTiles(null);
+
+var subs = {};
+var svcData = null;
+
+function renderSvc() {
+  var h = MR.device || {};
+  var s = (svcData && svcData.svc) || {};
+  var r2h = s.r2h || { ok: false, port: 5140, service: "—" };
+  var udp = s.udpxy || { ok: false, port: 12123, service: "—" };
+  MR.$("svc").innerHTML = [
+    setSvc("路由器", h.router_ok !== false, h.router_ok ? "可达" : "不可达",
+      h.router ? h.router.host : ""),
+    setSvc("rtp2httpd", r2h.ok, r2h.ok ? "运行中" : "未运行", ":" + r2h.port),
+    setSvc("udpxy", udp.ok, udp.ok ? "运行中" : "未运行", ":" + udp.port)
+  ].join("");
+}
+
+/* ---------- 天气实况卡片 ---------- */
+function aqiColor(a) {
+  if (a <= 50) return "#3fb950";
+  if (a <= 100) return "#c9a227";
+  if (a <= 150) return "#e07000";
+  if (a <= 200) return "#d1242f";
+  if (a <= 300) return "#8b2f8b";
+  return "#6e1b1b";
+}
+function pickAqi(w) {
+  var air = w.air || {};
+  if (air.indexes && air.indexes.length) {
+    var x = air.indexes[0];
+    return { aqi: Number(x.aqi), cat: x.category || "", level: x.level };
+  }
+  return null;
+}
+function renderWx(w) {
+  if (!w || !w.ok) return;  // 取不到就静默隐藏，不打扰
+  var n = (w.now && w.now.now) || {};
+  if (n.temp == null) return;
+
+  var el = MR.$("wxnow");
+  var a = pickAqi(w);
+  var loc = w.name || "";
+
+  var gridItems = [
+    ["体感", n.feelsLike != null ? n.feelsLike + "°" : "—"],
+    ["湿度", n.humidity != null ? n.humidity + "%" : "—"],
+    ["风向", (n.windDir || "—") + (n.windScale ? " " + n.windScale + "级" : "")],
+    ["气压", n.pressure ? n.pressure + "hPa" : "—"]
+  ];
+  var grid = gridItems.map(function (m) {
+    return '<div class="wgm"><div class="k">' + MR.esc(m[0]) +
+      '</div><div class="v">' + MR.esc(m[1]) + "</div></div>";
+  }).join("");
+
+  var aqiHtml = "";
+  if (a && !isNaN(a.aqi)) {
+    var c = aqiColor(a.aqi);
+    aqiHtml = '<div class="wxaqi"><div class="aqi-tile" style="background:' + c + '">' +
+      "<b>" + a.aqi + "</b><small>AQI</small></div>" +
+      '<div class="info"><div class="cat" style="color:' + c + '">' + MR.esc(a.cat || "空气") +
+      '</div><div class="sub">实况 · 24 小时 · 7 天 · 空气详情见天气页</div></div></div>';
+  }
+
+  el.innerHTML =
+    '<div class="wxhd"><b>天气实况</b><span class="loc">' + MR.esc(loc) + "</span></div>" +
+    '<div class="wxmain"><div class="wxtemp">' + MR.esc(n.temp) + "<i>°C</i></div>" +
+    '<div class="wxside"><div class="txt">' + MR.esc(n.text || "—") + "</div>" +
+    (n.feelsLike != null ? '<div class="feels">体感 ' + MR.esc(n.feelsLike) + "°</div>" : "") +
+    "</div></div>" +
+    '<div class="wxgrid">' + grid + "</div>" +
+    aqiHtml +
+    '<span class="wxmore">查看 24 小时 / 7 天预报 ›</span>';
+  el.style.display = "block";
+}
+
+/* ---------- 今日卡：静态公历 + 农历 ----------
+ * 首页刻意不做走秒时钟：每秒重绘 DOM + 反复取数，在单线程 HTTP 的 ESP32 上
+ * 会和首屏串行取数抢连接，实测明显拖慢整页。农历数据随 /api/home 一次带出
+ * （health + 服务状态 + 今日历法三合一），这里只在首屏渲染一次——页面里没有
+ * 任何 setInterval。要看走秒时间请点卡片进 NTP 页，刷新本页即可更新日期。
+ */
+var WD = ["一", "二", "三", "四", "五", "六", "日"];   // 农历接口的 week: 0=周一
+function renderHomeCal(c) {
+  var el = MR.$("todayCard");
+  if (!c || !c.ok || !c.lunar) { el.style.display = "none"; return; }
+  MR.$("tdDate").innerHTML = c.y + " 年 " + c.m + " 月 " + c.d + " 日" +
+    "<em>星期" + WD[c.week || 0] + "</em>";
+  MR.$("tdLunar").innerHTML = "农历 " + MR.esc(c.ganzhi) + "年 " +
+    MR.esc(c.lunar) + "<em>" + MR.esc(c.zodiac) + "年</em>";
+  var p = [];
+  if (c.term) p.push('<span class="tag term">今日 ' + MR.esc(c.term) + "</span>");
+  (c.festivals || []).forEach(function (n) {
+    p.push('<span class="tag fest">' + MR.esc(n) + "</span>");
+  });
+  var nx = (c.next || [])[0];
+  if (nx) p.push('<span class="soon">距 ' + MR.esc(nx.name) + " " + nx.days + " 天</span>");
+  MR.$("tdExtra").innerHTML = p.join("");
+  el.style.display = "block";
+}
+
+/* 取数刻意串行：板子是单线程 HTTP 服务，并发连接会被挤掉。
+   顺序 = health（首屏必需）→ weather → status → services。
+   每个接口在板子上都带 TTL 缓存，短时间内重复刷新不会再去问路由器。 */
+/* 取数刻意串行，而且尽量少：板子是单线程 HTTP 服务，lwIP 只有约 10 个
+   TCP PCB，手机浏览器还要预连 6~8 条，每多一条请求都在逼近死线。
+   现在首屏只有两条请求：/api/home（健康 + 服务状态 + 今日历法）
+   和 /api/weather（29KB 的天气聚合）。原来这里是 4 条。 */
+MR.api("/api/home").then(function (h) {
+  if (!h || !h.ok) {
+    MR.$("pDot").className = "dot err";
+    MR.$("pText").textContent = "设备离线";
+    return null;
+  }
+  MR.device = h;
+  MR.$("devName").textContent = h.name || "ESP32 终端服务器";
+  MR.$("devSub").textContent = "路由器 " + (h.router ? h.router.host : "") + " · 本机 " + h.ip;
+  MR.$("pDot").className = "dot " + (h.router_ok ? "on" : "err");
+  MR.$("pText").textContent = h.router_ok ? "运行正常 · 已运行 " + MR.fmtDur(h.up) : "路由器不可达";
+  MR.$("fIp").textContent = h.ip;
+  MR.$("fUp").textContent = MR.fmtDur(h.up);
+  MR.$("fMem").textContent = MR.fmtBytes(h.mem_free);
+  /* 顶栏那颗小灯也顺手更新（不再单独发 /api/health） */
+  var dot = MR.$("hDot"), tip = MR.$("hIp");
+  if (dot) dot.className = "dot " + (h.router_ok ? "on" : "err");
+  if (tip) {
+    tip.textContent = h.ip;
+    tip.title = (h.router_ok ? "路由器可达" : "路由器不可达") + " · RSSI " + h.rssi +
+      " · 运行 " + MR.fmtDur(h.up) + " · 空闲内存 " + MR.fmtBytes(h.mem_free);
+  }
+  svcData = { svc: h.svc || {} };
+  renderSvc();
+  renderHomeCal(h.cal);
+  return MR.api("/api/weather").catch(function () { return null; });
+}).then(function (wx) {
+  if (wx && wx.ok) {
+    renderWx(wx);
+    subs.weather = "实况 · 24 小时 · 7 天 · 空气";
+  }
+});
+</script>
+</body>
+</html>

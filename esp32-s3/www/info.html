@@ -1,0 +1,562 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>本机信息 · ESP32 终端服务器</title>
+<link rel="icon" href="data:,">
+<style>
+/* ESP32 终端服务器 · 设计系统
+ * 视觉语言照搬原路由器页面：深色底 + 分层卡片 + 细描边 + 等宽数字
+ */
+:root{
+  --bg:#0f1216; --bg2:#161b22; --bg3:#1c232c; --line:#283141;
+  --fg:#e6edf3; --fg2:#8b98a9; --acc:#ff6a00; --acc2:#3b82f6;
+  --ok:#3fb950; --err:#f85149; --warm:#ffb454; --cold:#58a6ff;
+  --radius:16px;
+}
+@media (prefers-color-scheme:light){
+  :root{
+    --bg:#f2f5f9; --bg2:#ffffff; --bg3:#e9eef4; --line:#d8dee4;
+    --fg:#1f2328; --fg2:#59636e;
+  }
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;padding:0;min-height:100%}
+body{
+  background:radial-gradient(1200px 600px at 50% -10%, #1b2430 0%, var(--bg) 60%);
+  background-attachment:fixed;
+  color:var(--fg);
+  font:15px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+}
+@media (prefers-color-scheme:light){
+  body{background:radial-gradient(1200px 600px at 50% -10%, #ffffff 0%, var(--bg) 55%);}
+}
+a{color:var(--acc);text-decoration:none}
+
+/* ---------- 顶栏 ---------- */
+.top{
+  position:sticky;top:0;z-index:20;display:flex;align-items:center;gap:10px;
+  padding:12px 16px;background:color-mix(in srgb, var(--bg) 86%, transparent);
+  backdrop-filter:blur(10px);border-bottom:1px solid var(--line);
+}
+.top .back{
+  width:32px;height:32px;flex:0 0 32px;border-radius:9px;border:1px solid var(--line);
+  background:var(--bg2);color:var(--fg2);display:flex;align-items:center;justify-content:center;
+  font-size:16px;line-height:1;
+}
+.top .back:hover{color:var(--fg);border-color:var(--acc)}
+.top h1{font-size:16px;margin:0;font-weight:600;flex:1;letter-spacing:.3px;
+  min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.top .st{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--fg2);flex:0 0 auto}
+.dot{width:7px;height:7px;border-radius:50%;background:var(--fg2);flex:0 0 auto}
+.dot.on{background:var(--ok);box-shadow:0 0 8px var(--ok)}
+.dot.err{background:var(--err)}
+
+/* ---------- 页签 ---------- */
+.nav{
+  display:flex;gap:6px;overflow-x:auto;padding:10px 16px;
+  border-bottom:1px solid var(--line);background:color-mix(in srgb, var(--bg) 86%, transparent);
+  backdrop-filter:blur(10px);position:sticky;top:57px;z-index:19;
+}
+.nav a{
+  flex:0 0 auto;font-size:13px;color:var(--fg2);border:1px solid var(--line);
+  background:var(--bg2);border-radius:999px;padding:5px 13px;white-space:nowrap;
+}
+.nav a.on{background:var(--acc);border-color:var(--acc);color:#fff}
+.nav a:hover{color:var(--fg)}
+
+/* ---------- 容器 ---------- */
+.wrap{max-width:760px;margin:0 auto;padding:16px 14px 40px}
+.card{
+  background:var(--bg2);border:1px solid var(--line);border-radius:var(--radius);
+  padding:16px 18px;margin-bottom:12px;
+}
+.card>h2{margin:0 0 12px;font-size:13px;font-weight:600;color:var(--fg2);letter-spacing:.5px}
+.card.flush{padding:6px 18px}
+.muted{color:var(--fg2)}
+.small{font-size:12px}
+.right{margin-left:auto}
+.btn{
+  background:var(--bg3);border:1px solid var(--line);color:var(--fg);
+  border-radius:9px;padding:7px 13px;font:inherit;font-size:13px;cursor:pointer;
+}
+.btn:hover{border-color:var(--acc);color:var(--acc)}
+.btn.primary{background:var(--acc);border-color:var(--acc);color:#fff}
+.btn.primary:hover{color:#fff;filter:brightness(1.08)}
+.btn.mini{padding:4px 10px;font-size:12px;border-radius:7px;text-decoration:none}
+.card>h2.hd{display:flex;align-items:center;gap:8px}
+.card>h2.hd .sp{flex:1}
+
+/* ---------- 门户 ---------- */
+.hero{text-align:center;margin:10px 0 26px}
+.hero h1{margin:0 0 6px;font-size:24px;font-weight:600;letter-spacing:.5px}
+.hero .sub{color:var(--fg2);font-size:13.5px}
+.hero .badge{
+  display:inline-flex;align-items:center;gap:7px;margin-top:12px;
+  background:var(--bg3);border:1px solid var(--line);border-radius:999px;
+  padding:5px 14px;font-size:12.5px;color:var(--fg2);
+}
+.grid{display:grid;gap:14px;grid-template-columns:repeat(auto-fit,minmax(240px,1fr))}
+.tile{
+  display:flex;align-items:center;gap:14px;color:inherit;
+  background:linear-gradient(160deg,var(--bg2),var(--bg3));
+  border:1px solid var(--line);border-radius:var(--radius);
+  padding:18px;transition:.15s;position:relative;overflow:hidden;
+}
+.tile:hover{border-color:var(--acc);transform:translateY(-2px);box-shadow:0 10px 26px rgba(0,0,0,.45)}
+.tile:active{transform:translateY(0)}
+.tile .ico{
+  width:46px;height:46px;flex:0 0 46px;border-radius:12px;display:flex;
+  align-items:center;justify-content:center;background:var(--bg);border:1px solid var(--line);
+}
+.tile .ico svg{width:22px;height:22px;stroke:var(--acc);fill:none;stroke-width:1.7;
+  stroke-linecap:round;stroke-linejoin:round}
+.tile b{display:block;font-size:15.5px;font-weight:600;margin-bottom:2px}
+.tile span{display:block;color:var(--fg2);font-size:12.5px;white-space:nowrap;
+  overflow:hidden;text-overflow:ellipsis}
+.tile .go{position:absolute;right:14px;color:var(--fg2);font-size:18px;opacity:.5}
+.tile:hover .go{color:var(--acc);opacity:1}
+
+/* ---------- 服务状态小格 ---------- */
+.sts{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+@media (min-width:560px){.sts{grid-template-columns:repeat(4,minmax(0,1fr))}}
+.st1{display:grid;grid-template-columns:auto minmax(0,1fr);column-gap:7px;row-gap:1px;
+  align-items:center;background:var(--bg3);border:1px solid var(--line);
+  border-radius:10px;padding:9px 11px;font-size:12.5px}
+.st1 .dot{grid-column:1;grid-row:1;width:8px;height:8px}
+.st1 b{grid-column:2;grid-row:1;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.st1 small{grid-column:2;grid-row:2;font-size:11.5px;color:var(--fg2);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+/* ---------- 天气 ---------- */
+.now{text-align:center;padding:8px 0 4px}
+.now .loc{color:var(--fg2);font-size:14px;margin-bottom:4px}
+.now .big{display:flex;align-items:flex-end;justify-content:center;gap:14px;margin:6px 0}
+.now .temp{font:600 72px/1 ui-monospace,Menlo,Consolas,monospace;letter-spacing:-2px}
+.now .temp .deg{font-size:.38em;font-style:normal;vertical-align:.72em;
+  margin-left:2px;letter-spacing:0;color:var(--fg2)}
+.now .txt{font-size:17px;color:var(--fg2);padding-bottom:9px}
+.now .feels{color:var(--fg2);font-size:13.5px;margin-top:2px}
+.metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:16px}
+.metric{background:var(--bg3);border-radius:11px;padding:9px 4px;text-align:center}
+.metric .k{font-size:11px;color:var(--fg2)}
+.metric .v{font-size:15px;font-weight:600;margin-top:2px}
+
+.aq{display:flex;align-items:center;gap:14px}
+.aq .tile-aqi{
+  min-width:64px;height:64px;border-radius:16px;display:flex;flex-direction:column;
+  align-items:center;justify-content:center;color:#fff;font-weight:700;line-height:1;
+  flex:0 0 64px;
+}
+.aq .tile-aqi b{font-size:24px;letter-spacing:-.5px}
+.aq .tile-aqi small{font-size:10px;font-weight:500;opacity:.92;margin-top:3px;letter-spacing:1px}
+.aq .info{flex:1;min-width:0}
+.aq .cat{font-size:15px;font-weight:600;margin-bottom:3px}
+.aq .adv{font-size:12px;color:var(--fg2);line-height:1.55}
+.poll{display:grid;grid-template-columns:repeat(auto-fit,minmax(78px,1fr));gap:7px;margin-top:12px}
+.poll .p{background:var(--bg3);border-radius:9px;padding:8px 6px;text-align:center}
+.poll .p .n{font-size:10.5px;color:var(--fg2)}
+.poll .p .v{font-size:14.5px;font-weight:600;margin:2px 0 1px}
+.poll .p .u{font-size:9.5px;color:var(--fg2)}
+
+.warn-bar{display:flex;align-items:center;gap:9px;font-size:13px;color:var(--fg2)}
+.warn-bar .ok-dot{width:9px;height:9px;border-radius:50%;background:var(--ok);
+  box-shadow:0 0 0 3px rgba(63,185,80,.16);flex:0 0 9px}
+.warn-item{background:var(--bg3);border-left:3px solid var(--err);border-radius:9px;
+  padding:10px 12px;margin-bottom:9px}
+.warn-item:last-child{margin-bottom:0}
+.warn-item .hd{display:flex;align-items:center;gap:8px;margin-bottom:5px;flex-wrap:wrap}
+.warn-item .lv{font-size:11px;font-weight:600;padding:1px 7px;border-radius:5px;color:#fff}
+.warn-item .ti{font-size:13.5px;font-weight:600}
+.warn-item .bd{font-size:12.5px;line-height:1.6;color:var(--fg)}
+.warn-item .mt{font-size:11px;color:var(--fg2);margin-top:6px}
+
+.hours{display:flex;gap:8px;overflow-x:auto;padding-bottom:6px}
+.hour{flex:0 0 auto;width:58px;text-align:center;background:var(--bg3);
+  border-radius:11px;padding:9px 4px}
+.hour .h{font-size:11.5px;color:var(--fg2)}
+.hour .t{font-size:14px;font-weight:600;margin-top:4px}
+.hour .s{font-size:10.5px;color:var(--fg2);margin-top:2px;white-space:nowrap;
+  overflow:hidden;text-overflow:ellipsis}
+
+.day{display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid var(--line)}
+.day:last-child{border-bottom:0}
+.day .d{width:56px;font-size:13.5px}
+.day .s{flex:1;font-size:13px;color:var(--fg2);min-width:0;overflow:hidden;
+  text-overflow:ellipsis;white-space:nowrap}
+.day .r{font-size:13.5px;font-variant-numeric:tabular-nums;white-space:nowrap}
+.day .r b{color:var(--warm);font-weight:600}
+.day .r i{color:var(--cold);font-style:normal}
+
+.idx{display:grid;grid-template-columns:repeat(auto-fill,minmax(132px,1fr));gap:8px}
+.idx .it{background:var(--bg3);border-radius:10px;padding:9px 11px;font-size:12px}
+.idx .it b{display:block;font-size:13px;margin-bottom:2px}
+.idx .it span{color:var(--fg2)}
+
+/* ---------- 状态 ---------- */
+.meters{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.meter .k{font-size:11px;color:var(--fg2)}
+.meter .v{font-size:19px;font-weight:600;font-variant-numeric:tabular-nums}
+.bar{height:5px;background:var(--line);border-radius:3px;margin-top:6px;overflow:hidden}
+.bar i{display:block;height:100%;width:0;background:var(--acc2);border-radius:3px;transition:width .35s}
+.bar i.warn{background:var(--warm)}
+.bar i.crit{background:var(--err)}
+
+table.kv{width:100%;border-collapse:collapse;font-size:13px}
+table.kv td{padding:8px 0;border-bottom:1px solid var(--line);vertical-align:top}
+table.kv td:first-child{color:var(--fg2);width:42%}
+table.kv tr:last-child td{border-bottom:0}
+table.kv .mono{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12.5px}
+
+/* ---------- 流量 ---------- */
+.dev{display:flex;align-items:center;justify-content:space-between;
+  padding:10px 0;border-bottom:1px solid var(--line)}
+.dev:last-child{border-bottom:0}
+.dev .nm{font-size:13.5px;font-weight:500}
+.dev .ip{color:var(--fg2);font-size:11.5px}
+.dev .vals{text-align:right;white-space:nowrap;
+  font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12.5px}
+.dev .dn{color:var(--ok)}
+.dev .up{color:var(--cold)}
+.rank{display:inline-block;width:20px;color:var(--fg2);font-size:12px}
+
+/* ---------- IPTV ---------- */
+.player{position:relative;background:#0b0e12;border-radius:12px;overflow:hidden;
+  aspect-ratio:16/9;border:1px solid var(--line)}
+video{width:100%;height:100%;display:block;background:#0b0e12}
+.ptip{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+  color:#8b98a9;font-size:13px;text-align:center;padding:0 24px;pointer-events:none}
+.ph{display:flex;align-items:center;gap:10px;margin-bottom:10px}
+.ph b{font-size:14px}
+.search{background:var(--bg3);border:1px solid var(--line);color:var(--fg);
+  border-radius:9px;padding:7px 11px;font:inherit;font-size:13px;width:46%}
+.search:focus{outline:none;border-color:var(--acc)}
+.grp{margin-top:14px}
+.grp h3{margin:0 0 4px;font-size:12px;color:var(--fg2);font-weight:600;letter-spacing:.5px}
+.ch{display:flex;align-items:center;justify-content:space-between;gap:10px;
+  padding:10px 10px;border-radius:9px;font-size:14px;cursor:pointer}
+.ch:hover{background:var(--bg3)}
+.ch.playing{background:var(--bg3);box-shadow:inset 2px 0 0 var(--acc)}
+.ch .tag{font-size:11px;color:var(--fg2);white-space:nowrap}
+.ch .tag.live{color:var(--ok)}
+.ch .tag.live::before{content:"● ";font-size:9px;vertical-align:1px}
+.ch .tag.dead{color:var(--fg2)}
+
+/* ---------- 提示 ---------- */
+.toast{position:fixed;left:50%;bottom:28px;transform:translateX(-50%) translateY(14px);
+  background:#1f2937;border:1px solid var(--line);color:#e6edf3;padding:9px 18px;
+  border-radius:9px;font-size:13px;opacity:0;transition:.25s;pointer-events:none;z-index:60}
+.toast.on{opacity:1;transform:translateX(-50%) translateY(0)}
+.foot{color:var(--fg2);font-size:12px;text-align:center;margin:18px 0 0;line-height:1.9}
+.foot code{background:var(--bg3);border:1px solid var(--line);border-radius:5px;padding:1px 6px;font-size:11.5px}
+
+@media (max-width:520px){
+  .wrap{padding:12px 12px 32px}
+  .nav{gap:4px;padding:9px 10px}
+  .nav a{padding:4px 9px;font-size:12px}
+  .now .temp{font-size:58px}
+  .meters{grid-template-columns:1fr 1fr;gap:10px}
+  .grid{grid-template-columns:1fr}
+}
+
+</style>
+</head>
+<body>
+
+<div id="topbar"></div>
+
+<div class="wrap">
+  <div class="card">
+    <div class="ph" style="justify-content:space-between">
+      <b>设备</b>
+      <a class="btn mini" id="btnRefresh">刷新</a>
+    </div>
+    <table class="kv">
+      <tr><td>主机名</td><td id="host" class="mono">—</td></tr>
+      <tr><td>IP 地址</td><td id="ip" class="mono">—</td></tr>
+      <tr><td>MAC</td><td id="mac" class="mono">—</td></tr>
+      <tr><td>WiFi</td><td id="ssid">—</td></tr>
+      <tr><td>信号强度</td><td id="rssi">—</td></tr>
+      <tr><td>信道 / 功率</td><td id="wchan">—</td></tr>
+      <tr><td>省电模式</td><td id="wpm">—</td></tr>
+      <tr><td>运行时长</td><td id="up">—</td></tr>
+      <tr><td>启动到就绪</td><td id="ready">—</td></tr>
+    </table>
+  </div>
+
+  <div class="card">
+    <h2>资源占用</h2>
+    <div class="meters">
+      <div class="meter"><div class="k">堆内存（空闲）</div><div class="v" id="mem">—</div>
+        <div class="bar"><i id="memBar"></i></div></div>
+      <div class="meter"><div class="k">内部 RAM（WiFi / lwIP）</div><div class="v" id="iram">—</div>
+        <div class="bar"><i id="iramBar"></i></div></div>
+      <div class="meter"><div class="k">Flash（可用）</div><div class="v" id="flash">—</div>
+        <div class="bar"><i id="flashBar"></i></div></div>
+    </div>
+    <table class="kv" style="margin-top:12px">
+      <tr><td>堆明细</td><td id="memDetail" class="mono">—</td></tr>
+      <tr><td>内部 RAM</td><td id="iramDetail" class="mono">—</td></tr>
+      <tr><td>Flash 明细</td><td id="flashDetail" class="mono">—</td></tr>
+    </table>
+  </div>
+
+  <div class="card">
+    <h2>芯片</h2>
+    <table class="kv">
+      <tr><td>芯片温度</td><td id="chipTemp">—</td></tr>
+      <tr><td>复位原因</td><td id="chipReset">—</td></tr>
+      <tr><td>代码优化</td><td id="chipOpt" class="mono">—</td></tr>
+      <tr><td>内部 RAM 分块</td><td id="chipBlocks" class="mono">—</td></tr>
+    </table>
+  </div>
+
+  <div class="card">
+    <h2>固件</h2>
+    <table class="kv">
+      <tr><td>MicroPython</td><td id="fwVer" class="mono">—</td></tr>
+      <tr><td>构建</td><td id="fwBuild" class="mono">—</td></tr>
+      <tr><td>板型</td><td id="fwBoard">—</td></tr>
+      <tr><td>CPU 频率</td><td id="fwFreq">—</td></tr>
+    </table>
+  </div>
+
+  <div class="card">
+    <h2>板上文件 <span class="muted small" id="fsum"></span></h2>
+    <table class="kv" id="files"><tr><td class="muted small">读取中…</td><td></td></tr></table>
+  </div>
+
+  <p class="foot">
+    数据全部读自板子本地（<code>os</code> / <code>gc</code> / <code>machine</code>），
+    <b>不经过路由器、不发任何网络请求</b>，所以这一页不会给路由器添负担。
+  </p>
+</div>
+
+<script>
+/* ESP32 终端服务器 · 公共前端
+ * 各页面共用：取数、格式化、顶栏与页签、提示条
+ */
+"use strict";
+
+var MR = (function () {
+
+  var PAGES = [
+    { href: "/", title: "首页" },
+    { href: "/weather.html", title: "天气" },
+    { href: "/market.html", title: "行情" },
+    { href: "/radio.html", title: "电台" },
+    { href: "/info.html", title: "本机" },
+    { href: "/ntp.html", title: "NTP" },
+    { href: "/iptv.html", title: "IPTV" }
+  ];
+
+  function $(id) { return document.getElementById(id); }
+
+  function esc(s) {
+    return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+    });
+  }
+
+  function api(path) {
+    return fetch(path, { cache: "no-store" }).then(function (r) {
+      if (!r.ok) throw new Error("HTTP " + r.status);
+      return r.json();
+    });
+  }
+
+  function fmtBytes(n) {
+    n = Number(n) || 0;
+    if (n < 1024) return n + " B";
+    if (n < 1048576) return (n / 1024).toFixed(1) + " KB";
+    if (n < 1073741824) return (n / 1048576).toFixed(1) + " MB";
+    return (n / 1073741824).toFixed(2) + " GB";
+  }
+
+  function fmtDur(sec) {
+    sec = Number(sec) || 0;
+    var d = Math.floor(sec / 86400), h = Math.floor(sec % 86400 / 3600), m = Math.floor(sec % 3600 / 60);
+    if (d) return d + " 天 " + h + " 小时";
+    if (h) return h + " 小时 " + m + " 分";
+    return m + " 分钟";
+  }
+
+  function pad(n) { return n < 10 ? "0" + n : "" + n; }
+  function hhmm(d) { return pad(d.getHours()) + ":" + pad(d.getMinutes()); }
+  function mmdd(s) { return s ? s.substr(5, 5) : "--"; }
+
+  function currentPage() {
+    var p = location.pathname;
+    if (p === "" || p === "/" || p === "/index.html") return "/";
+    return p.replace(/^\/+/, "/");
+  }
+
+  /* 顶栏 + 页签。title 为空时不显示返回键 */
+  function mountTop(title) {
+    var cur = currentPage();
+    var nav = PAGES.map(function (p) {
+      var on = p.href === cur ? " on" : "";
+      return '<a class="' + on.trim() + '" href="' + p.href + '">' + p.title + "</a>";
+    }).join("");
+
+    var back = cur === "/" ? "" :
+      '<a class="back" href="/" title="返回首页">‹</a>';
+
+    var html =
+      '<div class="top">' + back +
+      "<h1>" + esc(title) + "</h1>" +
+      '<div class="st"><span class="dot" id="hDot"></span><span id="hIp">连接中…</span></div>' +
+      "</div>" +
+      '<div class="nav">' + nav + "</div>";
+
+    var host = document.getElementById("topbar");
+    if (host) host.innerHTML = html;
+  }
+
+  function healthTick() {
+    return api("/api/health").then(function (h) {
+      var dot = $("hDot"), ip = $("hIp");
+      if (!dot) return h;
+      dot.className = "dot " + (h.router_ok ? "on" : "err");
+      ip.textContent = h.ip;
+      ip.title = (h.router_ok ? "路由器可达" : "路由器不可达") + " · RSSI " + h.rssi +
+        " · 运行 " + fmtDur(h.up) + " · 空闲内存 " + fmtBytes(h.mem_free);
+      MR.device = h;
+      return h;
+    }).catch(function () {
+      var dot = $("hDot");
+      if (dot) dot.className = "dot err";
+      return null;
+    });
+  }
+
+  var toastTimer = 0;
+  function toast(msg, ms) {
+    var el = document.getElementById("toast");
+    if (!el) {
+      el = document.createElement("div");
+      el.id = "toast";
+      el.className = "toast";
+      document.body.appendChild(el);
+    }
+    el.textContent = msg;
+    el.className = "toast on";
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(function () { el.className = "toast"; }, ms || 2600);
+  }
+
+  function empty(msg) { return '<span class="muted small">' + esc(msg) + "</span>"; }
+
+  return {
+    $: $, esc: esc, api: api, fmtBytes: fmtBytes, fmtDur: fmtDur,
+    hhmm: hhmm, mmdd: mmdd, mountTop: mountTop, healthTick: healthTick,
+    toast: toast, empty: empty, PAGES: PAGES, device: null
+  };
+})();
+
+</script>
+<script>
+MR.mountTop("本机信息");
+
+function bar(id, pct) {
+  var el = MR.$(id);
+  el.style.width = Math.max(0, Math.min(100, pct)) + "%";
+  el.className = pct >= 90 ? "crit" : pct >= 75 ? "warn" : "";
+}
+
+function render(d) {
+  if (!d || !d.ok) return;
+  var n = d.net || {}, m = d.mem || {}, f = d.flash || {}, fw = d.fw || {};
+  var ch = d.chip || {}, hp = d.heap || {};
+
+  MR.$("host").textContent = n.hostname || "—";
+  MR.$("ip").textContent = n.ip || "—";
+  MR.$("mac").textContent = n.mac || "—";
+  MR.$("ssid").textContent = (n.ssid || "—") +
+    (n.status_name ? " · " + n.status_name : "");
+  MR.$("rssi").textContent = n.rssi != null ? n.rssi + " dBm" : "—";
+  MR.$("wchan").textContent = (n.channel ? "CH " + n.channel : "—") +
+    (n.txpower ? " · " + n.txpower + " dBm" : "");
+  MR.$("wpm").textContent = n.pm_name || "—";
+  MR.$("up").textContent = MR.fmtDur(d.up || 0);
+  MR.$("ready").textContent = d.ready_ms ? (d.ready_ms / 1000).toFixed(2) + " 秒" : "—";
+
+  var mp = m.total ? m.used * 100 / m.total : 0;
+  MR.$("mem").textContent = MR.fmtBytes(m.free) + " 空闲";
+  bar("memBar", mp);
+  MR.$("memDetail").textContent = m.total
+    ? "总 " + MR.fmtBytes(m.total) + " · 已用 " + MR.fmtBytes(m.used) +
+      " · 空闲 " + MR.fmtBytes(m.free)
+    : "—";
+
+  var fp = f.total ? f.used * 100 / f.total : 0;
+  MR.$("flash").textContent = MR.fmtBytes(f.avail) + " 可用";
+  bar("flashBar", fp);
+  MR.$("flashDetail").textContent = f.total
+    ? "总 " + MR.fmtBytes(f.total) + " · 已用 " + MR.fmtBytes(f.used) +
+      " · 可用 " + MR.fmtBytes(f.avail)
+    : "—";
+
+  /* 内部 RAM：只统计内部 SRAM 块，跳过 PSRAM（>=1MB 那块就是 Python 堆）。
+     「最大连续块」是关键 —— 它掉到几 KB 时，TCP 握手能过但收发会失败。 */
+  var blocks = hp.data || [];
+  var iTotal = 0, iFree = 0, iMax = 0, iCnt = 0, detail = [];
+  blocks.forEach(function (b) {
+    if (b[0] >= 1048576) return;
+    iTotal += b[0]; iFree += b[1]; iCnt++;
+    if (b[2] > iMax) iMax = b[2];
+    detail.push(MR.fmtBytes(b[1]));
+  });
+  if (iCnt) {
+    MR.$("iram").textContent = MR.fmtBytes(iFree) + " 空闲";
+    bar("iramBar", iTotal ? (iTotal - iFree) * 100 / iTotal : 0);
+    MR.$("iramDetail").textContent =
+      "空闲 " + MR.fmtBytes(iFree) + " / 共 " + MR.fmtBytes(iTotal) +
+      " · 最大连续 " + MR.fmtBytes(iMax) + " · " + iCnt + " 个块";
+    MR.$("chipBlocks").textContent = detail.join(" / ");
+    MR.$("iramDetail").style.color = iMax < 16384 ? "var(--err)" : "";
+  } else {
+    MR.$("iram").textContent = "—";
+    MR.$("iramDetail").textContent = "—";
+    MR.$("chipBlocks").textContent = "—";
+  }
+
+  MR.$("chipTemp").textContent = ch.temp != null ? ch.temp + " °C" : "—";
+  MR.$("chipReset").textContent = ch.reset_name || "—";
+  MR.$("chipOpt").textContent = fw.opt != null && fw.opt >= 0
+    ? "O" + fw.opt + "（0=不优化，字节码更小）" : "—";
+
+  MR.$("fwVer").textContent = "v" + (fw.ver || "—");
+  MR.$("fwBuild").textContent = fw.build || "—";
+  MR.$("fwBoard").textContent = fw.board || "—";
+  /* 频率这一栏永远读到满频：任何查询请求自己就会把 CPU 拉起来。
+     所以补一个降频目标，说明空闲时它会掉到多少。 */
+  MR.$("fwFreq").textContent = fw.freq
+    ? (fw.freq / 1000000) + " MHz" + (fw.pm_mhz
+        ? "（空闲降到 " + fw.pm_mhz + " MHz）" : "")
+    : "—";
+
+  var fs = d.files || [], total = 0;
+  var rows = fs.map(function (x) {
+    total += x[1] || 0;
+    return '<tr><td class="mono">' + MR.esc(x[0]) + '</td><td class="mono">' +
+      MR.fmtBytes(x[1]) + "</td></tr>";
+  }).join("");
+  MR.$("files").innerHTML = rows || '<tr><td class="muted small">无文件</td><td></td></tr>';
+  MR.$("fsum").textContent = fs.length + " 个 · 共 " + MR.fmtBytes(total);
+}
+
+function load() {
+  var b = MR.$("btnRefresh");
+  b.disabled = true;
+  return MR.api("/api/info").then(render).catch(function () {
+    MR.$("files").innerHTML = '<tr><td class="muted small">读取失败，点「刷新」重试</td><td></td></tr>';
+  }).then(function () { b.disabled = false; });
+}
+
+MR.$("btnRefresh").addEventListener("click", load);
+load();
+</script>
+</body>
+</html>

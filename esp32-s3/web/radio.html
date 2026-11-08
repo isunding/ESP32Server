@@ -1,0 +1,443 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>电台 · ESP32 终端服务器</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="/theme.css?v=20261107d">
+<style>
+  .playerbox{background:linear-gradient(150deg,var(--bg2),var(--bg3));border:1px solid var(--line);
+    border-radius:var(--radius);padding:14px 16px;margin-bottom:12px}
+  .playerbox audio{width:100%;display:block;margin-top:10px}
+  .nowline{display:flex;align-items:center;gap:8px;font-size:15px;font-weight:600;
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .nowline .bd{width:7px;height:7px;border-radius:50%;background:var(--fg2);flex:0 0 7px}
+  .nowline.on .bd{background:var(--acc);box-shadow:0 0 0 4px color-mix(in srgb,var(--acc) 18%,transparent)}
+  .playstate{margin-top:8px;font-size:12.5px;color:var(--fg2);min-height:18px}
+  .playstate.on{color:var(--acc)}
+  .playstate.err{color:var(--err)}
+
+  .srch{position:relative;margin-bottom:12px}
+  .srch input{width:100%;background:var(--bg2);border:1px solid var(--line);color:var(--fg);
+    border-radius:11px;padding:10px 34px 10px 12px;font:inherit;font-size:13.5px}
+  .srch input:focus{outline:none;border-color:var(--acc)}
+  .srch .clr{position:absolute;right:10px;top:50%;transform:translateY(-50%);
+    color:var(--fg2);cursor:pointer;font-size:17px;line-height:1;padding:2px 4px}
+  .srch .clr:hover{color:var(--fg)}
+
+  .grp{background:var(--bg2);border:1px solid var(--line);border-radius:13px;
+    margin-bottom:10px;overflow:hidden}
+  .gh{width:100%;display:flex;align-items:center;gap:9px;padding:12px 14px;
+    background:none;border:0;color:var(--fg);font:inherit;cursor:pointer;text-align:left}
+  .gh:hover{background:var(--bg3)}
+  .gh .gt{flex:1;font-size:14px;font-weight:600}
+  .gh .gc{font-size:11px;color:var(--fg2);background:var(--bg3);border:1px solid var(--line);
+    border-radius:20px;padding:0 8px;line-height:18px}
+  .gh .ar{color:var(--fg2);font-size:11px;transition:transform .18s;width:12px;text-align:center}
+  .grp.open .gh .ar{transform:rotate(180deg)}
+  .gl{display:none;border-top:1px solid var(--line)}
+  .grp.open .gl{display:block}
+
+  .ch{display:flex;align-items:center;justify-content:space-between;gap:10px;
+    padding:10px 14px;border-bottom:1px solid var(--line);cursor:pointer}
+  .ch:last-child{border-bottom:0}
+  .ch:hover{background:var(--bg3)}
+  .ch.playing{background:var(--bg3);box-shadow:inset 2px 0 0 var(--acc)}
+  .ch .l{display:flex;align-items:center;gap:9px;min-width:0}
+  .ch .ic{width:16px;color:var(--fg2);font-size:11px;flex:0 0 16px;text-align:center}
+  .ch.playing .ic{color:var(--acc)}
+  .ch .nm{font-size:13.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .ch .ds{font-size:11px;color:var(--fg2);margin-top:1px}
+  .ch .tag{font-size:11px;color:var(--fg2);white-space:nowrap;flex:0 0 auto}
+  .ch.playing .tag{color:var(--acc)}
+  .none{padding:16px 14px;color:var(--fg2);font-size:13px;text-align:center}
+
+  .urlrow{display:flex;gap:8px}
+  .urlrow input{flex:1;min-width:0;background:var(--bg3);border:1px solid var(--line);
+    color:var(--fg);border-radius:9px;padding:8px 11px;font:inherit;font-size:13px}
+  .urlrow input:focus{outline:none;border-color:var(--acc)}
+</style>
+</head>
+<body>
+
+<div id="topbar"></div>
+
+<div class="wrap">
+  <div class="playerbox">
+    <div class="nowline" id="nowline"><span class="bd"></span><span id="nowname">未选择电台</span></div>
+    <audio id="au" controls preload="none"></audio>
+    <div class="playstate" id="state">选一个电台开始播放</div>
+  </div>
+
+  <div class="srch">
+    <input id="q" placeholder="搜索电台 / 城市 / 频率…" autocomplete="off">
+    <span class="clr" id="clr" hidden>×</span>
+  </div>
+
+  <div id="groups"></div>
+
+  <div class="card" style="margin-top:14px">
+    <h2>自定义地址</h2>
+    <div class="urlrow">
+      <input id="url" placeholder="http(s)://…  .mp3 / .aac / .m3u8" autocomplete="off">
+      <a class="btn primary" id="playUrl">播放</a>
+    </div>
+    <p class="muted small" style="margin:10px 0 0">
+      支持 MP3 / AAC 直链与 HLS（<code>.m3u8</code>，需电台允许跨域）。地址只存本机浏览器。
+    </p>
+  </div>
+
+  <p class="foot">
+    67 个台 / 9 类，逐个实测「国内可直连」。音频由<b>浏览器直连电台服务器</b>，
+    不经过 ESP32 —— 板子只发这一个页面，听广播不会给它加任何负载。
+  </p>
+</div>
+
+<script src="/ui.js?v=20261107d"></script>
+<script>
+MR.mountTop("电台");
+
+/* 2026-11 实测（国内可直连）：
+   - lhttp.qtfm.cn / lhttp.qingting.fm / lhttp-hw.qtfm.cn：MP3 64k 直链，<audio> 直接播
+   - sk.cri.cn：HLS，Access-Control-Allow-Origin: *
+   - brtv-radiolive.rbc.cn：HLS，CORS *
+   - m.tyradio.uk：MP3 直链
+   不要用央广 ngcdn 系列、cnr.cn 的 m3u8：CORS 只放行 app.cctv.com，Chrome 里 hls.js 拉不到分片。 */
+var GROUPS = [
+  { t: "央广 · 国家级", s: [
+    { n: "中国之声", f: "CNR-1 · 64k", u: "https://lhttp.qtfm.cn/live/15318317/64k.mp3" },
+    { n: "国际新闻", f: "CNR · 64k", u: "https://lhttp.qtfm.cn/live/20500172/64k.mp3" },
+    { n: "CRI 环球资讯广播", f: "中国国际广播电台 · HLS", u: "http://sk.cri.cn/905.m3u8" },
+    { n: "CRI 华语环球广播", f: "中国国际广播电台 · HLS", u: "http://sk.cri.cn/hyhq.m3u8" },
+    { n: "CRI 南海之声", f: "中国国际广播电台 · HLS", u: "https://sk.cri.cn/nhzs.m3u8" },
+    { n: "CGTN Radio 英语资讯", f: "中国国际广播电台 · HLS", u: "http://sk.cri.cn/am846.m3u8" }
+  ]},
+  { t: "北京", s: [
+    { n: "城市广播 FM107.3", f: "北京广播电视台 · HLS", u: "https://brtv-radiolive.rbc.cn/alive/fm1073.m3u8" },
+    { n: "交通广播 FM103.9", f: "64k", u: "https://lhttp.qingting.fm/live/336/64k.mp3" },
+    { n: "新闻广播 FM100.6", f: "64k", u: "https://lhttp.qtfm.cn/live/339/64k.mp3" },
+    { n: "音乐广播 FM97.4", f: "64k", u: "https://lhttp.qtfm.cn/live/332/64k.mp3" },
+    { n: "文艺广播 FM87.6", f: "64k", u: "https://lhttp.qtfm.cn/live/333/64k.mp3" }
+  ]},
+  { t: "上海", s: [
+    { n: "上海新闻广播 FM93.4", f: "64k", u: "https://lhttp.qingting.fm/live/270/64k.mp3" },
+    { n: "动感 101 FM101.7", f: "流行音乐 · 64k", u: "https://lhttp.qingting.fm/live/274/64k.mp3" },
+    { n: "经典金曲广播 FM103.7", f: "64k", u: "https://lhttp-hw.qtfm.cn/live/273/64k.mp3" },
+    { n: "经典音乐广播 FM94.7", f: "古典 · 64k", u: "https://lhttp-hw.qtfm.cn/live/267/64k.mp3" },
+    { n: "戏剧曲艺广播 FM97.2", f: "64k", u: "https://lhttp-hw.qtfm.cn/live/269/64k.mp3" }
+  ]},
+  { t: "华东 · 江浙沪皖", s: [
+    { n: "上海交通广播 FM105.7", f: "上海 · 64k", u: "https://lhttp-hw.qtfm.cn/live/266/64k.mp3" },
+    { n: "上海长三角之声 FM89.9", f: "上海 · 64k", u: "https://lhttp-hw.qtfm.cn/live/275/64k.mp3" },
+    { n: "上海浦东新娱乐 FM100.1", f: "上海 · 64k", u: "http://lhttp.qingting.fm/live/5022341/64k.mp3" },
+    { n: "南京音乐广播", f: "江苏 · 64k", u: "https://lhttp-hw.qtfm.cn/live/4963/64k.mp3" },
+    { n: "苏州交通经济广播", f: "江苏 · 64k", u: "http://lhttp.qingting.fm/live/2806/64k.mp3" },
+    { n: "苏州都市音乐广播", f: "江苏 · 64k", u: "http://lhttp.qingting.fm/live/2803/64k.mp3" },
+    { n: "苏州新闻广播", f: "江苏 · 64k", u: "http://lhttp.qingting.fm/live/2808/64k.mp3" },
+    { n: "无锡新闻综合 FM93.7", f: "江苏 · 64k", u: "https://lhttp.qtfm.cn/live/2777/64k.mp3" },
+    { n: "常州交通广播", f: "江苏 · 64k", u: "https://lhttp.qtfm.cn/live/2796/64k.mp3" },
+    { n: "南通综合广播", f: "江苏 · 64k", u: "https://lhttp.qtfm.cn/live/21277/64k.mp3" },
+    { n: "徐州交通广播", f: "江苏 · 64k", u: "https://lhttp.qingting.fm/live/4924/64k.mp3" },
+    { n: "杭州交通经济广播", f: "浙江 · 64k", u: "https://lhttp.qtfm.cn/live/1133/64k.mp3" },
+    { n: "杭州西湖之声", f: "浙江 · 64k", u: "https://lhttp.qtfm.cn/live/1163/64k.mp3" },
+    { n: "宁波综合广播", f: "浙江 · 64k", u: "https://lhttp-hw.qtfm.cn/live/1138/64k.mp3" },
+    { n: "宁波交通广播", f: "浙江 · 64k", u: "https://lhttp-hw.qtfm.cn/live/1140/64k.mp3" },
+    { n: "温州综合广播", f: "浙江 · 64k", u: "https://lhttp.qtfm.cn/live/1155/64k.mp3" },
+    { n: "绍兴交通广播", f: "浙江 · 64k", u: "http://lhttp.qingting.fm/live/5053/64k.mp3" }
+  ]},
+  { t: "安徽 · 合肥", s: [
+    { n: "安徽综合广播", f: "安徽 · 64k", u: "https://lhttp.qtfm.cn/live/4919/64k.mp3" },
+    { n: "安徽交通广播", f: "安徽 · 64k", u: "https://lhttp.qtfm.cn/live/1949/64k.mp3" },
+    { n: "安徽经济广播", f: "安徽 · 64k", u: "https://lhttp.qtfm.cn/live/4916/64k.mp3" },
+    { n: "安徽音乐广播", f: "安徽 · 64k", u: "https://lhttp.qtfm.cn/live/1947/64k.mp3" },
+    { n: "安徽生活广播", f: "安徽 · 64k", u: "http://lhttp.qingting.fm/live/1948/64k.mp3" },
+    { n: "安徽旅游广播", f: "安徽 · 64k", u: "https://lhttp.qtfm.cn/live/15318219/64k.mp3" },
+    { n: "安徽戏曲广播", f: "安徽 · 64k", u: "https://lhttp.qtfm.cn/live/1952/64k.mp3" },
+    { n: "安徽小说评书广播", f: "安徽 · 64k", u: "https://lhttp.qtfm.cn/live/1951/64k.mp3" },
+    { n: "合肥交通信息广播", f: "合肥 · 64k", u: "https://lhttp-hw.qtfm.cn/live/1960/64k.mp3" }
+  ]},
+  { t: "各地电台", s: [
+    { n: "四川新闻广播", f: "成都 · 64k", u: "https://lhttp.qtfm.cn/live/4906/64k.mp3" },
+    { n: "湖北之声", f: "武汉 · 64k", u: "https://lhttp.qingting.fm/live/1303/64k.mp3" },
+    { n: "武汉新闻广播", f: "64k", u: "http://lhttp.qingting.fm/live/20198/64k.mp3" },
+    { n: "天津经济广播", f: "64k", u: "https://lhttp-hw.qtfm.cn/live/15318227/64k.mp3" },
+    { n: "福建交通广播", f: "64k", u: "https://lhttp.qtfm.cn/live/1733/64k.mp3" },
+    { n: "福建新闻综合广播", f: "64k", u: "https://lhttp.qtfm.cn/live/1731/64k.mp3" },
+    { n: "陕西交通广播", f: "西安 · 64k", u: "https://lhttp.qtfm.cn/live/1601/64k.mp3" },
+    { n: "海南国际旅游岛之声", f: "64k", u: "http://lhttp.qingting.fm/live/1862/64k.mp3" }
+  ]},
+  { t: "音乐", s: [
+    { n: "500 首华语经典", f: "64k", u: "https://lhttp.qtfm.cn/live/5022308/64k.mp3" },
+    { n: "动听音乐台", f: "64k", u: "https://lhttp-hw.qtfm.cn/live/5022107/64k.mp3" },
+    { n: "星空电台 STAR RADIO", f: "64k", u: "https://lhttp-hw.qtfm.cn/live/5022379/64k.mp3" },
+    { n: "FM891 线上音乐台", f: "64k", u: "https://lhttp.qtfm.cn/live/20500215/64k.mp3" },
+    { n: "AsiaFM 高清音乐台", f: "64k", u: "https://lhttp.qtfm.cn/live/15318341/64k.mp3" },
+    { n: "AsiaFM 亚洲粤语台", f: "粤语歌 · 64k", u: "https://lhttp.qtfm.cn/live/15318569/64k.mp3" },
+    { n: "哈尔滨古典音乐广播", f: "古典 · 64k", u: "http://lhttp.qingting.fm/live/5022338/64k.mp3" },
+    { n: "长沙音乐广播", f: "64k", u: "https://lhttp.qtfm.cn/live/20847/64k.mp3" }
+  ]},
+  { t: "曲艺 · 故事", s: [
+    { n: "济南故事广播", f: "64k", u: "https://lhttp.qtfm.cn/live/1672/64k.mp3" },
+    { n: "阿基米德故事会", f: "64k", u: "https://lhttp.qtfm.cn/live/20500182/64k.mp3" },
+    { n: "听云评书台", f: "MP3 直连", u: "https://m.tyradio.uk/typs.mp3" },
+    { n: "听云相声台", f: "MP3 直连", u: "https://m.tyradio.uk/tyxs.mp3" },
+    { n: "听 · 越剧", f: "戏曲 · 64k", u: "https://lhttp.qtfm.cn/live/20500178/64k.mp3" }
+  ]},
+  { t: "财经", s: [
+    { n: "第一财经 FM90.9", f: "上海 · 64k", u: "https://lhttp-hw.qtfm.cn/live/276/64k.mp3" },
+    { n: "广东股市广播", f: "64k", u: "https://lhttp.qtfm.cn/live/4847/64k.mp3" },
+    { n: "海上财经", f: "64k", u: "https://lhttp.qtfm.cn/live/20500170/64k.mp3" }
+  ]}
+];
+
+/* 打平并给每个台一个序号，点击时用 data-uid 索引 */
+var FLAT = [];
+GROUPS.forEach(function (g) {
+  g.s.forEach(function (s) {
+    s.gi = GROUPS.indexOf(g);
+    s.key = (s.n + " " + s.f + " " + g.t).toLowerCase();
+    s.uid = FLAT.length;
+    FLAT.push(s);
+  });
+});
+
+var au = MR.$("au");
+var hls = null;
+var cur = null;
+var OPEN_KEY = "mr_radio_open";
+
+function setState(txt, cls) {
+  var el = MR.$("state");
+  el.textContent = txt;
+  el.className = "playstate" + (cls ? " " + cls : "");
+}
+
+function setNow(name, on) {
+  MR.$("nowname").textContent = name || "未选择电台";
+  MR.$("nowline").className = "nowline" + (on ? " on" : "");
+}
+
+function stopHls() {
+  if (hls) {
+    try { hls.destroy(); } catch (e) { }
+    hls = null;
+  }
+}
+
+function markPlaying(uid) {
+  var nodes = MR.$("groups").querySelectorAll(".ch");
+  for (var i = 0; i < nodes.length; i++) {
+    var isOn = Number(nodes[i].getAttribute("data-uid")) === uid;
+    nodes[i].classList.toggle("playing", isOn);
+    var tag = nodes[i].querySelector(".tag");
+    if (tag) tag.textContent = isOn ? "● 播放中" : "播放";
+  }
+}
+
+/* HLS 内核按需加载：89KB 的 hls.js 只在真的点 HLS 电台时才下载。
+   页面本身现在是一条内联好的 HTML，整站最怕的就是「一次访问开好几条连接」。
+   纯 MP3 直链的台完全用不到它。 */
+var _hlsP = null;
+function loadHls() {
+  if (window.Hls) return Promise.resolve();
+  if (_hlsP) return _hlsP;
+  _hlsP = new Promise(function (resolve, reject) {
+    var s = document.createElement("script");
+    var done = false;
+    var timer = setTimeout(function () {
+      if (done) return;
+      done = true;
+      if (s.parentNode) s.parentNode.removeChild(s);
+      reject(new Error("timeout"));
+    }, 20000);
+    s.src = "/hls.js";
+    s.onload = function () {
+      if (done) return;
+      done = true; clearTimeout(timer);
+      if (window.Hls) resolve(); else reject(new Error("empty"));
+    };
+    s.onerror = function () {
+      if (done) return;
+      done = true; clearTimeout(timer);
+      reject(new Error("load error"));
+    };
+    document.head.appendChild(s);
+  });
+  return _hlsP;
+}
+
+function play(s) {
+  if (/\.m3u8(\?|$)/i.test(s.u) && !window.Hls) {
+    setState("加载播放内核…");
+    loadHls().then(function () { play(s); }).catch(function () {
+      setState("播放内核加载失败，MP3 直链的台仍可播放", "err");
+    });
+    return;
+  }
+  stopHls();
+  cur = s;
+  markPlaying(s.uid);
+  setNow(s.n, true);
+  setState("正在连接：" + s.n);
+
+  if (/\.m3u8(\?|$)/i.test(s.u)) {
+    if (window.Hls && window.Hls.isSupported()) {
+      hls = new Hls({ enableWorker: false, lowLatencyMode: false });
+      hls.loadSource(s.u);
+      hls.attachMedia(au);
+      hls.on(Hls.Events.ERROR, function (evt, data) {
+        if (data && data.fatal) setState("播放失败：" + (data.details || "HLS 错误"), "err");
+      });
+    } else if (au.canPlayType("application/vnd.apple.mpegurl")) {
+      au.src = s.u;
+    } else {
+      setState("这个浏览器不支持 HLS 直播流", "err");
+      return;
+    }
+  } else {
+    au.src = s.u;
+  }
+
+  var p = au.play();
+  if (p && p.then) {
+    p.then(function () { setState("正在播放：" + s.n, "on"); })
+      .catch(function () { setState("已就绪，点播放键开始（浏览器自动播放限制）", "on"); });
+  }
+}
+
+au.addEventListener("error", function () {
+  if (au.src && cur) setState("流中断或地址不可用：" + cur.n, "err");
+});
+
+/* ---------- 折叠状态 ---------- */
+function readOpen() {
+  try {
+    var v = JSON.parse(localStorage.getItem(OPEN_KEY) || "null");
+    if (v && v.length) return v;
+  } catch (e) { }
+  return [0];   // 默认只展开第一组
+}
+
+function saveOpen(arr) {
+  try { localStorage.setItem(OPEN_KEY, JSON.stringify(arr)); } catch (e) { }
+}
+
+function openList() {
+  var out = [];
+  var grps = MR.$("groups").querySelectorAll(".grp");
+  for (var i = 0; i < grps.length; i++) {
+    if (grps[i].classList.contains("open")) out.push(Number(grps[i].getAttribute("data-gi")));
+  }
+  return out;
+}
+
+/* ---------- 渲染 ---------- */
+function render() {
+  var open = readOpen();
+  var html = "";
+  GROUPS.forEach(function (g, gi) {
+    html += '<section class="grp' + (open.indexOf(gi) >= 0 ? " open" : "") + '" data-gi="' + gi + '">' +
+      '<button class="gh"><span class="gt">' + MR.esc(g.t) + '</span>' +
+      '<span class="gc">' + g.s.length + '</span>' +
+      '<span class="ar">▼</span></button><div class="gl">';
+    g.s.forEach(function (s) {
+      html += '<div class="ch" data-uid="' + s.uid + '">' +
+        '<div class="l"><span class="ic">▶</span><div style="min-width:0">' +
+        '<div class="nm">' + MR.esc(s.n) + '</div>' +
+        '<div class="ds">' + MR.esc(s.f) + '</div></div></div>' +
+        '<span class="tag">播放</span></div>';
+    });
+    html += "</div></section>";
+  });
+  MR.$("groups").innerHTML = html;
+
+  /* 点组头折叠 */
+  var heads = MR.$("groups").querySelectorAll(".gh");
+  for (var i = 0; i < heads.length; i++) {
+    heads[i].addEventListener("click", function () {
+      var grp = this.parentNode;
+      grp.classList.toggle("open");
+      saveOpen(openList());
+    });
+  }
+
+  /* 点台播放 */
+  var rows = MR.$("groups").querySelectorAll(".ch");
+  for (var j = 0; j < rows.length; j++) {
+    rows[j].addEventListener("click", function () {
+      play(FLAT[Number(this.getAttribute("data-uid"))]);
+    });
+  }
+}
+
+/* ---------- 搜索过滤 ---------- */
+function filter(q) {
+  q = (q || "").trim().toLowerCase();
+  MR.$("clr").hidden = !q;
+  var grps = MR.$("groups").querySelectorAll(".grp");
+  for (var i = 0; i < grps.length; i++) {
+    var grp = grps[i];
+    var gi = Number(grp.getAttribute("data-gi"));
+    var rows = grp.querySelectorAll(".ch");
+    var hit = 0;
+    for (var j = 0; j < rows.length; j++) {
+      var s = FLAT[Number(rows[j].getAttribute("data-uid"))];
+      var ok = !q || s.key.indexOf(q) >= 0;
+      rows[j].style.display = ok ? "" : "none";
+      if (ok) hit++;
+    }
+    grp.style.display = hit ? "" : "none";
+    /* 搜索时强制展开有命中的组，退出搜索恢复原折叠状态 */
+    if (q) {
+      grp.classList.toggle("open", hit > 0);
+    } else {
+      var open = readOpen();
+      grp.classList.toggle("open", open.indexOf(gi) >= 0);
+    }
+  }
+  /* 全无命中提示 */
+  var visible = MR.$("groups").querySelectorAll('.grp:not([hidden])');
+  var shown = 0;
+  for (var k = 0; k < visible.length; k++) {
+    if (visible[k].style.display !== "none") shown++;
+  }
+  var tip = MR.$("nodata");
+  if (!shown) {
+    if (!tip) {
+      var d = document.createElement("div");
+      d.id = "nodata";
+      d.className = "none";
+      d.style.cssText = "background:var(--bg2);border:1px solid var(--line);border-radius:13px";
+      d.textContent = "没有匹配的电台，试试「北京」「音乐」「财经」";
+      MR.$("groups").appendChild(d);
+    }
+  } else if (tip) {
+    tip.remove();
+  }
+}
+
+render();
+filter("");
+
+MR.$("q").addEventListener("input", function () { filter(this.value); });
+MR.$("clr").addEventListener("click", function () {
+  MR.$("q").value = "";
+  filter("");
+  MR.$("q").focus();
+});
+
+var lastUrl = "";
+try { lastUrl = localStorage.getItem("mr_radio_url") || ""; } catch (e) { }
+if (lastUrl) MR.$("url").value = lastUrl;
+
+MR.$("playUrl").addEventListener("click", function () {
+  var u = MR.$("url").value.trim();
+  if (!u) { setState("先填一个地址", "err"); return; }
+  if (!/^https?:\/\//i.test(u)) u = "http://" + u;
+  try { localStorage.setItem("mr_radio_url", u); } catch (e) { }
+  play({ n: "自定义地址", u: u, uid: -1 });
+});
+</script>
+</body>
+</html>

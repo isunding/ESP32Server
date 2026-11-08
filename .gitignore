@@ -5,6 +5,7 @@
 
 # ---- 板端真实配置（含 WiFi 密码，务必留在本地）----
 esp32/config.json
+esp32-s3/config.json
 
 # ---- 板端运行时数据（自选股 / 缓存，随环境变化）----
 # calendar.json 为农历年度表缓存，首次运行自动生成且带年份（会过期）
@@ -12,6 +13,12 @@ esp32/watch.json
 esp32/weather.json
 esp32/channels.json
 esp32/calendar.json
+esp32/whist.json
+esp32-s3/watch.json
+esp32-s3/weather.json
+esp32-s3/channels.json
+esp32-s3/calendar.json
+esp32-s3/whist.json
 
 # ---- 密钥与证书 ----
 *.pem
@@ -36,10 +43,12 @@ legacy/
 esp32/README.md
 esp32/backup/
 esp32/tmp_*
-__pycache__/
 esp32/build_mpy/
 esp32/tools/
 esp32/docs/screens/
+esp32-s3/build_mpy/
+esp32-s3/factory/
+__pycache__/
 
 # ---- 已移除功能的实现（历史参考，不参与运行）----
 esp32/alerts.py
@@ -56,6 +65,7 @@ esp32/*.mpy
 
 # ---- 其它 ----
 .workbuddy/
+.tmp-*
 .DS_Store
 Thumbs.db
 *.log

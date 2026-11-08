@@ -1,0 +1,481 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>IPTV · ESP32 终端服务器</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="/theme.css?v=20261107d">
+<style>
+  /* 左右布局：桌面并排，窄屏堆叠 */
+  .iptv{display:grid;gap:14px;align-items:start}
+  @media (min-width:760px){
+    .iptv{grid-template-columns:minmax(0,1.15fr) minmax(0,1fr)}
+  }
+
+  /* 左：播放器 */
+  .player{
+    background:#000;border:1px solid var(--line);border-radius:var(--radius);
+    overflow:hidden;position:relative;aspect-ratio:16/9;
+  }
+  @media (min-width:760px){
+    .player{position:sticky;top:122px}
+  }
+  .player video{width:100%;height:100%;display:block;background:#000}
+  .player .ph-cover{
+    position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+    pointer-events:none;
+  }
+  /* 未播放空态：纯图标，无文字 */
+  .player .ph-cover .pl-ico{
+    width:64px;height:64px;border-radius:50%;border:2px solid rgba(255,255,255,.18);
+    display:flex;align-items:center;justify-content:center;color:rgba(255,255,255,.28);
+  }
+  .player .ph-cover .pl-ico svg{width:30px;height:30px;fill:currentColor}
+  .pmeta{display:flex;align-items:center;gap:10px;margin:10px 2px 2px}
+  .pmeta .ptitle{font-size:14px;font-weight:600;flex:1;min-width:0;
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .pmeta .pstat{font-size:11px;color:var(--fg2);flex:0 0 auto}
+  .pctl{display:flex;gap:8px;flex-wrap:wrap;margin:8px 0 0}
+  .pctl .btn{flex:1 1 auto;min-width:0}
+  .perr{display:none;font-size:11.5px;color:var(--err);line-height:1.6;margin-top:8px}
+  .perr.show{display:block}
+
+  /* 右：播放列表 */
+  .plist{
+    background:var(--bg2);border:1px solid var(--line);border-radius:var(--radius);
+    display:flex;flex-direction:column;max-height:calc(100vh - 130px);
+  }
+  @media (min-width:760px){
+    .plist{position:sticky;top:122px;max-height:calc(100vh - 138px)}
+  }
+  .plist .phead{
+    padding:12px 14px;border-bottom:1px solid var(--line);flex:0 0 auto;
+  }
+  .plist .phead .prow{display:flex;align-items:center;gap:8px}
+  .plist .phead b{font-size:13px;font-weight:600}
+  .plist .phead .cnt{font-size:11px;color:var(--fg2);margin-left:auto;flex:0 0 auto}
+  .plist .phead .search{
+    background:var(--bg3);border:1px solid var(--line);border-radius:8px;
+    color:var(--fg);padding:6px 10px;font:inherit;font-size:12px;width:100%;margin-top:9px;
+  }
+  .plist .phead .search:focus{outline:none;border-color:var(--acc)}
+  .scroll{overflow-y:auto;flex:1 1 auto;padding:6px}
+  .scroll::-webkit-scrollbar{width:8px}
+  .scroll::-webkit-scrollbar-thumb{background:var(--line);border-radius:4px}
+
+  /* 频道条目 */
+  .ch{display:flex;align-items:center;gap:9px;padding:9px 10px;border-radius:10px;
+    cursor:pointer;border:1px solid transparent}
+  .ch:hover{background:var(--bg3)}
+  .ch.on{background:var(--bg3);border-color:var(--acc)}
+  .ch .name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+    font-size:13px}
+  .ch .caret{color:var(--fg2);font-size:10px;flex:0 0 auto;transition:transform .15s;
+    padding:2px}
+  .ch.on .caret{transform:rotate(90deg)}
+  .cblk{border-radius:10px}
+  .addr{background:var(--bg3);border-radius:10px;padding:2px 12px;margin:0 6px 6px}
+  .arow{display:flex;align-items:center;gap:9px;padding:8px 0;border-top:1px solid var(--line)}
+  .arow:first-child{border-top:none}
+  .arow .k{font-size:10.5px;color:var(--fg2);flex:0 0 80px;line-height:1.4}
+  .arow code{flex:1;min-width:0;font-size:11px;word-break:break-all;line-height:1.5;
+    font-family:ui-monospace,Menlo,Consolas,monospace;color:var(--fg);user-select:all}
+  .arow .btn{padding:3px 9px;font-size:11px;flex:0 0 auto}
+  /* 分组：默认折叠，一次只展开一组 */
+  .grp{margin-bottom:8px}
+  .ghd{display:flex;align-items:center;gap:8px;padding:10px 11px;cursor:pointer;
+    background:var(--bg3);border:1px solid var(--line);border-radius:10px}
+  .ghd:hover{border-color:var(--acc)}
+  .ghd .gname{flex:1;min-width:0;font-size:13px;font-weight:600;
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .ghd .gcnt{font-size:11px;color:var(--fg2);flex:0 0 auto;
+    font-variant-numeric:tabular-nums}
+  .ghd .gcaret{color:var(--fg2);font-size:12px;line-height:1;flex:0 0 auto;
+    transition:transform .15s}
+  .grp.open .ghd{border-color:var(--acc)}
+  .grp.open .gcaret{transform:rotate(90deg)}
+  .gbody{padding:4px 0 0}
+
+  /* 底部工具条 */
+  .acts{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+  .acts .btn{flex:1 1 auto}
+</style>
+</head>
+<body>
+
+<div id="topbar"></div>
+
+<div class="wrap" style="max-width:1120px">
+  <div class="iptv">
+
+    <!-- 左：播放器 -->
+    <div>
+      <div class="player" id="player">
+        <video id="video" playsinline controls></video>
+        <div class="ph-cover" id="pcover">
+          <div class="pl-ico">
+            <svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+          </div>
+        </div>
+      </div>
+      <div class="pmeta">
+        <span class="ptitle" id="ptitle">未在播放</span>
+        <span class="pstat" id="pstat"></span>
+      </div>
+      <div class="pctl">
+        <button class="btn" id="prev">◀ 上一台</button>
+        <button class="btn" id="next">下一台 ▶</button>
+        <button class="btn" id="stop">■ 停止</button>
+      </div>
+      <div class="perr" id="perr"></div>
+    </div>
+
+    <!-- 右：播放列表 -->
+    <div class="plist">
+      <div class="phead">
+        <div class="prow">
+          <b>播放列表</b>
+          <span class="cnt" id="cnt"></span>
+        </div>
+        <input id="search" class="search" placeholder="搜索频道 / 分组">
+      </div>
+      <div class="scroll" id="list"><span class="muted small">加载中…</span></div>
+    </div>
+
+  </div>
+
+  <div class="card" style="margin-top:14px">
+    <div class="acts">
+      <button class="btn" id="cpAll">复制当前列表（M3U）</button>
+      <button class="btn" id="cpGrp">只复制可用频道</button>
+    </div>
+    <p class="small muted" style="margin:10px 0 0;line-height:1.7">
+      点频道直接播放，点 <b>▸</b> 展开地址。网页内播放仅走 rtp2httpd <code>:5140</code>（已开 CORS）；
+      断流封 IP 5 秒，重连 429 属正常。
+    </p>
+  </div>
+</div>
+
+<script src="/ui.js?v=20261107d"></script>
+<script>
+MR.mountTop("IPTV");
+
+var state = {
+  channels: [], filter: "", open: "", openGrp: "",
+  router: { host: "10.0.0.1", r2h_port: 5140, udpxy_port: 12123 },
+  playing: null, idx: -1
+};
+
+MR.healthTick().then(function (h) {
+  if (h && h.router) state.router = h.router;
+  render();
+}).catch(function () { render(); });
+
+function urls(ip, port) {
+  var r = state.router;
+  return {
+    r2h: "http://" + r.host + ":" + (r.r2h_port || 5140) + "/rtp/" + ip + ":" + port,
+    udp: "http://" + r.host + ":" + (r.udpxy_port || 12123) + "/rtp/" + ip + ":" + port,
+    mcast: "rtp://" + ip + ":" + port
+  };
+}
+
+function copyText(text, okMsg) {
+  function ok(flag) {
+    MR.toast(flag ? (okMsg || "已复制") : "复制失败，请长按地址手动选择");
+  }
+  function fallback() {
+    var ta = document.createElement("textarea");
+    ta.value = text;
+    ta.setAttribute("readonly", "");
+    ta.style.cssText = "position:fixed;top:0;left:0;opacity:0;width:1px;height:1px";
+    document.body.appendChild(ta);
+    ta.select();
+    ta.setSelectionRange(0, text.length);
+    var done = false;
+    try { done = document.execCommand("copy"); } catch (e) { }
+    document.body.removeChild(ta);
+    ok(done);
+  }
+  if (navigator.clipboard && window.isSecureContext) {
+    navigator.clipboard.writeText(text).then(function () { ok(true); }, fallback);
+  } else {
+    fallback();
+  }
+}
+
+function addrBlock(c) {
+  var u = urls(c.ip, c.port);
+  var rows = [
+    ["VLC / 手机", u.r2h],
+    ["TVBox / DIYP", u.udp],
+    ["原始组播", u.mcast]
+  ];
+  return '<div class="addr">' + rows.map(function (it) {
+    return '<div class="arow"><span class="k">' + it[0] + "</span>" +
+      "<code>" + MR.esc(it[1]) + "</code>" +
+      '<button class="btn" data-cp="' + MR.esc(it[1]) + '">复制</button></div>';
+  }).join("") + "</div>";
+}
+
+function render() {
+  var q = state.filter.toLowerCase();
+  var groups = {}, order = [];
+
+  state.channels.forEach(function (it) {
+    var c = { name: it[0] || "", grp: it[1] || "未分组", ip: it[2], port: it[3], live: it[4] };
+    if (!c.ip || !c.port) return;
+    if (q && (c.name + " " + c.grp + " " + c.ip).toLowerCase().indexOf(q) < 0) return;
+    if (!groups[c.grp]) { groups[c.grp] = []; order.push(c.grp); }
+    groups[c.grp].push(c);
+  });
+
+  var searching = q.length > 0;
+  var total = 0;
+
+  var html = order.map(function (g) {
+    var arr = groups[g];
+    total += arr.length;
+
+    /* 搜索时全部展开，平时只展开 state.openGrp 那一组 */
+    var isOpen = searching || (g === state.openGrp);
+    var playingIn = false;
+
+    var list = "";
+    if (isOpen) {
+      list = arr.map(function (c) {
+        var key = c.ip + ":" + c.port;
+        var playing = (state.playing && state.playing.key === key);
+        if (playing) playingIn = true;
+        var on = (key === state.open);
+        var tag = c.live === "1" ? '<span class="tag live">可用</span>'
+          : c.live === "0" ? '<span class="tag dead">失效</span>'
+            : '<span class="tag">未检测</span>';
+        var pdot = playing ? '<span class="tag live">播放中</span>' : "";
+        return '<div class="cblk" data-key="' + MR.esc(key) + '">' +
+          '<div class="ch' + (on || playing ? " on" : "") + '">' +
+          '<span class="name">' + MR.esc(c.name) + "</span>" + pdot + tag +
+          '<span class="caret">▸</span></div>' +
+          (on ? addrBlock(c) : "") + "</div>";
+      }).join("");
+    } else if (state.playing && arr.some(function (c) {
+      return (c.ip + ":" + c.port) === state.playing.key;
+    })) {
+      playingIn = true;
+    }
+
+    return '<div class="grp' + (isOpen ? " open" : "") + '">' +
+      '<div class="ghd" data-grp="' + MR.esc(g) + '">' +
+      '<span class="gname">' + MR.esc(g) + "</span>" +
+      (playingIn ? '<span class="tag live">播放中</span>' : "") +
+      '<span class="gcnt">' + arr.length + "</span>" +
+      '<span class="gcaret">▸</span></div>' +
+      (isOpen ? '<div class="gbody">' + list + "</div>" : "") +
+      "</div>";
+  }).join("");
+
+  MR.$("list").innerHTML = html || MR.empty("没有匹配的频道");
+  MR.$("cnt").textContent = total + " 个";
+  state.visible = [];
+  order.forEach(function (g) { groups[g].forEach(function (c) { state.visible.push(c); }); });
+}
+
+function buildM3U(onlyLive) {
+  var r = state.router;
+  var lines = ["#EXTM3U"];
+  (state.visible || []).forEach(function (c) {
+    if (onlyLive && c.live === "0") return;
+    lines.push('#EXTINF:-1 group-title="' + c.grp + '",' + c.name);
+    lines.push("http://" + r.host + ":" + (r.r2h_port || 5140) + "/rtp/" + c.ip + ":" + c.port);
+  });
+  return lines.join("\n");
+}
+
+/* ---------------- 播放器 ---------------- */
+var player = null;
+var video = MR.$("video");
+
+function showErr(msg) {
+  var e = MR.$("perr");
+  e.textContent = msg;
+  e.classList.add("show");
+  MR.$("pstat").textContent = "播放失败";
+}
+
+function clearErr() { MR.$("perr").classList.remove("show"); }
+function setStatus(t) { MR.$("pstat").textContent = t; }
+
+function stop() {
+  if (player) {
+    try { player.destroy(); } catch (e) { }
+    player = null;
+  }
+  try { video.pause(); } catch (e) { }
+  try { video.removeAttribute("src"); video.load(); } catch (e) { }
+  state.playing = null; state.idx = -1;
+  MR.$("ptitle").textContent = "未在播放";
+  MR.$("pcover").style.display = "flex";
+  setStatus("");
+  clearErr();
+  render();
+}
+
+/* 播放内核按需加载：首屏不下载 52KB 的 mpegts.js，只有真的点播放才去取。
+   实测 jsdelivr 走公网要 2.1 秒，比板子本地 0.67 秒还慢，所以只用本地；
+   取到后浏览器按 max-age 缓存，后续打开直接复用。 */
+var _kernelP = null;
+function loadKernel() {
+  if (window.mpegts) return Promise.resolve();
+  if (_kernelP) return _kernelP;
+  _kernelP = new Promise(function (resolve, reject) {
+    var s = document.createElement("script");
+    var done = false;
+    var timer = setTimeout(function () {
+      if (done) return;
+      done = true;
+      if (s.parentNode) s.parentNode.removeChild(s);
+      reject(new Error("timeout"));
+    }, 15000);
+    s.src = "/mpegts.js?v=20261107d.7.3";
+    s.onload = function () {
+      if (done) return;
+      done = true; clearTimeout(timer);
+      if (window.mpegts) resolve(); else reject(new Error("empty"));
+    };
+    s.onerror = function () {
+      if (done) return;
+      done = true; clearTimeout(timer);
+      reject(new Error("load error"));
+    };
+    document.head.appendChild(s);
+  });
+  return _kernelP;
+}
+
+function playChannel(c, idx) {
+  if (!c || !c.ip || !c.port) return;
+  if (typeof mpegts === "undefined") {
+    setStatus("加载播放内核…");
+    loadKernel().then(function () { playChannel(c, idx); })
+      .catch(function () {
+        showErr("播放内核加载失败：CDN 与板子本地都取不到 mpegts.js");
+        setStatus("");
+      });
+    return;
+  }
+  stop();
+  state.playing = { name: c.name, grp: c.grp, key: c.ip + ":" + c.port };
+  state.idx = idx;
+  state.open = state.playing.key;
+  state.openGrp = c.grp;   // 展开所属分组，保证能看到正在播的那一项
+
+  var url = urls(c.ip, c.port).r2h;  // 仅 :5140 有 CORS
+  MR.$("ptitle").textContent = c.name;
+  MR.$("pcover").style.display = "none";
+  setStatus("连接中…");
+  clearErr();
+
+  try {
+    player = mpegts.createPlayer({
+      type: "mpegts",
+      isLive: true,
+      url: url,
+      enableWorker: false
+    });
+    player.attachMediaElement(video);
+    player.load();
+    player.play().catch(function () { /* 自动播放被拦，等用户点击 */ });
+    player.on(mpegts.Events.ERROR, function (e, info) {
+      if (info && info.details === "xhrSetupError") {
+        showErr("拉流被拒（跨域/连接失败）：" + url);
+      } else {
+        showErr("播放出错：" + (info ? (info.type || info.details || "") : ""));
+      }
+      setStatus("播放失败");
+    });
+  } catch (e) {
+    showErr("创建播放器失败：" + (e && e.message ? e.message : e));
+  }
+  render();
+}
+
+function step(dir) {
+  var arr = state.visible || [];
+  if (!arr.length) return;
+  var i = state.idx;
+  i = (i < 0) ? 0 : (i + dir + arr.length) % arr.length;
+  playChannel(arr[i], i);
+}
+
+MR.$("prev").addEventListener("click", function () { step(-1); });
+MR.$("next").addEventListener("click", function () { step(1); });
+MR.$("stop").addEventListener("click", stop);
+
+/* ---------------- 频道加载 ---------------- */
+MR.api("/api/channels").then(function (r) {
+  if (!r || !r.ok) {
+    MR.$("list").innerHTML = MR.empty((r && r.msg) || "频道库不可用，检查路由器 /cgi-bin/iptv");
+    return;
+  }
+  state.channels = r.items || [];
+  render();
+}).catch(function () {
+  MR.$("list").innerHTML = MR.empty("取数失败");
+});
+
+MR.$("list").addEventListener("click", function (e) {
+  var cp = e.target.closest("[data-cp]");
+  if (cp) { copyText(cp.dataset.cp, "地址已复制"); return; }
+
+  /* 分组标题：一次只展开一组 */
+  var ghd = e.target.closest(".ghd");
+  if (ghd) {
+    var g = ghd.dataset.grp;
+    state.openGrp = (state.openGrp === g) ? "" : g;
+    state.open = "";
+    render();
+    return;
+  }
+
+  var blk = e.target.closest(".cblk");
+  if (!blk) return;
+  var key = blk.dataset.key;
+
+  var caret = e.target.closest(".caret");
+  if (!caret) {
+    var idx = -1;
+    (state.visible || []).forEach(function (c, i) {
+      if ((c.ip + ":" + c.port) === key) idx = i;
+    });
+    if (idx >= 0) {
+      if (state.playing && state.playing.key === key) {
+        state.open = (state.open === key) ? "" : key;
+        render();
+      } else {
+        playChannel(state.visible[idx], idx);
+      }
+      return;
+    }
+  }
+
+  state.open = (state.open === key) ? "" : key;
+  render();
+});
+
+MR.$("cpAll").addEventListener("click", function () {
+  if (!state.visible || !state.visible.length) { MR.toast("列表为空"); return; }
+  copyText(buildM3U(false), "已复制 " + state.visible.length + " 个频道（M3U）");
+});
+MR.$("cpGrp").addEventListener("click", function () {
+  var n = (state.visible || []).filter(function (c) { return c.live !== "0"; }).length;
+  if (!n) { MR.toast("没有可用频道"); return; }
+  copyText(buildM3U(true), "已复制 " + n + " 个可用频道（M3U）");
+});
+MR.$("search").addEventListener("input", function (e) {
+  state.filter = e.target.value;
+  render();
+});
+</script>
+</body>
+</html>

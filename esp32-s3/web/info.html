@@ -1,0 +1,185 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>本机信息 · ESP32 终端服务器</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="/theme.css?v=20261107d">
+</head>
+<body>
+
+<div id="topbar"></div>
+
+<div class="wrap">
+  <div class="card">
+    <div class="ph" style="justify-content:space-between">
+      <b>设备</b>
+      <a class="btn mini" id="btnRefresh">刷新</a>
+    </div>
+    <table class="kv">
+      <tr><td>主机名</td><td id="host" class="mono">—</td></tr>
+      <tr><td>IP 地址</td><td id="ip" class="mono">—</td></tr>
+      <tr><td>MAC</td><td id="mac" class="mono">—</td></tr>
+      <tr><td>WiFi</td><td id="ssid">—</td></tr>
+      <tr><td>信号强度</td><td id="rssi">—</td></tr>
+      <tr><td>信道 / 功率</td><td id="wchan">—</td></tr>
+      <tr><td>省电模式</td><td id="wpm">—</td></tr>
+      <tr><td>运行时长</td><td id="up">—</td></tr>
+      <tr><td>启动到就绪</td><td id="ready">—</td></tr>
+    </table>
+  </div>
+
+  <div class="card">
+    <h2>资源占用</h2>
+    <div class="meters">
+      <div class="meter"><div class="k">堆内存（空闲）</div><div class="v" id="mem">—</div>
+        <div class="bar"><i id="memBar"></i></div></div>
+      <div class="meter"><div class="k">内部 RAM（WiFi / lwIP）</div><div class="v" id="iram">—</div>
+        <div class="bar"><i id="iramBar"></i></div></div>
+      <div class="meter"><div class="k">Flash（可用）</div><div class="v" id="flash">—</div>
+        <div class="bar"><i id="flashBar"></i></div></div>
+    </div>
+    <table class="kv" style="margin-top:12px">
+      <tr><td>堆明细</td><td id="memDetail" class="mono">—</td></tr>
+      <tr><td>内部 RAM</td><td id="iramDetail" class="mono">—</td></tr>
+      <tr><td>Flash 明细</td><td id="flashDetail" class="mono">—</td></tr>
+    </table>
+  </div>
+
+  <div class="card">
+    <h2>芯片</h2>
+    <table class="kv">
+      <tr><td>芯片温度</td><td id="chipTemp">—</td></tr>
+      <tr><td>复位原因</td><td id="chipReset">—</td></tr>
+      <tr><td>代码优化</td><td id="chipOpt" class="mono">—</td></tr>
+      <tr><td>内部 RAM 分块</td><td id="chipBlocks" class="mono">—</td></tr>
+    </table>
+  </div>
+
+  <div class="card">
+    <h2>固件</h2>
+    <table class="kv">
+      <tr><td>MicroPython</td><td id="fwVer" class="mono">—</td></tr>
+      <tr><td>构建</td><td id="fwBuild" class="mono">—</td></tr>
+      <tr><td>板型</td><td id="fwBoard">—</td></tr>
+      <tr><td>CPU 频率</td><td id="fwFreq">—</td></tr>
+    </table>
+  </div>
+
+  <div class="card">
+    <h2>板上文件 <span class="muted small" id="fsum"></span></h2>
+    <table class="kv" id="files"><tr><td class="muted small">读取中…</td><td></td></tr></table>
+  </div>
+
+  <p class="foot">
+    数据全部读自板子本地（<code>os</code> / <code>gc</code> / <code>machine</code>），
+    <b>不经过路由器、不发任何网络请求</b>，所以这一页不会给路由器添负担。
+  </p>
+</div>
+
+<script src="/ui.js?v=20261107d"></script>
+<script>
+MR.mountTop("本机信息");
+
+function bar(id, pct) {
+  var el = MR.$(id);
+  el.style.width = Math.max(0, Math.min(100, pct)) + "%";
+  el.className = pct >= 90 ? "crit" : pct >= 75 ? "warn" : "";
+}
+
+function render(d) {
+  if (!d || !d.ok) return;
+  var n = d.net || {}, m = d.mem || {}, f = d.flash || {}, fw = d.fw || {};
+  var ch = d.chip || {}, hp = d.heap || {};
+
+  MR.$("host").textContent = n.hostname || "—";
+  MR.$("ip").textContent = n.ip || "—";
+  MR.$("mac").textContent = n.mac || "—";
+  MR.$("ssid").textContent = (n.ssid || "—") +
+    (n.status_name ? " · " + n.status_name : "");
+  MR.$("rssi").textContent = n.rssi != null ? n.rssi + " dBm" : "—";
+  MR.$("wchan").textContent = (n.channel ? "CH " + n.channel : "—") +
+    (n.txpower ? " · " + n.txpower + " dBm" : "");
+  MR.$("wpm").textContent = n.pm_name || "—";
+  MR.$("up").textContent = MR.fmtDur(d.up || 0);
+  MR.$("ready").textContent = d.ready_ms ? (d.ready_ms / 1000).toFixed(2) + " 秒" : "—";
+
+  var mp = m.total ? m.used * 100 / m.total : 0;
+  MR.$("mem").textContent = MR.fmtBytes(m.free) + " 空闲";
+  bar("memBar", mp);
+  MR.$("memDetail").textContent = m.total
+    ? "总 " + MR.fmtBytes(m.total) + " · 已用 " + MR.fmtBytes(m.used) +
+      " · 空闲 " + MR.fmtBytes(m.free)
+    : "—";
+
+  var fp = f.total ? f.used * 100 / f.total : 0;
+  MR.$("flash").textContent = MR.fmtBytes(f.avail) + " 可用";
+  bar("flashBar", fp);
+  MR.$("flashDetail").textContent = f.total
+    ? "总 " + MR.fmtBytes(f.total) + " · 已用 " + MR.fmtBytes(f.used) +
+      " · 可用 " + MR.fmtBytes(f.avail)
+    : "—";
+
+  /* 内部 RAM：只统计内部 SRAM 块，跳过 PSRAM（>=1MB 那块就是 Python 堆）。
+     「最大连续块」是关键 —— 它掉到几 KB 时，TCP 握手能过但收发会失败。 */
+  var blocks = hp.data || [];
+  var iTotal = 0, iFree = 0, iMax = 0, iCnt = 0, detail = [];
+  blocks.forEach(function (b) {
+    if (b[0] >= 1048576) return;
+    iTotal += b[0]; iFree += b[1]; iCnt++;
+    if (b[2] > iMax) iMax = b[2];
+    detail.push(MR.fmtBytes(b[1]));
+  });
+  if (iCnt) {
+    MR.$("iram").textContent = MR.fmtBytes(iFree) + " 空闲";
+    bar("iramBar", iTotal ? (iTotal - iFree) * 100 / iTotal : 0);
+    MR.$("iramDetail").textContent =
+      "空闲 " + MR.fmtBytes(iFree) + " / 共 " + MR.fmtBytes(iTotal) +
+      " · 最大连续 " + MR.fmtBytes(iMax) + " · " + iCnt + " 个块";
+    MR.$("chipBlocks").textContent = detail.join(" / ");
+    MR.$("iramDetail").style.color = iMax < 16384 ? "var(--err)" : "";
+  } else {
+    MR.$("iram").textContent = "—";
+    MR.$("iramDetail").textContent = "—";
+    MR.$("chipBlocks").textContent = "—";
+  }
+
+  MR.$("chipTemp").textContent = ch.temp != null ? ch.temp + " °C" : "—";
+  MR.$("chipReset").textContent = ch.reset_name || "—";
+  MR.$("chipOpt").textContent = fw.opt != null && fw.opt >= 0
+    ? "O" + fw.opt + "（0=不优化，字节码更小）" : "—";
+
+  MR.$("fwVer").textContent = "v" + (fw.ver || "—");
+  MR.$("fwBuild").textContent = fw.build || "—";
+  MR.$("fwBoard").textContent = fw.board || "—";
+  /* 频率这一栏永远读到满频：任何查询请求自己就会把 CPU 拉起来。
+     所以补一个降频目标，说明空闲时它会掉到多少。 */
+  MR.$("fwFreq").textContent = fw.freq
+    ? (fw.freq / 1000000) + " MHz" + (fw.pm_mhz
+        ? "（空闲降到 " + fw.pm_mhz + " MHz）" : "")
+    : "—";
+
+  var fs = d.files || [], total = 0;
+  var rows = fs.map(function (x) {
+    total += x[1] || 0;
+    return '<tr><td class="mono">' + MR.esc(x[0]) + '</td><td class="mono">' +
+      MR.fmtBytes(x[1]) + "</td></tr>";
+  }).join("");
+  MR.$("files").innerHTML = rows || '<tr><td class="muted small">无文件</td><td></td></tr>';
+  MR.$("fsum").textContent = fs.length + " 个 · 共 " + MR.fmtBytes(total);
+}
+
+function load() {
+  var b = MR.$("btnRefresh");
+  b.disabled = true;
+  return MR.api("/api/info").then(render).catch(function () {
+    MR.$("files").innerHTML = '<tr><td class="muted small">读取失败，点「刷新」重试</td><td></td></tr>';
+  }).then(function () { b.disabled = false; });
+}
+
+MR.$("btnRefresh").addEventListener("click", load);
+load();
+</script>
+</body>
+</html>

@@ -9,6 +9,12 @@
 ## 2026-11-08
 
 ### 新增
+- `esp32-s3/`：ESP32-S3 N16R8 移植（Python 堆放 PSRAM、原生 USB 串口、
+  WS2812 指示灯可彻底关闭、WiFi 关闭 modem sleep）
+- 空闲降频（`power` 配置）：连续 `idle_after_s` 秒没有 HTTP 请求就把 CPU
+  从 240MHz 降到 `idle_mhz`（默认 80），下一个请求到达立刻回满频
+- `/api/info`：新增芯片卡片（温度、复位原因、优化级别、内部 RAM 分块）
+  与 WiFi 详情（SSID/信道/发射功率/省电模式）
 - `README.md`：项目说明、页面清单、架构图、部署指引
 - `docs/ARCHITECTURE.md`：启动流程、请求生命周期、构建流水线
 - `docs/CONFIG.md`：配置项说明
