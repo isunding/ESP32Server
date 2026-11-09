@@ -283,15 +283,19 @@ def _csv_tail(fn, need, before=0, chunk=4096):
                 line = line.strip()
                 if not line:
                     continue
-                p = line.split(b",", 2)
-                if len(p) < 2:
-                    continue
-                try:
-                    ct = int(p[1])
-                except ValueError:
-                    continue
-                if before and ct >= before:
-                    continue
+                if before:
+                    # 只有分页游标才需要读第二列的时间戳。各表列结构不同：
+                    # 新闻是 id,ctime,…；地震是 key,震级,…（震级可能是小数），
+                    # 所以不能无条件按整数解析。
+                    p = line.split(b",", 2)
+                    if len(p) < 2:
+                        continue
+                    try:
+                        ct = int(p[1])
+                    except ValueError:
+                        continue
+                    if ct >= before:
+                        continue
                 out.append(line)
                 if len(out) >= need:
                     break
@@ -1560,27 +1564,30 @@ class App:
             self.quake_ids = self._daily_ids("quake")
         fn = "quake-%s.csv" % _ymd()
         added = 0
-        try:
-            with open(fn, "a") as f:
-                for n in rows:
-                    addtime = str(n.get("addtime") or "")
-                    leve = str(n.get("leve") or "")
-                    if not addtime:
-                        continue
-                    k = addtime.replace(" ", "_").replace(":", "") + "_" + leve
-                    if k in self.quake_ids:
-                        continue
-                    self.quake_ids.add(k)
-                    f.write("%s,%s,%s,%s,%s,%s,%s\n" % (
-                        k, leve, _csv_q(addtime),
-                        _csv_q(n.get("weizhi") or ""),
-                        n.get("shendu") or "", n.get("weidu") or "",
-                        n.get("jingdu") or ""))
-                    added += 1
-        except OSError as e:
-            print("[quake] write", e)
-            self.quake_fail_ts = time.ticks_ms()
-            return False
+        buf = []                      # 先攒着，没有新条目就不建空文件
+        for n in rows:
+            addtime = str(n.get("addtime") or "")
+            leve = str(n.get("leve") or "")
+            if not addtime:
+                continue
+            k = addtime.replace(" ", "_").replace(":", "") + "_" + leve
+            if k in self.quake_ids:
+                continue
+            self.quake_ids.add(k)
+            buf.append("%s,%s,%s,%s,%s,%s,%s\n" % (
+                k, leve, _csv_q(addtime),
+                _csv_q(n.get("weizhi") or ""),
+                n.get("shendu") or "", n.get("weidu") or "",
+                n.get("jingdu") or ""))
+            added += 1
+        if buf:
+            try:
+                with open(fn, "a") as f:
+                    f.write("".join(buf))
+            except OSError as e:
+                print("[quake] write", e)
+                self.quake_fail_ts = time.ticks_ms()
+                return False
         self.quake_ts = time.ticks_ms()
         _csv_prune("quake")
         print("[quake] +%d 条 共%d %dms" % (added, len(self.quake_ids),
