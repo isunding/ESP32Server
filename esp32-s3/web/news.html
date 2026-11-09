@@ -32,11 +32,11 @@
 
   <div id="list" class="feed"><div class="skel"></div><div class="skel"></div><div class="skel"></div></div>
 
-  <div class="morewrap"><button class="btn" id="btnMore" style="display:none">加载更早的</button></div>
+  <div class="morewrap" id="moreWrap" style="display:none"><span class="muted small" id="moreTip">继续上滑加载更早的</span></div>
 
   <p class="foot">
     数据经路由器转发的新闻电报，本地按天存 CSV、只留 7 天。
-    首屏只取最近 30 条，向下可继续加载；下拉刷新只重读板上缓存，不触发上游取数。
+    首屏只取最近 30 条，上滑到底自动加载更早的一段；下拉刷新只重读板上缓存，不触发上游取数。
     点股票标签加入自选，再点一次移除（行情页可见）。
   </p>
 </div>
@@ -164,7 +164,8 @@ function parseRows(rows) {
 }
 
 function paint() {
-  $("btnMore").style.display = MORE ? "" : "none";
+  $("moreWrap").style.display = (MORE || BUSY) ? "" : "none";
+  $("moreTip").textContent = BUSY ? "加载中…" : "继续上滑加载更早的";
   $("updAt").textContent = (ALL.length ? "最新 " + hhmm(ALL[0].ctime) : "—") +
     " · 已载 " + ALL.length + " 条";
 }
@@ -187,6 +188,7 @@ function load(force) {
     render();
     paint();
     loadWatch();                 // 标出哪些股票已在自选
+    setTimeout(maybeMore, 120);  // 首屏没铺满就自动补一段
   }).catch(function () {
     $("updAt").textContent = "读取失败";
     $("list").innerHTML = '<div class="empty muted small">接口无响应，点刷新重试</div>';
@@ -196,14 +198,13 @@ function load(force) {
   });
 }
 
-/* 追加一页更早的，游标取当前最老一条的时间 */
+/* 追加一页更早的，游标取当前最老一条的时间；到底自动触发，不用点按钮 */
 function loadMore() {
   if (BUSY || !MORE || !ALL.length) return Promise.resolve();
   BUSY = true;
-  var btn = $("btnMore");
-  btn.disabled = true;
-  btn.textContent = "加载中…";
+  paint();
   var before = ALL[ALL.length - 1].ctime;
+  var beforeLen = ALL.length;
   return MR.api(pageUrl(before, false)).then(function (d) {
     if (d.ok) {
       var have = {};
@@ -213,18 +214,29 @@ function loadMore() {
       });
       ALL.sort(function (a, b) { return b.ctime - a.ctime; });
       MORE = d.more ? 1 : 0;
+      /* 一页全是重复行说明上游没有更早的了，停住，避免空转 */
+      if (ALL.length === beforeLen) MORE = 0;
       subChips();
       render();
-      paint();
       loadWatch();
     }
   }).catch(function () {
     MR.toast("加载失败，请重试");
+    MORE = 0;
   }).then(function () {
     BUSY = false;
-    btn.disabled = false;
-    btn.textContent = "加载更早的";
+    paint();
+    setTimeout(maybeMore, 80);    // 视口没填满就接着取，直到填满或到底
   });
+}
+
+/* 距底部不足 240px 就加载下一段 */
+function maybeMore() {
+  if (!MORE || BUSY) return;
+  var vh = window.innerHeight || 0;
+  var y = window.scrollY || 0;
+  var h = (document.body && document.body.scrollHeight) || 0;
+  if (!vh || y + vh >= h - 240) loadMore();
 }
 
 /* 交互：等级 / 主题 / 展开 / 加自选 */
@@ -303,7 +315,7 @@ $("btnRefresh").addEventListener("click", function () {
   load(true);
 });
 
-$("btnMore").addEventListener("click", loadMore);
+window.addEventListener("scroll", maybeMore, { passive: true });
 
 /* 下拉手势：只重读板上缓存，不触发上游取数 */
 var pullY = 0, pulling = false;
