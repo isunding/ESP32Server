@@ -157,7 +157,7 @@ python esp32-s3/scripts/flash.py esp32-s3/main.py esp32-s3/www/index.html ...
 | GET | `/api/config` | 读取配置（密码打码） |
 | POST | `/api/config` | 保存配置并重启 |
 | POST | `/api/led` | `{"on":0/1}`，板载指示灯心跳开关，写入 `led.on` 并立即生效（仅 S3） |
-| GET | `/api/news` | 新闻电报（近 7 天，本地 CSV，`?force=1` 触发刷新）；每小时定时补采并翻页追平（仅 S3） |
+| GET | `/api/news` | 新闻电报（近 7 天，本地 CSV）；`?limit=<条数>` 与 `?before=<ctime>` 分段向前取，`?force=1` 触发上游刷新；每小时定时补采并翻页追平（仅 S3） |
 | GET | `/api/quake` | 地震列表（近 7 天，本地 CSV）；`?a=global` 切全球视图，`?force=1` 触发刷新（仅 S3） |
 
 ---

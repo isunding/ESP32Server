@@ -325,6 +325,10 @@ video{width:100%;height:100%;display:block;background:#0b0e12}
 .fsum .v{font-size:15px;font-weight:600;margin-top:2px}
 
 </style>
+<style>
+.morewrap{text-align:center;padding:16px 0 6px}
+.morewrap .btn{padding:9px 24px}
+</style>
 </head>
 <body>
 
@@ -347,9 +351,12 @@ video{width:100%;height:100%;display:block;background:#0b0e12}
 
   <div id="list" class="feed"><div class="skel"></div><div class="skel"></div><div class="skel"></div></div>
 
+  <div class="morewrap"><button class="btn" id="btnMore" style="display:none">加载更早的</button></div>
+
   <p class="foot">
     数据经路由器转发的新闻电报，本地按天存 CSV、只留 7 天。
-    点条目展开全文；点股票标签加入自选，再点一次移除（行情页可见）。
+    首屏只取最近 30 条，向下可继续加载；下拉刷新只重读板上缓存，不触发上游取数。
+    点股票标签加入自选，再点一次移除（行情页可见）。
   </p>
 </div>
 
@@ -658,33 +665,88 @@ function subChips() {
     }).join("");
 }
 
+var LIMIT = 30, MORE = 0, BUSY = false;
+
+function pageUrl(before, force) {
+  var p = ["limit=" + LIMIT];
+  if (before) p.push("before=" + before);
+  if (force) p.push("force=1");        // 只有点「刷新」才真的去上游取数
+  return "/api/news?" + p.join("&");
+}
+
+function parseRows(rows) {
+  return (rows || []).map(function (line) {
+    var f = csvLine(line);
+    return {
+      key: f[0], ctime: Number(f[1]) || 0, lv: f[2] || "C",
+      subjects: String(f[3] || "").split(" ").filter(Boolean),
+      stk: f[4] || "", title: f[5] || "", text: f[6] || f[5] || ""
+    };
+  });
+}
+
+function paint() {
+  $("btnMore").style.display = MORE ? "" : "none";
+  $("updAt").textContent = (ALL.length ? "最新 " + hhmm(ALL[0].ctime) : "—") +
+    " · 已载 " + ALL.length + " 条";
+}
+
+/* 首屏 / 整页重载。force 为假时只读板上 CSV，不打扰上游 */
 function load(force) {
   var b = $("btnRefresh");
+  if (BUSY) return Promise.resolve();
+  BUSY = true;
   b.disabled = true;
-  return MR.api("/api/news" + (force ? "?force=1" : "")).then(function (d) {
+  return MR.api(pageUrl(0, force)).then(function (d) {
     if (!d.ok) {
       $("updAt").textContent = d.msg || "准备中…";
-      setTimeout(function () { load(true); }, 4000);
+      setTimeout(function () { load(false); }, 4000);
       return;
     }
-    var rows = d.rows || [];
-    ALL = rows.map(function (line) {
-      var f = csvLine(line);
-      return {
-        key: f[0], ctime: Number(f[1]) || 0, lv: f[2] || "C",
-        subjects: String(f[3] || "").split(" ").filter(Boolean),
-        stk: f[4] || "", title: f[5] || "", text: f[6] || f[5] || ""
-      };
-    }).sort(function (a, b) { return b.ctime - a.ctime; });
-    $("updAt").textContent = "更新于 " + (ALL.length ? hhmm(ALL[0].ctime) : "—") +
-      " · 共 " + ALL.length + " 条";
+    ALL = parseRows(d.rows).sort(function (a, b) { return b.ctime - a.ctime; });
+    MORE = d.more ? 1 : 0;
     subChips();
     render();
+    paint();
     loadWatch();                 // 标出哪些股票已在自选
   }).catch(function () {
     $("updAt").textContent = "读取失败";
     $("list").innerHTML = '<div class="empty muted small">接口无响应，点刷新重试</div>';
-  }).then(function () { b.disabled = false; });
+  }).then(function () {
+    BUSY = false;
+    b.disabled = false;
+  });
+}
+
+/* 追加一页更早的，游标取当前最老一条的时间 */
+function loadMore() {
+  if (BUSY || !MORE || !ALL.length) return Promise.resolve();
+  BUSY = true;
+  var btn = $("btnMore");
+  btn.disabled = true;
+  btn.textContent = "加载中…";
+  var before = ALL[ALL.length - 1].ctime;
+  return MR.api(pageUrl(before, false)).then(function (d) {
+    if (d.ok) {
+      var have = {};
+      ALL.forEach(function (x) { have[x.key] = 1; });
+      parseRows(d.rows).forEach(function (x) {
+        if (!have[x.key]) { have[x.key] = 1; ALL.push(x); }
+      });
+      ALL.sort(function (a, b) { return b.ctime - a.ctime; });
+      MORE = d.more ? 1 : 0;
+      subChips();
+      render();
+      paint();
+      loadWatch();
+    }
+  }).catch(function () {
+    MR.toast("加载失败，请重试");
+  }).then(function () {
+    BUSY = false;
+    btn.disabled = false;
+    btn.textContent = "加载更早的";
+  });
 }
 
 /* 交互：等级 / 主题 / 展开 / 加自选 */
@@ -759,12 +821,33 @@ $("list").addEventListener("click", function (e) {
 });
 
 $("btnRefresh").addEventListener("click", function () {
-  $("updAt").textContent = "刷新中…";
+  $("updAt").textContent = "取数中…";
   load(true);
 });
 
+$("btnMore").addEventListener("click", loadMore);
+
+/* 下拉手势：只重读板上缓存，不触发上游取数 */
+var pullY = 0, pulling = false;
+window.addEventListener("touchstart", function (e) {
+  pulling = window.scrollY <= 0 && e.touches.length === 1;
+  if (pulling) pullY = e.touches[0].clientY;
+}, { passive: true });
+window.addEventListener("touchend", function (e) {
+  if (!pulling) return;
+  pulling = false;
+  var y = (e.changedTouches && e.changedTouches[0]) ? e.changedTouches[0].clientY : pullY;
+  if (y - pullY >= 60 && window.scrollY <= 0) {
+    MR.toast("读取板上缓存", 900);
+    load(false);
+  }
+}, { passive: true });
+
 load(false);
-setInterval(function () { load(true); }, 300000);   // 5 分钟自动刷
+setInterval(function () {
+  if (window.scrollY > 200) return;     // 正在往下翻页时不打断
+  load(false);                          // 定时也只读缓存
+}, 300000);
 </script>
 </body>
 </html>

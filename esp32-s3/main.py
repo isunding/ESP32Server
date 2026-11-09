@@ -248,6 +248,65 @@ def _csv_prune(prefix):
         pass
 
 
+def _csv_tail(fn, need, before=0, chunk=4096):
+    """从文件尾部往前读，返回 ctime < before 的最近 need 行（时间升序）。
+
+    日文件按时间升序追加，页面要的是最近的一段。逐块 seek 读取而不是全文件
+    逐行解析：一天几百行时全量遍历要两秒以上，会卡住单线程主循环。
+    """
+    if need <= 0:
+        return []
+    try:
+        size = os.stat(fn)[6]
+    except OSError:
+        return []
+    if not size:
+        return []
+    out = []                      # 新的在前，读完再反转
+    pos = size
+    tail = b""
+    f = None
+    try:
+        f = open(fn, "rb")
+        while pos > 0 and len(out) < need:
+            step = chunk if pos >= chunk else pos
+            pos -= step
+            f.seek(pos)
+            buf = f.read(step) + tail
+            parts = buf.split(b"\n")
+            if pos > 0:
+                tail = parts[0]   # 块首可能是半行，留给下一轮拼接
+                parts = parts[1:]
+            else:
+                tail = b""
+            for line in reversed(parts):
+                line = line.strip()
+                if not line:
+                    continue
+                p = line.split(b",", 2)
+                if len(p) < 2:
+                    continue
+                try:
+                    ct = int(p[1])
+                except ValueError:
+                    continue
+                if before and ct >= before:
+                    continue
+                out.append(line)
+                if len(out) >= need:
+                    break
+    except OSError:
+        return []
+    finally:
+        if f is not None:
+            try:
+                f.close()
+            except Exception:
+                pass
+    out.reverse()
+    return [x.decode() for x in out]
+
+
 def load_watch():
     """自选股列表。文件坏了就当没配过，用默认几支，绝不让页面 500。"""
     try:
@@ -1311,56 +1370,59 @@ class App:
                 pass
         return ids
 
-    def _h_daily(self, prefix, ttl_key, cap, force=False):
+    def _h_daily(self, prefix, ttl_key, cap, req):
         """把最近几天的 CSV 行原样拼成 JSON 吐给页面。
 
         行是 CSV 原文（字段可能带引号），页面自己按引号规则拆 —— 这样板子
-        不用二次编码，也省一份内存。只吐最新的 cap 行，避免单次响应过大。
+        不用二次编码，也省一份内存。默认只吐最新的 cap 行；`?limit=` 指定本次
+        条数，`?before=<ctime>` 取该时刻之前的一段，供页面分段加载。
         """
         ttl = self.cfg["poll"].get(ttl_key, 300000)
         ts = getattr(self, prefix + "_ts")
-        if force:
+        if req.arg("force") == "1":
             setattr(self, prefix + "_due", True)
         if not ts or time.ticks_diff(time.ticks_ms(), ts) >= ttl:
             fail = getattr(self, prefix + "_fail_ts")
             if not fail or time.ticks_diff(time.ticks_ms(), fail) >= 60000:
                 setattr(self, prefix + "_due", True)
-        # 文件按时间升序追加，越靠后越新；跨天读取时把较早的一天的行拼在前面，
-        # 每读完一个文件就裁到 cap 行，保证吐出去的是「最新的 cap 条」而不是最旧的。
+        try:
+            limit = int(req.arg("limit") or 0)
+        except ValueError:
+            limit = 0
+        if limit <= 0 or limit > cap:
+            limit = cap
+        try:
+            before = int(req.arg("before") or 0)
+        except ValueError:
+            before = 0
+        # 多要一条用来判断「还有更早的」，返回前再裁掉
+        need = limit + 1
         rows = []
         for back in range(CSV_KEEP_DAYS):
             fn = "%s-%s.csv" % (prefix, _ymd(back))
             if not self._file_ok(fn):
                 continue
-            chunk = []
-            try:
-                with open(fn) as f:
-                    for line in f:
-                        line = line.strip()
-                        if line:
-                            chunk.append(line)
-            except OSError:
-                pass
-            if chunk:
-                rows = chunk + rows
-                if len(rows) > cap:
-                    rows = rows[len(rows) - cap:]
-            if len(rows) >= cap:
+            got = _csv_tail(fn, need - len(rows), before)
+            if got:
+                rows = got + rows
+            if len(rows) >= need:
                 break
         if not rows:
             return httpsrv.json_resp({"ok": 0, "pending": 1,
                                       "msg": "正在取数，几秒后自动刷新"})
-        return httpsrv.json_resp({"ok": 1, "rows": rows})
+        more = 0
+        if len(rows) > limit:
+            more = 1
+            rows = rows[len(rows) - limit:]
+        return httpsrv.json_resp({"ok": 1, "rows": rows, "more": more})
 
     def h_news(self, req):
-        return self._h_daily("news", "news_ms", NEWS_ROWS_MAX,
-                             req.arg("force") == "1")
+        return self._h_daily("news", "news_ms", NEWS_ROWS_MAX, req)
 
     def h_quake(self, req):
         # 国内 / 全球各一份 CSV，互不覆盖；页面用 ?a=global 切到全球视图
         prefix = "quakeg" if req.arg("a") == "global" else "quake"
-        return self._h_daily(prefix, "quake_ms", QUAKE_ROWS_MAX,
-                             req.arg("force") == "1")
+        return self._h_daily(prefix, "quake_ms", QUAKE_ROWS_MAX, req)
 
     def _news_last_ctime(self):
         """从近几天的 CSV 里找出已收录的最新时间，供重启后接续翻页。"""
