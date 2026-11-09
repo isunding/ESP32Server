@@ -15,7 +15,8 @@
 | `esp32/` | ESP32-D0WD-V3 | 160 MHz | 4MB / 520KB | 基线版本，GPIO2 单色指示灯 |
 | `esp32-s3/` | ESP32-S3 N16R8 | 240 MHz | 16MB / 8MB PSRAM | Python 堆在 PSRAM、原生 USB 串口、WS2812 指示灯、空闲降频 |
 
-两版页面、路由与 API 一致，差异限于 LED 驱动、WiFi 省电、内存布局与频率管理。
+两版页面与 API 基本一致，差异限于 LED 驱动、WiFi 省电、内存布局与频率管理；
+新闻、地震两个页面及 `/api/news`、`/api/quake`、`/api/led` 仅 S3 版提供。
 
 ---
 
@@ -27,13 +28,13 @@
 | 天气 | `/weather.html` | 实况、24 小时、7 天预报、空气质量、生活指数 |
 | 行情 | `/market.html` | 三大指数、汇率、自选股（存于板上） |
 | 电台 | `/radio.html` | 67 个电台 / 9 个分类，支持搜索与折叠 |
-| 新闻 | `/news.html` | 单列卡片、时间与重要度置于标题行、正文完整显示、标签置于卡片下方、重要度与主题筛选、`【】` 标题加粗、股票标签点选加入 / 移出自选（仅 S3） |
+| 新闻 | `/news.html` | 单列卡片、时间与重要度置于标题行、正文完整显示、标签置于卡片下方、重要度与主题筛选、`【】` 标题加粗、股票标签点选加入 / 移出自选、每小时定时补采（仅 S3） |
 | 地震 | `/quake.html` | 单列卡片、国内 / 全球切换、近 7 天列表、按震级筛选与配色、经纬度标注 N/S/E/W（仅 S3） |
 | 本机 | `/info.html` | 固件、板型、CPU、芯片温度、内部 RAM 分块、MAC、堆、Flash、休眠记录与时间轴 |
 | NTP | `/ntp.html` | 板载 NTP 服务端状态、上游同步、时区设置、农历 |
 | IPTV | `/iptv.html` | 频道库浏览与网页播放 |
 
-页面共用 `web/theme.css`，支持系统深浅色；构建后为单文件形式，CSS/JS 内联并生成 gzip 预压缩版本。
+页面共用 `web/theme.css` 与 `web/ui.js`，支持系统深浅色；构建后为单文件形式，CSS/JS 内联并生成 gzip 预压缩版本。顶栏统一显示设备 IP、状态点与指示灯心跳开关（仅 S3）。
 
 ---
 
@@ -45,7 +46,7 @@
 | 固件 | MicroPython v1.26.1 `ESP32_GENERIC` | MicroPython v1.29.0 `ESP32_GENERIC_S3-SPIRAM_OCT` |
 | 烧写偏移 | `0x1000` | `0x0` |
 | 串口 | CH9102 / CP2102（USB 转串口） | 原生 USB-Serial/JTAG |
-| 指示灯 | GPIO2 单色 | GPIO48 WS2812（可彻底关闭） |
+| 指示灯 | GPIO2 单色 | GPIO48 WS2812，低亮度心跳，可在顶栏开关 |
 
 无需 SD 卡或外设。S3 版 Python 堆位于 PSRAM，内部 SRAM 供 WiFi 与 lwIP 使用。
 数据源为运行 CGI 的路由器，见 [docs/CONFIG.md](docs/CONFIG.md)。
@@ -140,7 +141,7 @@ python esp32-s3/scripts/flash.py esp32-s3/main.py esp32-s3/www/index.html ...
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
-| GET | `/api/health` | IP、RSSI、运行时长、剩余堆、路由器可达性 |
+| GET | `/api/health` | IP、RSSI、运行时长、剩余堆、路由器可达性、板载指示灯状态（`led_on` / `led_hw`） |
 | GET | `/api/home` | 健康状态、服务状态、今日历法 |
 | GET | `/api/info` | 固件、板型、CPU 频率、芯片温度、复位原因、内部 RAM 分块、MAC、堆、Flash、文件清单 |
 | GET | `/api/weather` | 天气聚合数据（实况 / 24 小时 / 7 天 / 空气 / 预警 / 指数）；`?force=1` 清除两级缓存后重取 |
@@ -155,8 +156,9 @@ python esp32-s3/scripts/flash.py esp32-s3/main.py esp32-s3/www/index.html ...
 | POST | `/api/ntp` | `sync` / `srv` / `upstream` / `interval` / `tz` |
 | GET | `/api/config` | 读取配置（密码打码） |
 | POST | `/api/config` | 保存配置并重启 |
-| GET | `/api/news` | 新闻电报（近 7 天，本地 CSV，`?force=1` 触发刷新）；每小时定时补采并翻页追平 |
-| GET | `/api/quake` | 地震列表（近 7 天，本地 CSV）；`?a=global` 切全球视图，`?force=1` 触发刷新 |
+| POST | `/api/led` | `{"on":0/1}`，板载指示灯心跳开关，写入 `led.on` 并立即生效（仅 S3） |
+| GET | `/api/news` | 新闻电报（近 7 天，本地 CSV，`?force=1` 触发刷新）；每小时定时补采并翻页追平（仅 S3） |
+| GET | `/api/quake` | 地震列表（近 7 天，本地 CSV）；`?a=global` 切全球视图，`?force=1` 触发刷新（仅 S3） |
 
 ---
 
@@ -177,7 +179,7 @@ python esp32-s3/scripts/flash.py esp32-s3/main.py esp32-s3/www/index.html ...
 │   ├── web/               页面源码
 │   ├── www/               构建产物（部署此目录）
 │   └── scripts/           构建、上传、刷机、预编译
-├── esp32-s3/              ESP32-S3 N16R8 版（目录结构、页面、API 与 esp32/ 一致）
+├── esp32-s3/              ESP32-S3 N16R8 版（目录结构与 esp32/ 相同，另有新闻、地震页面）
 └── docs/
     ├── ARCHITECTURE.md
     ├── CONFIG.md
@@ -200,12 +202,14 @@ python esp32-s3/scripts/flash.py esp32-s3/main.py esp32-s3/www/index.html ...
 | 落盘方式 | 写 `.tmp` 后 rename | 避免并发读取到不完整文件 |
 | 空闲降频下限 | 80 MHz | WiFi APB 与 Octal PSRAM 时序的下限 |
 | 满频基准 | 配置项 `power.max_mhz` | `esp_pm` 时钟配置不随软复位恢复 |
+| 指示灯心跳 | 主循环 ticks 判断，不 sleep | 不额外唤醒 CPU，空闲降频不受影响 |
 
 ---
 
 ## 已知限制
 
-- 单线程：慢请求会阻塞后续请求；联网接口均有 TTL 缓存，无后台轮询
+- 单线程：慢请求会阻塞后续请求；联网取数以请求触发为主，仅在缓存过期后于主循环补刷，
+  新闻另有每小时定时补采（仅 S3）
 - WiFi 密码以明文存于 flash
 - 不支持 HTTPS
 - 电台直链由第三方提供

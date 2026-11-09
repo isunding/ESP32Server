@@ -641,6 +641,7 @@ class App:
         w.route("GET", "/api/news", self.h_news)
         w.route("GET", "/api/quake", self.h_quake)
         w.route("POST", "/api/config", self.h_set_cfg)
+        w.route("POST", "/api/led", self.h_led_action)
 
     def poll_services(self):
         """探两个转发引擎：借路由器上的 svcstat 反代探测，绕开跨域。
@@ -688,6 +689,8 @@ class App:
             "router": {"host": r["host"], "r2h_port": r["r2h_port"],
                        "udpxy_port": r.get("udpxy_port", 12123)},
             "router_ok": bool(self.reachable),
+            "led_on": 1 if _hb_enable else 0,
+            "led_hw": 1 if (_np is not None or _led is not None) else 0,
             "err": self.api.last_err,
         }
 
@@ -1260,6 +1263,23 @@ class App:
             return httpsrv.json_resp({"ok": 0, "msg": "写入失败: %s" % e}, 500)
         self.reboot_at = time.ticks_ms()
         return httpsrv.json_resp({"ok": 1, "msg": "已保存，设备即将重启", "reboot": 1})
+
+    def h_led_action(self, req):
+        """板载指示灯心跳开关。只动 led.on，写盘后立即生效，不重启。"""
+        if _np is None and _led is None:
+            return httpsrv.json_resp({"ok": 0, "msg": "本机没有可控指示灯"}, 400)
+        d = req.json() or {}
+        if "on" not in d:
+            return httpsrv.json_resp({"ok": 0, "msg": "缺少 on 参数"}, 400)
+        v = 1 if d.get("on") else 0
+        self.cfg.setdefault("led", {})["on"] = v
+        try:
+            save_cfg(self.cfg)
+        except Exception as e:
+            return httpsrv.json_resp({"ok": 0, "msg": "写入失败: %s" % e}, 500)
+        led_config(self.cfg)
+        return httpsrv.json_resp({"ok": 1, "on": 1 if _hb_enable else 0,
+                                  "msg": "心跳已开启" if v else "心跳已关闭"})
 
     # ---------------- 新闻 / 地震（CSV 日文件） ----------------
     def _daily_ids(self, prefix):

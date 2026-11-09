@@ -57,6 +57,20 @@ a{color:var(--acc);text-decoration:none}
 @keyframes beat{0%,100%{opacity:1}50%{opacity:.3}}
 @media (prefers-reduced-motion: reduce){.dot.beat{animation:none}}
 
+/* 板载指示灯心跳开关：波形图标，开时着色呼吸，关时灰暗 */
+.hbtn{
+  width:22px;height:22px;flex:0 0 auto;display:flex;align-items:center;justify-content:center;
+  padding:0;margin-left:2px;border:0;border-radius:6px;background:none;
+  color:var(--fg2);opacity:.5;cursor:pointer;transition:color .2s,opacity .2s,background .2s;
+  -webkit-tap-highlight-color:transparent;
+}
+.hbtn:hover{opacity:1;background:var(--bg2)}
+.hbtn:focus-visible{outline:1px solid var(--acc);outline-offset:1px}
+.hbtn svg{display:block}
+.hbtn.on{color:var(--ok);opacity:1;filter:drop-shadow(0 0 3px var(--ok))}
+.hbtn.on svg{animation:beat 2s ease-in-out infinite}
+@media (prefers-reduced-motion: reduce){.hbtn.on svg{animation:none}}
+
 /* ---------- 页签 ---------- */
 .nav{
   display:flex;gap:6px;overflow-x:auto;padding:10px 16px;
@@ -388,6 +402,20 @@ var MR = (function () {
     });
   }
 
+  /* 写接口：统一按 {"ok":0,"msg":...} 判失败，异常信息直接给用户看 */
+  function post(path, body) {
+    return fetch(path, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body || {})
+    }).then(function (r) {
+      return r.json().catch(function () { return {}; }).then(function (d) {
+        if (!r.ok || !d.ok) throw new Error(d.msg || ("HTTP " + r.status));
+        return d;
+      });
+    });
+  }
+
   function fmtBytes(n) {
     n = Number(n) || 0;
     if (n < 1024) return n + " B";
@@ -414,6 +442,37 @@ var MR = (function () {
     return p.replace(/^\/+/, "/");
   }
 
+  /* 板载指示灯心跳开关。图标画在 IP 右侧，点一下切一次，状态存板上配置。
+     显示与否取决于 /api/health 的 led_hw：没有可控指示灯的设备不出现按钮。 */
+  var LED_SVG = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" ' +
+    'stroke="currentColor" stroke-width="2" stroke-linecap="round" ' +
+    'stroke-linejoin="round" aria-hidden="true"><path d="M2 12h4l2.5-7 5 14 2.5-7h8"/></svg>';
+
+  function setLedBtn(on, hw) {
+    var b = $("hLed");
+    if (!b) return;
+    b.style.display = hw ? "" : "none";
+    b.className = "hbtn" + (on ? " on" : "");
+    b.setAttribute("data-on", on ? "1" : "0");
+    b.setAttribute("aria-pressed", on ? "true" : "false");
+    b.title = on ? "板载心跳：开（点击关闭）" : "板载心跳：关（点击开启）";
+  }
+
+  function toggleLed() {
+    var b = $("hLed");
+    if (!b || b.getAttribute("data-busy") === "1") return;
+    var want = b.getAttribute("data-on") === "1" ? 0 : 1;
+    b.setAttribute("data-busy", "1");
+    post("/api/led", { on: want }).then(function (r) {
+      b.removeAttribute("data-busy");
+      setLedBtn(r.on ? 1 : 0, 1);
+      toast(r.on ? "板载心跳已开启" : "板载心跳已关闭", 1600);
+    }).catch(function (e) {
+      b.removeAttribute("data-busy");
+      toast(e && e.message ? e.message : "切换失败");
+    });
+  }
+
   /* 顶栏 + 页签。title 为空时不显示返回键。
      挂载完就自动开始心跳：以前要求每页自己调 healthTick()，漏掉一页
      右上角就永远停在初始文案「连接中…」。 */
@@ -430,13 +489,17 @@ var MR = (function () {
     var html =
       '<div class="top">' + back +
       "<h1>" + esc(title) + "</h1>" +
-      '<div class="st"><span class="dot" id="hDot"></span><span id="hIp">连接中…</span></div>' +
+      '<div class="st"><span class="dot" id="hDot"></span><span id="hIp">连接中…</span>' +
+      '<button class="hbtn" id="hLed" type="button" data-on="0" ' +
+      'aria-pressed="false" title="板载心跳">' + LED_SVG + "</button></div>" +
       "</div>" +
       '<div class="nav">' + nav + "</div>";
 
     var host = document.getElementById("topbar");
     if (host) {
       host.innerHTML = html;
+      var lb = $("hLed");
+      if (lb) lb.onclick = toggleLed;
       startBeat();
     }
   }
@@ -456,6 +519,7 @@ var MR = (function () {
         ip.title = (h.router_ok ? "路由器可达" : "路由器不可达") + " · RSSI " + h.rssi +
           " · 运行 " + fmtDur(h.up) + " · 空闲内存 " + fmtBytes(h.mem_free);
       }
+      setLedBtn(h.led_on ? 1 : 0, h.led_hw ? 1 : 0);
       MR.device = h;
       return h;
     }).catch(function () {
@@ -499,7 +563,7 @@ var MR = (function () {
   function empty(msg) { return '<span class="muted small">' + esc(msg) + "</span>"; }
 
   return {
-    $: $, esc: esc, api: api, fmtBytes: fmtBytes, fmtDur: fmtDur,
+    $: $, esc: esc, api: api, post: post, fmtBytes: fmtBytes, fmtDur: fmtDur,
     hhmm: hhmm, mmdd: mmdd, mountTop: mountTop, healthTick: healthTick,
     startBeat: startBeat,
     toast: toast, empty: empty, PAGES: PAGES, device: null

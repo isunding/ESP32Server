@@ -12,6 +12,8 @@
   按上游 `last_time` 逐页向前追平上次采集时刻，`poll.news_pages` 控制页数上限
 - 重启后从近几天的 CSV 恢复新闻采集进度
 - 路由器新闻 CGI 增加 `?a=page&last_time=<秒>`，翻页请求不进入首页缓存
+- 顶栏 IP 右侧增加板载指示灯心跳开关：`POST /api/led` 写入 `led.on` 并立即生效，
+  不重启设备；`/api/health` 增加 `led_on` / `led_hw`
 
 ### 变更
 - 新闻卡片正文直接完整显示，取消三行缩略与点击展开
