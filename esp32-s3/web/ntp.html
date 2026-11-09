@@ -23,30 +23,21 @@
     border:1px solid rgba(88,166,255,.35);border-radius:999px;padding:2px 9px;font-size:11px}
   .clk .lx .fest{background:rgba(255,106,0,.14);color:var(--acc);
     border:1px solid rgba(255,106,0,.35);border-radius:999px;padding:2px 9px;font-size:11px}
+  /* 宜忌：只有「宜」「忌」两个字带底色，行本身不加背景 */
+  .clk .yj{margin-top:11px;padding-top:11px;border-top:1px solid var(--line);
+    display:grid;gap:7px;text-align:left}
+  .clk .yj .row{display:flex;align-items:flex-start;gap:9px}
+  .clk .yj .row b{flex:0 0 auto;width:22px;height:22px;border-radius:6px;font-size:11.5px;
+    font-weight:600;display:flex;align-items:center;justify-content:center}
+  .clk .yj .row.y b{background:rgba(63,185,80,.18);color:var(--ok)}
+  .clk .yj .row.j b{background:rgba(248,81,73,.16);color:var(--err)}
+  .clk .yj .row span{flex:1;min-width:0;font-size:13px;line-height:22px;
+    word-break:break-word}
   .clk .s{margin-top:11px;display:inline-flex;align-items:center;gap:7px;font-size:11.5px;
     color:var(--fg2);background:var(--bg3);border:1px solid var(--line);
     border-radius:999px;padding:3px 11px}
-  /* 万年历：公历与农历为主体，时钟收进右上角，下面是宜忌 */
-  .alm{text-align:left;padding:16px 18px 15px}
-  .alm .top{display:flex;align-items:flex-start;gap:12px}
-  .alm .g{flex:1;min-width:0}
-  .alm .g .dt{font-size:18px;font-weight:600;line-height:1.3;letter-spacing:.3px}
-  .alm .g .ln,.alm .g .lx{justify-content:flex-start}
-  .alm .g .ln{margin-top:5px}
-  .alm .g .lx{margin-top:8px}
-  .alm .ck{flex:0 0 auto;text-align:right;max-width:112px}
-  .alm .ck .t{font-size:19px;letter-spacing:.5px;font-variant-numeric:tabular-nums}
-  .alm .ck .s{margin-top:6px;margin-bottom:0;font-size:10.5px;padding:2px 8px}
-  .alm-yj{margin-top:13px;padding-top:12px;border-top:1px solid var(--line);display:grid;gap:8px}
-  .alm-yj .row{display:flex;align-items:flex-start;gap:9px}
-  .alm-yj .row b{flex:0 0 auto;width:22px;height:22px;border-radius:6px;font-size:11.5px;
-    font-weight:600;display:flex;align-items:center;justify-content:center}
-  .alm-yj .row.y b{background:rgba(63,185,80,.16);color:var(--ok)}
-  .alm-yj .row.j b{background:rgba(248,81,73,.14);color:var(--err)}
-  .alm-yj .row span{flex:1;min-width:0;font-size:13px;line-height:1.55;
-    word-break:break-word}
-  .alm-ft{margin-top:11px;font-size:11px;color:var(--fg2);line-height:1.65}
-  .nrow{display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid var(--line)}  .nrow:last-child{border-bottom:0}
+  .nrow{display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid var(--line)}
+  .nrow:last-child{border-bottom:0}
   .nrow .k{font-size:12.5px;color:var(--fg2);flex:0 0 96px}
   .nrow .v{flex:1;min-width:0;font-size:13px;
     font-family:ui-monospace,Menlo,Consolas,monospace;
@@ -74,23 +65,16 @@
 <div id="topbar"></div>
 
 <div class="wrap">
-  <div class="card clk alm">
-    <div class="top">
-      <div class="g">
-        <div class="dt" id="clkDate">正在读取 ESP32 时间…</div>
-        <div class="ln" id="clkLunar" style="display:none"></div>
-        <div class="lx" id="clkExtra"></div>
-      </div>
-      <div class="ck">
-        <div class="t" id="clkTime">--:--:--</div>
-        <div class="s"><span class="dot" id="clkDot"></span><span id="clkSrc">—</span></div>
-      </div>
+  <div class="card clk">
+    <div class="t" id="clkTime">--:--:--</div>
+    <div class="d" id="clkDate">正在读取 ESP32 时间…</div>
+    <div class="ln" id="clkLunar" style="display:none"></div>
+    <div class="yj" id="clkYj" style="display:none">
+      <div class="row y"><b>宜</b><span id="clkYi"></span></div>
+      <div class="row j"><b>忌</b><span id="clkJi"></span></div>
     </div>
-    <div class="alm-yj">
-      <div class="row y"><b>宜</b><span id="almYi">—</span></div>
-      <div class="row j"><b>忌</b><span id="almJi">—</span></div>
-    </div>
-    <div class="alm-ft" id="almFoot">万年历加载中…</div>
+    <div class="lx" id="clkExtra"></div>
+    <div class="s"><span class="dot" id="clkDot"></span><span id="clkSrc">ESP32 本机时钟</span></div>
   </div>
 
   <div class="card">
@@ -189,46 +173,6 @@ function renderCal(c) {
   lx.innerHTML = p.join("");
 }
 
-/* ---------------- 万年历 ----------------
- * 数据来自板子按天缓存的 /api/almanac（接口盒子万年历）：干支、宜忌、生肖、冲煞。
- * 农历与节气仍由板上的年度缓存推算，这边接口不可用时不影响看时间。
- */
-function almList(s) {
-  if (!s || s === "无") return "无";
-  return String(s).split("|").filter(Boolean).join("　");
-}
-
-function renderAlm(d) {
-  var yi = MR.$("almYi"), ji = MR.$("almJi"), ft = MR.$("almFoot");
-  if (!d || !d.ok || !d.alm) {
-    yi.textContent = "—";
-    ji.textContent = "—";
-    ft.textContent = (d && d.msg) || "万年历暂不可用";
-    return;
-  }
-  var a = d.alm, p = [];
-  yi.textContent = almList(a.yi);
-  ji.textContent = almList(a.ji);
-  if (a.YEARGANZHI || a.ganzhiri) {
-    p.push((a.YEARGANZHI || "") + "年 " + (a.ganzhiri || "") + "日");
-  }
-  if (a.shengxiao) p.push("生肖" + a.shengxiao);
-  if (a.xingzuo) p.push(a.xingzuo);
-  if (a.DAYCHONGDESC) p.push("冲 " + a.DAYCHONGDESC);
-  if (a.jieri) p.push(a.jieri);
-  ft.textContent = p.join(" · ");
-}
-
-var almDay = "";
-function loadAlm(force) {
-  var key = calDay || "now";
-  if (!force && almDay === key) return Promise.resolve();
-  almDay = key;
-  return MR.api(force ? "/api/almanac?force=1" : "/api/almanac")
-    .then(renderAlm)
-    .catch(function () { MR.$("almFoot").textContent = "万年历暂不可用"; });
-}
-
 function loadCal() {
   var k = (D && D.sync && D.sync.esp_time) ? D.sync.esp_time.slice(0, 10) : "";
   if (k === calDay) return Promise.resolve(CAL);
@@ -244,6 +188,41 @@ function loadCal() {
     loadAlm();
     return null;
   });
+}
+
+/* ---------------- 万年历 ----------------
+ * 数据来自板子按天缓存的 /api/almanac（接口盒子万年历）。
+ * 只补一行宜忌，沿用农历行的字号与灰度；农历与节气仍由板上的年度缓存推算，
+ * 接口不可用时去掉该行，不影响看时间。
+ */
+function almList(s) {
+  if (!s || s === "无") return "无";
+  return String(s).split("|").filter(Boolean).join("　");
+}
+
+var almDay = "";
+
+function renderAlm(d) {
+  var yj = MR.$("clkYj");
+  if (!d || !d.ok || !d.alm) {
+    yj.style.display = "none";
+    MR.$("clkYi").textContent = "";
+    MR.$("clkJi").textContent = "";
+    return;
+  }
+  var a = d.alm;
+  yj.style.display = "grid";
+  MR.$("clkYi").textContent = almList(a.yi);
+  MR.$("clkJi").textContent = almList(a.ji);
+}
+
+function loadAlm(force) {
+  var key = calDay || "now";
+  if (!force && almDay === key) return Promise.resolve();
+  almDay = key;
+  return MR.api(force ? "/api/almanac?force=1" : "/api/almanac")
+    .then(renderAlm)
+    .catch(function () { almDay = ""; renderAlm(null); });
 }
 
 /* ---------------- 顶部时钟 ----------------
@@ -372,14 +351,12 @@ function paintClock() {
   var hms = pad2(d.getHours()) + ":" + pad2(d.getMinutes()) + ":" + pad2(d.getSeconds());
   var ymd = d.getFullYear() + "-" + pad2(d.getMonth() + 1) + "-" + pad2(d.getDate());
   MR.$("clkTime").textContent = hms;
-  // 不带年份：卡片右侧还有时钟，带年份会顶到两行；年份在下面的干支里能看出来
-  MR.$("clkDate").textContent = (d.getMonth() + 1) + " 月 " + d.getDate() +
-    " 日 · 星期" + WD[d.getDay()];
+  MR.$("clkDate").textContent = d.getFullYear() + " 年 " + (d.getMonth() + 1) + " 月 " +
+    d.getDate() + " 日 · 星期" + WD[d.getDay()];
 
   var cal = !!(D && D.sync && D.sync.calibrated);
   if (dot) dot.className = "dot " + (cal ? "on" : "");
-  MR.$("clkSrc").textContent = cal ? "已校准" : "未校准";
-  MR.$("clkSrc").title = "ESP32 本机时钟";
+  MR.$("clkSrc").textContent = "ESP32 本机时钟 · " + (cal ? "已校准" : "未校准");
   MR.$("espTime").textContent = ymd + " " + hms;
 }
 
