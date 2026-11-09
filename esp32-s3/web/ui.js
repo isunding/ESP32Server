@@ -11,10 +11,10 @@ var MR = (function () {
     { href: "/quake.html", title: "地震" },
     { href: "/news.html", title: "新闻" },
     { href: "/market.html", title: "行情" },
-    { href: "/iptv.html", title: "IPTV" },
+    { href: "/iptv.html", title: "直播" },
     { href: "/radio.html", title: "电台" },
     { href: "/info.html", title: "本机" },
-    { href: "/ntp.html", title: "NTP" }
+    { href: "/ntp.html", title: "校时" }
   ];
 
   function $(id) { return document.getElementById(id); }

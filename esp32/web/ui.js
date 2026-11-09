@@ -11,8 +11,8 @@ var MR = (function () {
     { href: "/market.html", title: "行情" },
     { href: "/radio.html", title: "电台" },
     { href: "/info.html", title: "本机" },
-    { href: "/ntp.html", title: "NTP" },
-    { href: "/iptv.html", title: "IPTV" }
+    { href: "/ntp.html", title: "校时" },
+    { href: "/iptv.html", title: "直播" }
   ];
 
   function $(id) { return document.getElementById(id); }

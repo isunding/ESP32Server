@@ -287,7 +287,7 @@ video{width:100%;height:100%;display:block;background:#0b0e12}
   .grid{grid-template-columns:1fr}
 }
 
-/* ---------- 信息流模块（新闻 / 地震共用；视觉与首页 .tile 一致） ---------- */
+/* ---------- 信息流模块（新闻；视觉与首页 .tile 一致） ---------- */
 .feed{display:grid;gap:12px}
 .feed>.empty{grid-column:1/-1}
 .frow{min-width:0}
@@ -310,19 +310,11 @@ video{width:100%;height:100%;display:block;background:#0b0e12}
 .flv.A{background:rgba(230,60,60,.16);color:#e23c3c}
 .flv.B{background:rgba(240,160,40,.16);color:#d98a1a}
 .flv.C{background:var(--bg3);color:var(--fg2)}
-.fmag{font-size:15px;font-weight:600;border-radius:6px;padding:2px 9px;flex:0 0 auto}
-.fmag.m6{background:rgba(226,60,60,.18);color:#e23c3c}
-.fmag.m5{background:rgba(240,120,40,.18);color:#e07a1f}
-.fmag.m4{background:rgba(230,190,40,.18);color:#b8901a}
-.fmag.m0{background:var(--bg3);color:var(--fg2)}
 .ftag{font-size:11px;color:var(--fg2);border:1px solid var(--line);
   border-radius:999px;padding:1px 7px}
 .fbtn{font-size:11px;border:1px solid var(--line);border-radius:999px;
   padding:1px 7px;cursor:pointer;background:var(--bg2);color:var(--fg2);font-family:inherit}
 .fbtn.added{border-color:var(--ok);color:var(--ok)}
-.fsum{display:flex;gap:16px;flex-wrap:wrap;margin-bottom:4px}
-.fsum .k{font-size:11.5px;color:var(--fg2)}
-.fsum .v{font-size:15px;font-weight:600;margin-top:2px}
 
 </style>
 <style>
@@ -495,8 +487,8 @@ var MR = (function () {
     { href: "/market.html", title: "行情" },
     { href: "/radio.html", title: "电台" },
     { href: "/info.html", title: "本机" },
-    { href: "/ntp.html", title: "NTP" },
-    { href: "/iptv.html", title: "IPTV" }
+    { href: "/ntp.html", title: "校时" },
+    { href: "/iptv.html", title: "直播" }
   ];
 
   function $(id) { return document.getElementById(id); }

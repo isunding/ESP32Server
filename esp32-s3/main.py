@@ -1426,7 +1426,48 @@ class App:
                 pass
         return ids
 
-    def _h_daily(self, prefix, ttl_key, cap, req):
+    def _csv_stats(self, prefix):
+        """近 7 天按天计数与震级分档（M3 / M4 / M5 以上）。
+
+        一个日文件就是一天，按文件名归组即可，不用解析行内时间字符串；
+        震级取第 2 列，非数值行只计入当天总数，不参与分档。
+        """
+        days = []
+        tot_n = tot3 = tot4 = tot5 = 0
+        for back in range(CSV_KEEP_DAYS - 1, -1, -1):
+            day = _ymd(back)
+            fn = "%s-%s.csv" % (prefix, day)
+            n = n3 = n4 = n5 = 0
+            if self._file_ok(fn):
+                try:
+                    with open(fn) as f:
+                        for line in f:
+                            line = line.strip()
+                            if not line:
+                                continue
+                            n += 1
+                            parts = line.split(",", 2)
+                            try:
+                                mag = float(parts[1].strip('"'))
+                            except (IndexError, ValueError):
+                                continue
+                            if mag >= 3:
+                                n3 += 1
+                            if mag >= 4:
+                                n4 += 1
+                            if mag >= 5:
+                                n5 += 1
+                except OSError:
+                    pass
+            days.append({"d": day[4:6] + "-" + day[6:8], "n": n,
+                         "m3": n3, "m4": n4, "m5": n5})
+            tot_n += n
+            tot3 += n3
+            tot4 += n4
+            tot5 += n5
+        return {"days": days, "n": tot_n, "m3": tot3, "m4": tot4, "m5": tot5}
+
+    def _h_daily(self, prefix, ttl_key, cap, req, extra=None):
         """把最近几天的 CSV 行原样拼成 JSON 吐给页面。
 
         行是 CSV 原文（字段可能带引号），页面自己按引号规则拆 —— 这样板子
@@ -1453,6 +1494,11 @@ class App:
             before = 0
         # 多要一条用来判断「还有更早的」，返回前再裁掉
         need = limit + 1
+
+        def _out(d):
+            if extra:
+                d.update(extra)
+            return httpsrv.json_resp(d)
         rows = []
         for back in range(CSV_KEEP_DAYS):
             fn = "%s-%s.csv" % (prefix, _ymd(back))
@@ -1464,13 +1510,13 @@ class App:
             if len(rows) >= need:
                 break
         if not rows:
-            return httpsrv.json_resp({"ok": 0, "pending": 1,
-                                      "msg": "正在取数，几秒后自动刷新"})
+            return _out({"ok": 0, "pending": 1,
+                         "msg": "正在取数，几秒后自动刷新"})
         more = 0
         if len(rows) > limit:
             more = 1
             rows = rows[len(rows) - limit:]
-        return httpsrv.json_resp({"ok": 1, "rows": rows, "more": more})
+        return _out({"ok": 1, "rows": rows, "more": more})
 
     def h_news(self, req):
         return self._h_daily("news", "news_ms", NEWS_ROWS_MAX, req)
@@ -1484,7 +1530,9 @@ class App:
             prefix, ttl = "usgs", "usgs_ms"
         else:
             prefix, ttl = "quake", "quake_ms"
-        return self._h_daily(prefix, ttl, QUAKE_ROWS_MAX, req)
+        # 统计随列表一起返回，页面不用再发一次请求；等待取数时也能先画出空图
+        return self._h_daily(prefix, ttl, QUAKE_ROWS_MAX, req,
+                             {"stat": self._csv_stats(prefix)})
 
     def _news_last_ctime(self):
         """从近几天的 CSV 里找出已收录的最新时间，供重启后接续翻页。"""
