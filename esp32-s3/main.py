@@ -1448,11 +1448,12 @@ class App:
         return ids
 
     def _csv_stats(self, prefix):
-        """近 7 天按天计数与震级分档（M3 / M4 / M5 以上）。
+        """近 7 天按天计数与震级分档（M3 / M4 / M5 / M6 以上）。
 
         按事件时间归组，不按文件日期：上游一次返回的 30 条可能横跨好几天，
         按文件算会把它们全堆在抓取当天。震级取第 2 列，时间串取第 3 列前 10 位，
         解析不出日期的行跳过，落在 7 天窗口外的也不计。
+        分档均为「及以上」的累计值，页面按相邻相减得到互斥区间。
         """
         keys = []
         for back in range(CSV_KEEP_DAYS - 1, -1, -1):
@@ -1465,6 +1466,7 @@ class App:
         n3 = [0] * CSV_KEEP_DAYS
         n4 = [0] * CSV_KEEP_DAYS
         n5 = [0] * CSV_KEEP_DAYS
+        n6 = [0] * CSV_KEEP_DAYS
         for back in range(CSV_KEEP_DAYS):
             fn = "%s-%s.csv" % (prefix, _ymd(back))
             if not self._file_ok(fn):
@@ -1495,14 +1497,16 @@ class App:
                             n4[i] += 1
                         if mag >= 5:
                             n5[i] += 1
+                        if mag >= 6:
+                            n6[i] += 1
             except OSError:
                 pass
         days = []
         for i in range(len(keys)):
-            days.append({"d": keys[i], "n": n[i],
-                         "m3": n3[i], "m4": n4[i], "m5": n5[i]})
+            days.append({"d": keys[i], "n": n[i], "m3": n3[i],
+                         "m4": n4[i], "m5": n5[i], "m6": n6[i]})
         return {"days": days, "n": sum(n), "m3": sum(n3),
-                "m4": sum(n4), "m5": sum(n5)}
+                "m4": sum(n4), "m5": sum(n5), "m6": sum(n6)}
 
     def _h_daily(self, prefix, ttl_key, cap, req, extra=None):
         """把最近几天的 CSV 行原样拼成 JSON 吐给页面。

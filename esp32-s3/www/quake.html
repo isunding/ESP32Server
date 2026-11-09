@@ -321,8 +321,10 @@ video{width:100%;height:100%;display:block;background:#0b0e12}
   /* 地震卡片：左侧震级方块，右侧标题 / 深度 / 经纬度三行。与新闻信息流互不复用。 */
   .qfeed{display:grid;gap:10px}
   .qfeed>.empty{grid-column:1/-1}
-  /* 近 7 天柱状图：每天一根柱，柱高按当天条数占峰值的比例；
-     柱内自下而上按震级堆叠（低于 M3 / M3 / M4 / M5 以上） */
+  /* 近 7 天柱状图：每天一根柱，柱高按当天 M3 以上条数占峰值的比例。
+     分档与配色按 USGS 地震图：M3 起每一档取该震级对应的颜色
+     （M3 #83d0da / M4 #7bc87f / M5 #f9f518 / M6 以上 #fa8a11），M3 以下不计入；
+     柱内自下而上按震级堆叠（M3 / M4 / M5 / M6 以上） */
   .qchart{display:flex;align-items:flex-end;gap:6px;min-height:116px;margin-bottom:9px}
   /* 三部分（数字、柱、日期）都以列中心对齐：柱子被 .qbtrack 居中，数字与日期也跟着居中，
      否则数字会贴在列左边缘，与柱子和日期错开 */
@@ -333,22 +335,24 @@ video{width:100%;height:100%;display:block;background:#0b0e12}
   .qstack{width:100%;max-width:30px;display:flex;flex-direction:column;
     overflow:hidden;border-radius:6px 6px 2px 2px}
   .qstack>i{display:block;flex:1 1 0;min-height:0}
-  .qstack>i.s5{background:#d1373a}
-  .qstack>i.s4{background:#dd7a1e}
-  .qstack>i.s3{background:#b8971c}
-  .qstack>i.slo{background:#5a6573}
+  .qstack>i.s6{background:#fa8a11}
+  .qstack>i.s5{background:#f9f518}
+  .qstack>i.s4{background:#7bc87f}
+  .qstack>i.s3{background:#83d0da}
   .qstack.zero{height:2px;background:var(--bg3);border:1px solid var(--line);border-radius:3px}
   .qbd{margin-top:6px;font-size:10px;color:var(--fg2);white-space:nowrap;
     text-align:center;font-variant-numeric:tabular-nums}
-  .qlegend{display:flex;flex-wrap:wrap;gap:12px;margin-bottom:13px;
+  .qlegend{display:flex;flex-wrap:wrap;justify-content:center;gap:12px;margin-bottom:13px;
     font-size:10.5px;color:var(--fg2)}
   .qlegend span{display:inline-flex;align-items:center;gap:5px}
   .qlegend i{width:8px;height:8px;border-radius:2px}
-  .qlegend i.s5{background:#d1373a}
-  .qlegend i.s4{background:#dd7a1e}
-  .qlegend i.s3{background:#b8971c}
-  .qlegend i.slo{background:#5a6573}
-  .qsum{display:flex;gap:16px;flex-wrap:wrap;margin-bottom:4px}
+  .qlegend i.s6{background:#fa8a11}
+  .qlegend i.s5{background:#f9f518}
+  .qlegend i.s4{background:#7bc87f}
+  .qlegend i.s3{background:#83d0da}
+  /* 四格统计等宽居中，数字落在同一基线上 */
+  .qsum{display:flex;margin-bottom:4px}
+  .qsum>div{flex:1;min-width:0;text-align:center}
   .qsum .k{font-size:11.5px;color:var(--fg2)}
   .qsum .v{font-size:15px;font-weight:600;margin-top:2px}
   .qcard{display:flex;align-items:stretch;gap:12px;min-width:0;
@@ -359,10 +363,10 @@ video{width:100%;height:100%;display:block;background:#0b0e12}
     font-weight:700;line-height:1;font-variant-numeric:tabular-nums}
   .qmag b{font-size:20px;letter-spacing:-.5px}
   .qmag small{font-size:9px;font-weight:500;opacity:.9;margin-top:3px}
-  .qmag.m6{background:#d1373a}
-  .qmag.m5{background:#dd7a1e}
-  .qmag.m4{background:#b8971c}
-  .qmag.m0{background:#5a6573}
+  .qmag.m6{background:#c0392b}
+  .qmag.m5{background:#d98026}
+  .qmag.m4{background:#3f9e5e}
+  .qmag.m0{background:#2f8f9c}
   .qmain{flex:1;min-width:0;display:flex;flex-direction:column;justify-content:center}
   .qhd{display:flex;align-items:baseline;gap:10px}
   .qtitle{flex:1;min-width:0;font-size:14.5px;font-weight:600;line-height:1.4;
@@ -399,8 +403,8 @@ video{width:100%;height:100%;display:block;background:#0b0e12}
     <div class="qlegend">
       <span><i class="s3"></i>M3–3.9</span>
       <span><i class="s4"></i>M4–4.9</span>
-      <span><i class="s5"></i>M5 以上</span>
-      <span><i class="slo"></i>低于 M3</span>
+      <span><i class="s5"></i>M5–5.9</span>
+      <span><i class="s6"></i>M6 以上</span>
     </div>
     <div class="qsum">
       <div><div class="k">近 7 天</div><div class="v" id="cAll">—</div></div>
@@ -686,34 +690,34 @@ function tshort(s) {
 }
 
 /* 近 7 天柱状图与震级分档。统计口径来自板上的日文件，与当前所选范围一致。
-   没有数据时（stat 缺失或全为 0）也要画出 7 根空柱，避免卡片高度跳动。
-   柱内按震级堆叠：后端给的是累计档（≥3 / ≥4 / ≥5），相邻相减得到互斥区间。 */
+   分档按 USGS：M3 / M4 / M5 / M6 各一个震级区间，M3 以下不计入柱高与数字
+   （USGS 的 M2.5 源里低震级占多数，混进来会把有感的震动压平）。
+   后端给的是累计档（≥3 / ≥4 / ≥5 / ≥6），相邻相减得到互斥区间。 */
 function paintStats(st) {
   var days = (st && st.days) || [];
   var max = 0, i;
   for (i = 0; i < days.length; i++) {
-    if (days[i].n > max) max = days[i].n;
+    if ((days[i].m3 || 0) > max) max = days[i].m3;
   }
   $("qChart").innerHTML = days.map(function (d) {
-    var n = Number(d.n) || 0;
-    var m3 = Number(d.m3) || 0, m4 = Number(d.m4) || 0, m5 = Number(d.m5) || 0;
-    var b5 = Math.max(m5, 0);
-    var b4 = Math.max(m4 - m5, 0);
-    var b3 = Math.max(m3 - m4, 0);
-    var lo = Math.max(n - m3, 0);
-    var pct = max ? Math.round(n / max * 100) : 0;
-    if (n && pct < 4) pct = 4;              // 有数据时至少露一点，不然看着像 0
+    var m3 = Number(d.m3) || 0;
+    var b6 = Math.max(Number(d.m6) || 0, 0);
+    var b5 = Math.max((Number(d.m5) || 0) - b6, 0);
+    var b4 = Math.max((Number(d.m4) || 0) - (Number(d.m5) || 0), 0);
+    var b3 = Math.max(m3 - (Number(d.m4) || 0), 0);
+    var pct = max ? Math.round(m3 / max * 100) : 0;
+    if (m3 && pct < 4) pct = 4;             // 有数据时至少露一点，不然看着像 0
     var segs = "";
-    [[b5, "s5"], [b4, "s4"], [b3, "s3"], [lo, "slo"]].forEach(function (s) {
+    [[b6, "s6"], [b5, "s5"], [b4, "s4"], [b3, "s3"]].forEach(function (s) {
       if (s[0] > 0) segs += '<i class="' + s[1] + '" style="flex:' + s[0] + '"></i>';
     });
-    var tip = d.d + " 共 " + n + " 次";
-    if (n) tip += "（M5+ " + b5 + " · M4 " + b4 + " · M3 " + b3 + " · 以下 " + lo + "）";
+    var tip = d.d + " M3 以上 " + m3 + " 次";
+    if (m3) tip += "（M6+ " + b6 + " · M5 " + b5 + " · M4 " + b4 + " · M3 " + b3 + "）";
     return '<div class="qb" title="' + esc(tip) + '">' +
-      '<div class="qbn">' + (n || "") + "</div>" +
+      '<div class="qbn">' + (m3 || "") + "</div>" +
       '<div class="qbtrack">' +
-      (n ? '<div class="qstack" style="height:' + pct + '%">' + segs + "</div>"
-         : '<div class="qstack zero"></div>') +
+      (m3 ? '<div class="qstack" style="height:' + pct + '%">' + segs + "</div>"
+          : '<div class="qstack zero"></div>') +
       "</div>" +
       '<div class="qbd">' + esc(d.d) + "</div></div>";
   }).join("");
