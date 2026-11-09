@@ -29,7 +29,7 @@
 | 行情 | `/market.html` | 三大指数、汇率、自选股（存于板上） |
 | 电台 | `/radio.html` | 67 个电台 / 9 个分类，支持搜索与折叠 |
 | 新闻 | `/news.html` | 单列卡片、时间与重要度置于标题行、正文完整显示、标签置于卡片下方、重要度与主题筛选、`【】` 标题加粗、股票标签点选加入 / 移出自选、每小时定时补采（仅 S3） |
-| 地震 | `/quake.html` | 单列卡片、国内 / 全球切换、近 7 天列表、按震级筛选与配色、经纬度标注 N/S/E/W（仅 S3） |
+| 地震 | `/quake.html` | 单列卡片、国内 / 全球 / USGS 三路切换、近 7 天列表、按震级筛选与配色、经纬度标注 N/S/E/W（仅 S3） |
 | 本机 | `/info.html` | 固件、板型、CPU、芯片温度、内部 RAM 分块、MAC、堆、Flash、休眠记录与时间轴 |
 | NTP | `/ntp.html` | 板载 NTP 服务端状态、上游同步、时区设置、农历 |
 | IPTV | `/iptv.html` | 频道库浏览与网页播放 |
@@ -158,7 +158,7 @@ python esp32-s3/scripts/flash.py esp32-s3/main.py esp32-s3/www/index.html ...
 | POST | `/api/config` | 保存配置并重启 |
 | POST | `/api/led` | `{"on":0/1}`，板载指示灯心跳开关，写入 `led.on` 并立即生效（仅 S3） |
 | GET | `/api/news` | 新闻电报（近 7 天，本地 CSV）；`?limit=<条数>` 与 `?before=<ctime>` 分段向前取，`?force=1` 触发上游刷新；每小时定时补采并翻页追平（仅 S3） |
-| GET | `/api/quake` | 地震列表（近 7 天，本地 CSV）；`?a=global` 切全球视图，`?force=1` 触发刷新（仅 S3） |
+| GET | `/api/quake` | 地震列表（近 7 天，本地 CSV）；`?a=global` 全球震情，`?a=usgs` USGS M2.5+ 近 24 小时，`?force=1` 触发刷新（仅 S3） |
 
 ---
 

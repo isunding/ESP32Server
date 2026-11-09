@@ -21,6 +21,7 @@
     <span class="lbl">范围</span>
     <button data-s="cn" class="on">国内</button>
     <button data-s="global">全球（含海外）</button>
+    <button data-s="usgs">USGS 全球</button>
   </div>
 
   <div class="card">
@@ -42,7 +43,8 @@
   <div id="list" class="feed"><div class="skel"></div><div class="skel"></div><div class="skel"></div></div>
 
   <p class="foot">
-    国内速报与全球震情速报两路数据经路由器转发，各自按天存 CSV、只留 7 天。
+    国内速报、全球震情速报与 USGS 三路数据经路由器转发，各自按天存 CSV、只留 7 天。
+    USGS 为 M2.5 以上、近 24 小时，时间已转为本地时区。
     震级配色：<b style="color:#b8901a">M4</b> / <b style="color:#e07a1f">M5</b> /
     <b style="color:#e23c3c">M6+</b>。经纬度 N/S 为北 / 南纬，E/W 为东 / 西经。
   </p>
@@ -101,6 +103,7 @@ function render() {
     $("list").innerHTML = '<div class="empty muted small">' +
       (ALL.length ? "没有达到该震级的地震"
                   : (SCOPE === "global" ? "暂无全球数据，稍后自动刷新"
+                     : SCOPE === "usgs" ? "暂无 USGS 数据，稍后自动刷新"
                                         : "暂无国内数据，稍后自动刷新")) + "</div>";
     return;
   }
@@ -122,6 +125,7 @@ function load(force) {
   b.disabled = true;
   var q = [];
   if (SCOPE === "global") q.push("a=global");
+  else if (SCOPE === "usgs") q.push("a=usgs");
   if (force) q.push("force=1");
   return MR.api("/api/quake" + (q.length ? "?" + q.join("&") : "")).then(function (d) {
     if (!d.ok) {
@@ -146,7 +150,7 @@ function load(force) {
     $("cAll").textContent = ALL.length + " 次";
     $("c4").textContent = m4 + " 次";
     $("cMax").textContent = mx ? "M" + mx.toFixed(1) : "—";
-    var tag = SCOPE === "global" ? "全球" : "国内";
+    var tag = SCOPE === "global" ? "全球" : SCOPE === "usgs" ? "USGS" : "国内";
     $("updAt").textContent = ALL.length
       ? tag + " · 最近 " + (ALL[0].time || "").replace(/^\d{4}-/, "")
       : tag + " · 无数据";

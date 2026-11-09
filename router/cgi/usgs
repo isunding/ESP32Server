@@ -1,0 +1,98 @@
+#!/bin/sh
+# USGS 全球地震代理 CGI — 15 分钟缓存 + 单飞锁
+#   ?a=list     M2.5+ 近 24 小时，CSV 原样透传
+#               time,latitude,longitude,depth,mag,...,id,...,place
+#   ?a=cache    缓存状态
+#   ?a=flush    清缓存
+#
+# 上游为公开数据源，不需要凭据。
+
+CACHE=${USGS_CACHE:-/tmp/usgs_cache.csv}
+TS=$CACHE.ts
+LOCK=/tmp/usgs.lock
+TTL=900
+URL="https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/2.5_day.csv"
+
+hdr() {
+  printf 'Content-Type: text/csv; charset=utf-8\r\n'
+  printf 'Cache-Control: no-store\r\n\r\n'
+}
+getp() {
+  printf '%s' "$QUERY_STRING" | tr '&' '\n' | grep "^$1=" | head -1 | cut -d= -f2- \
+    | sed 's/+/ /g'
+}
+
+fetch() {
+  curl -s -m 20 -H 'User-Agent: ra81-iptv' "$URL" 2>/dev/null
+}
+
+fresh() {
+  [ -s "$CACHE" ] && [ -f "$TS" ] || return 1
+  [ $(( $(date +%s) - $(cat "$TS" 2>/dev/null || echo 0) )) -lt "$TTL" ]
+}
+
+wait_cache() {
+  n=0
+  while [ $n -lt 3 ]; do
+    [ -s "$CACHE" ] && return 0
+    sleep 1
+    n=$((n + 1))
+  done
+  [ -s "$CACHE" ]
+}
+
+case "$(getp a)" in
+  cache)
+    hdr
+    if [ -s "$CACHE" ]; then
+      printf '{"ok":1,"ttl":%s,"bytes":%s,"age":%s}\n' "$TTL" \
+        "$(wc -c < "$CACHE" | tr -d ' ')" \
+        "$(( $(date +%s) - $(cat "$TS" 2>/dev/null || echo 0) ))"
+    else
+      printf '{"ok":1,"ttl":%s,"bytes":0}\n' "$TTL"
+    fi
+    ;;
+  flush)
+    rm -f "$CACHE" "$TS"
+    rmdir "$LOCK" 2>/dev/null
+    hdr
+    printf '{"ok":1,"msg":"缓存已清"}\n'
+    ;;
+  *)
+    if fresh; then
+      hdr
+      cat "$CACHE"
+      exit 0
+    fi
+    if mkdir "$LOCK" 2>/dev/null; then
+      trap 'rmdir "$LOCK" 2>/dev/null' EXIT INT TERM
+      body=$(fetch)
+      # 校验表头，避免把错误页写进缓存
+      case "$body" in
+        time,latitude,longitude*)
+          printf '%s' "$body" > "$CACHE.tmp" && mv -f "$CACHE.tmp" "$CACHE"
+          date +%s > "$TS"
+          hdr
+          printf '%s' "$body"
+          ;;
+        *)
+          # 上游失败：有旧数据就给旧的，否则回只带表头的空表
+          hdr
+          if [ -s "$CACHE" ]; then
+            cat "$CACHE"
+          else
+            printf 'time,latitude\n'
+          fi
+          ;;
+      esac
+    else
+      if wait_cache; then
+        hdr
+        cat "$CACHE"
+      else
+        hdr
+        printf 'time,latitude\n'
+      fi
+    fi
+    ;;
+esac

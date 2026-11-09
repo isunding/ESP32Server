@@ -123,8 +123,9 @@ cp esp32-s3/config.example.json esp32-s3/config.json    # ESP32-S3
 （`/api/weather?force=1`）同时清除两级缓存，取数在主循环后台完成，
 页面在数据时间戳变化后重新渲染。
 
-`news_ms` / `quake_ms` 只对 S3 版生效。取回的数据按天追加到板上的 CSV
-（`news-YYYYMMDD.csv`、`quake-YYYYMMDD.csv`、`quakeg-YYYYMMDD.csv`），保留最近 7 天。
+`news_ms` / `quake_ms` / `usgs_ms` 只对 S3 版生效。取回的数据按天追加到板上的 CSV
+（`news-YYYYMMDD.csv`、`quake-YYYYMMDD.csv`、`quakeg-YYYYMMDD.csv`、`usgs-YYYYMMDD.csv`），
+保留最近 7 天。`usgs_ms` 默认 30 分钟，对应路由器端 15 分钟缓存。
 
 新闻按 `news_tick_ms`（默认 1 小时）定时补采，由主循环设置补刷标记，不占用
 请求路径。每次从最新一页开始，以本页最早一条的时间作为 `last_time` 逐页

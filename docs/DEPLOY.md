@@ -229,11 +229,12 @@ Windows 下可使用 `mpremote connect COM3` 或串口工具。
 |---|---|---|
 | `news` | `/data/iptv/www/cgi-bin/news` | `?a=list` 最新一页（本地算上游签名，缓存 5 分钟）；`?a=page&last_time=<秒>` 往前翻页，不缓存 |
 | `quake` | `/data/iptv/www/cgi-bin/quake` | `?a=list` 国内速报（`dizhen.php`）、`?a=global` 全球震情速报（`dizhensu.php`，含海外），两路缓存各 30 分钟、锁与缓存文件各自独立 |
+| `usgs` | `/data/iptv/www/cgi-bin/usgs` | `?a=list` USGS M2.5+ 近 24 小时（CSV 原样透传），缓存 15 分钟；公开源，无需凭据 |
 
 ```bash
 # 必须是 LF 换行，否则 #!/bin/sh^M 报 not found
 scp router/cgi/news router/cgi/quake root@<路由器>:/data/iptv/www/cgi-bin/
-ssh root@<路由器> 'chmod 755 /data/iptv/www/cgi-bin/news /data/iptv/www/cgi-bin/quake'
+ssh root@<路由器> 'chmod 755 /data/iptv/www/cgi-bin/news /data/iptv/www/cgi-bin/quake /data/iptv/www/cgi-bin/usgs'
 
 # 地震接口凭据（600 权限）
 ssh root@<路由器> "printf 'Q_ID=你的ID\nQ_KEY=你的KEY\n' > /data/iptv/etc/quake.conf && \
@@ -250,6 +251,8 @@ curl --noproxy "*" "http://<路由器>:8088/cgi-bin/news?a=cache"
 curl --noproxy "*" "http://<路由器>:8088/cgi-bin/quake?a=cache"   # 国内 + 全球两路缓存状态
 curl --noproxy "*" "http://<路由器>:8088/cgi-bin/quake?a=list"
 curl --noproxy "*" "http://<路由器>:8088/cgi-bin/quake?a=global"
+curl --noproxy "*" "http://<路由器>:8088/cgi-bin/usgs?a=list"
+curl --noproxy "*" "http://<路由器>:8088/cgi-bin/usgs?a=cache"
 ```
 
 两个脚本均支持 `?a=flush`；`quake` 同时清理国内与全球缓存。

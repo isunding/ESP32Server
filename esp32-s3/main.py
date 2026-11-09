@@ -144,7 +144,7 @@ DEFAULT_CFG = {
     "poll": {"weather_ms": 600000, "weatherhist_ms": 43200000,
              "channels_ms": 300000, "news_ms": 3600000,
              "news_tick_ms": 3600000, "news_pages": 6,
-             "quake_ms": 10800000},
+             "quake_ms": 10800000, "usgs_ms": 1800000},
     # 板载指示灯：低亮度心跳（on=0 为彻底关闭）
     "led": {"on": 1, "kind": "np", "pin": 48, "color": [0, 10, 0],
             "period_ms": 2000, "pulse_ms": 60},
@@ -184,6 +184,7 @@ P_NEWS = "/cgi-bin/news?a=list"
 P_NEWS_PAGE = "/cgi-bin/news?a=page&last_time=%d"
 P_QUAKE = "/cgi-bin/quake?a=list"
 P_QUAKE_GLOBAL = "/cgi-bin/quake?a=global"
+P_USGS = "/cgi-bin/usgs?a=list"
 
 WEATHER_FILE = "weather.json"   # 天气太大，落盘后由 HTTP 层流式吐出
 WHIST_FILE = "whist.json"        # 过去 7 天历史（约 34KB），同样落盘
@@ -213,6 +214,53 @@ def _csv_q(s):
     """CSV 字段：去掉换行、引号翻倍、整体加引号。反正是给自家页面读的。"""
     s = str(s or "").replace("\r", " ").replace("\n", " ")
     return '"' + s.replace('"', '""') + '"'
+
+
+def _csv_split(line):
+    """按 CSV 规则拆一行：双引号内的逗号不算分隔符，"" 还原成一个引号。"""
+    out = []
+    cur = ""
+    q = False
+    i = 0
+    n = len(line)
+    while i < n:
+        c = line[i]
+        if q:
+            if c == '"':
+                if i + 1 < n and line[i + 1] == '"':
+                    cur += '"'
+                    i += 1
+                else:
+                    q = False
+            else:
+                cur += c
+        elif c == '"':
+            q = True
+        elif c == ",":
+            out.append(cur)
+            cur = ""
+        else:
+            cur += c
+        i += 1
+    out.append(cur)
+    return out
+
+
+def _iso_local(s, tz_off=8 * 3600):
+    """2026-11-09T12:28:18.182Z（UTC）转本地时间字符串，解析不了返回空。"""
+    try:
+        y = int(s[0:4]); mo = int(s[5:7]); d = int(s[8:10])
+        hh = int(s[11:13]); mi = int(s[14:16]); ss = int(s[17:19])
+    except Exception:
+        return ""
+    if y < 2024:
+        return ""
+    try:
+        epoch = time.mktime((y, mo, d, hh, mi, ss, 0, 0)) + tz_off
+        t = time.localtime(epoch)
+    except Exception:
+        return ""
+    return "%04d-%02d-%02d %02d:%02d:%02d" % (t[0], t[1], t[2], t[3], t[4], t[5])
 
 
 def _ymd(back=0):
@@ -552,6 +600,10 @@ class App:
         self.quakeg_ts = 0
         self.quakeg_fail_ts = 0
         self.quakeg_ids = set()
+        self.usgs_due = False
+        self.usgs_ts = 0
+        self.usgs_fail_ts = 0
+        self.usgs_ids = set()
 
         self.t_wifi = 0
         self.reboot_at = 0
@@ -1425,8 +1477,14 @@ class App:
 
     def h_quake(self, req):
         # 国内 / 全球各一份 CSV，互不覆盖；页面用 ?a=global 切到全球视图
-        prefix = "quakeg" if req.arg("a") == "global" else "quake"
-        return self._h_daily(prefix, "quake_ms", QUAKE_ROWS_MAX, req)
+        a = req.arg("a")
+        if a == "global":
+            prefix, ttl = "quakeg", "quake_ms"
+        elif a == "usgs":
+            prefix, ttl = "usgs", "usgs_ms"
+        else:
+            prefix, ttl = "quake", "quake_ms"
+        return self._h_daily(prefix, ttl, QUAKE_ROWS_MAX, req)
 
     def _news_last_ctime(self):
         """从近几天的 CSV 里找出已收录的最新时间，供重启后接续翻页。"""
@@ -1592,6 +1650,70 @@ class App:
         _csv_prune("quake")
         print("[quake] +%d 条 共%d %dms" % (added, len(self.quake_ids),
                                            time.ticks_diff(self.quake_ts, t0)))
+        return True
+
+    def refresh_usgs(self):
+        """USGS 全球地震（M2.5+ 近 24 小时）。
+
+        上游是 CSV：time,latitude,longitude,depth,mag,...,id,...,place。
+        转成与其它地震源一致的 7 列（key,震级,本地时间,位置,深度,纬度,经度），
+        页面无需区分来源。
+        """
+        if not _clock_ok():
+            return False
+        self.usgs_due = False
+        t0 = time.ticks_ms()
+        try:
+            raw = self.api_aux.get(P_USGS, 16384)
+        except Exception as e:
+            print("[usgs]", e)
+            self.usgs_fail_ts = time.ticks_ms()
+            return False
+        if not raw:
+            self.usgs_fail_ts = time.ticks_ms()
+            return False
+        try:
+            text = raw.decode()
+        except Exception:
+            text = ""
+        if not self.usgs_ids:
+            self.usgs_ids = self._daily_ids("usgs")
+        fn = "usgs-%s.csv" % _ymd()
+        added = 0
+        buf = []
+        for line in text.split("\n"):
+            line = line.strip()
+            if not line or line.startswith("time,"):
+                continue
+            f = _csv_split(line)
+            if len(f) < 14:
+                continue
+            tm = _iso_local(f[0], self.tz_off)
+            if not tm:
+                continue
+            mag = f[4]
+            if not mag:
+                continue
+            k = "u" + (f[11] or tm.replace(" ", "_"))
+            if k in self.usgs_ids:
+                continue
+            self.usgs_ids.add(k)
+            buf.append("%s,%s,%s,%s,%s,%s,%s\n" % (
+                k, mag, _csv_q(tm), _csv_q(f[13]),
+                f[3] or "", f[1] or "", f[2] or ""))
+            added += 1
+        if buf:
+            try:
+                with open(fn, "a") as f:
+                    f.write("".join(buf))
+            except OSError as e:
+                print("[usgs] write", e)
+                self.usgs_fail_ts = time.ticks_ms()
+                return False
+        self.usgs_ts = time.ticks_ms()
+        _csv_prune("usgs")
+        print("[usgs] +%d 条 共%d %dms" % (added, len(self.usgs_ids),
+                                           time.ticks_diff(self.usgs_ts, t0)))
         return True
 
     def refresh_quake_global(self):
@@ -1785,6 +1907,8 @@ class App:
                 self.refresh_quake()
             if self.quakeg_due:
                 self.refresh_quake_global()
+            if self.usgs_due:
+                self.refresh_usgs()
 
             if time.ticks_diff(now, self.t_wifi) >= 30000:
                 self.t_wifi = now
