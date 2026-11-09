@@ -205,7 +205,7 @@ PM_LOG_MAX = 24   # 休眠区间最多留 24 条（每次降频一条，占不�
 # 第一列是去重键，并且保证不含逗号 —— 重启后靠它从当天文件里恢复已收录集合。
 # 涨跌/地震这类数据一天几十上百条，7 天全量也就几百 KB。
 CSV_KEEP_DAYS = 7
-NEWS_ROWS_MAX = 120     # 一次最多吐多少条给页面（约 30KB 响应，和天气页一个量级）
+NEWS_ROWS_MAX = 120     # 一次最多吐多少条给页面（取最新的一段，约 60KB 响应）
 QUAKE_ROWS_MAX = 120
 
 
@@ -1315,7 +1315,7 @@ class App:
         """把最近几天的 CSV 行原样拼成 JSON 吐给页面。
 
         行是 CSV 原文（字段可能带引号），页面自己按引号规则拆 —— 这样板子
-        不用二次编码，也省一份内存。只吐前 cap 行，避免单次响应过大。
+        不用二次编码，也省一份内存。只吐最新的 cap 行，避免单次响应过大。
         """
         ttl = self.cfg["poll"].get(ttl_key, 300000)
         ts = getattr(self, prefix + "_ts")
@@ -1325,25 +1325,32 @@ class App:
             fail = getattr(self, prefix + "_fail_ts")
             if not fail or time.ticks_diff(time.ticks_ms(), fail) >= 60000:
                 setattr(self, prefix + "_due", True)
+        # 文件按时间升序追加，越靠后越新；跨天读取时把较早的一天的行拼在前面，
+        # 每读完一个文件就裁到 cap 行，保证吐出去的是「最新的 cap 条」而不是最旧的。
         rows = []
         for back in range(CSV_KEEP_DAYS):
             fn = "%s-%s.csv" % (prefix, _ymd(back))
             if not self._file_ok(fn):
                 continue
+            chunk = []
             try:
                 with open(fn) as f:
                     for line in f:
                         line = line.strip()
                         if line:
-                            rows.append(line)
+                            chunk.append(line)
             except OSError:
                 pass
+            if chunk:
+                rows = chunk + rows
+                if len(rows) > cap:
+                    rows = rows[len(rows) - cap:]
             if len(rows) >= cap:
                 break
         if not rows:
             return httpsrv.json_resp({"ok": 0, "pending": 1,
                                       "msg": "正在取数，几秒后自动刷新"})
-        return httpsrv.json_resp({"ok": 1, "rows": rows[:cap]})
+        return httpsrv.json_resp({"ok": 1, "rows": rows})
 
     def h_news(self, req):
         return self._h_daily("news", "news_ms", NEWS_ROWS_MAX,
