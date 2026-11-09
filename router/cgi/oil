@@ -1,0 +1,113 @@
+#!/bin/sh
+# 全国油价代理 CGI — 24 小时缓存 + 单飞锁
+#   ?a=list          默认安徽，JSON 原样透传
+#   ?a=list&sheng=四川  指定省份（省级行政区名称，不带「省」字）
+#   ?a=cache         缓存状态
+#   ?a=flush         清缓存
+#
+# 数据源 接口盒子 cn.apihz.cn/api/jinrong/youjia.php
+# 需在后台申请 id / key 后填入下面两行。油价由发改委每 10 个工作日调整一次，
+# 一天一次足够，缓存 TTL 取 24 小时。
+
+Q_ID=""
+Q_KEY=""
+SHENG_DEFAULT="安徽"
+
+CACHE=${OIL_CACHE:-/tmp/oil_cache.json}
+TS=$CACHE.ts
+LOCK=/tmp/oil.lock
+TTL=86400
+ENDPOINT="https://cn.apihz.cn/api/jinrong/youjia.php"
+
+hdr() {
+  printf 'Content-Type: application/json; charset=utf-8\r\n'
+  printf 'Cache-Control: no-store\r\n\r\n'
+}
+getp() {
+  printf '%s' "$QUERY_STRING" | tr '&' '\n' | grep "^$1=" | head -1 | cut -d= -f2- \
+    | sed 's/+/ /g'
+}
+
+# 省份参数带中文，交给 curl 做百分号编码
+fetch() {
+  curl -s -m 20 -G -H 'User-Agent: ra81-iptv' \
+    --data-urlencode "sheng=$1" \
+    --data-urlencode "id=$Q_ID" \
+    --data-urlencode "key=$Q_KEY" \
+    "$ENDPOINT" 2>/dev/null
+}
+
+fresh() {
+  [ -s "$CACHE" ] && [ -f "$TS" ] || return 1
+  [ $(( $(date +%s) - $(cat "$TS" 2>/dev/null || echo 0) )) -lt "$TTL" ]
+}
+
+wait_cache() {
+  n=0
+  while [ $n -lt 3 ]; do
+    [ -s "$CACHE" ] && return 0
+    sleep 1
+    n=$((n + 1))
+  done
+  [ -s "$CACHE" ]
+}
+
+SHENG=$(getp sheng)
+[ -n "$SHENG" ] || SHENG="$SHENG_DEFAULT"
+
+case "$(getp a)" in
+  cache)
+    hdr
+    if [ -s "$CACHE" ]; then
+      printf '{"ok":1,"ttl":%s,"bytes":%s,"age":%s}\n' "$TTL" \
+        "$(wc -c < "$CACHE" | tr -d ' ')" \
+        "$(( $(date +%s) - $(cat "$TS" 2>/dev/null || echo 0) ))"
+    else
+      printf '{"ok":1,"ttl":%s,"bytes":0}\n' "$TTL"
+    fi
+    ;;
+  flush)
+    rm -f "$CACHE" "$TS"
+    rmdir "$LOCK" 2>/dev/null
+    hdr
+    printf '{"ok":1,"msg":"缓存已清"}\n'
+    ;;
+  *)
+    if [ -z "$Q_ID" ] || [ -z "$Q_KEY" ]; then
+      hdr
+      printf '{"code":400,"msg":"未配置接口凭据，请在 CGI 中填写 Q_ID 与 Q_KEY"}\n'
+      exit 0
+    fi
+    if fresh; then
+      hdr
+      cat "$CACHE"
+      exit 0
+    fi
+    if mkdir "$LOCK" 2>/dev/null; then
+      trap 'rmdir "$LOCK" 2>/dev/null' EXIT INT TERM
+      body=$(fetch "$SHENG")
+      # 上游是美化输出（"code": 200），用正则判断；只缓存成功响应
+      if printf '%s' "$body" | grep -q '"code"[[:space:]]*:[[:space:]]*200'; then
+        printf '%s' "$body" > "$CACHE.tmp" && mv -f "$CACHE.tmp" "$CACHE"
+        date +%s > "$TS"
+        hdr
+        printf '%s' "$body"
+      else
+        hdr
+        if [ -s "$CACHE" ]; then
+          cat "$CACHE"
+        else
+          printf '%s\n' "${body:-{\"code\":502,\"msg\":\"上游无响应\"}}"
+        fi
+      fi
+    else
+      if wait_cache; then
+        hdr
+        cat "$CACHE"
+      else
+        hdr
+        printf '{"code":503,"msg":"取数中，请稍后重试"}\n'
+      fi
+    fi
+    ;;
+esac

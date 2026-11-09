@@ -29,7 +29,7 @@
     "tz": 8
   },
   "poll": {
-    "_说明": "缓存 TTL；news_tick_ms 为新闻定时补采周期，news_pages 为每次最多翻页数；usgs_ms 为 USGS 地震缓存（仅 S3）",
+    "_说明": "缓存 TTL；news_tick_ms 为新闻定时补采周期，news_pages 为每次最多翻页数；usgs_ms 为 USGS 地震缓存，oil_ms / almanac_ms 为油价与万年历缓存（均仅 S3）",
     "weather_ms": 600000,
     "weatherhist_ms": 43200000,
     "channels_ms": 300000,
@@ -37,7 +37,9 @@
     "news_tick_ms": 3600000,
     "news_pages": 6,
     "quake_ms": 10800000,
-    "usgs_ms": 1800000
+    "usgs_ms": 1800000,
+    "oil_ms": 86400000,
+    "almanac_ms": 86400000
   },
   "led": {
     "_说明": "kind=np 用 neopixel 驱动 WS2812（S3 板 GPIO48）；kind=gpio 用普通引脚电平。on=0 时上电写黑并全程不驱动；on=1 时按 period_ms/pulse_ms 心跳，color 是 np 模式的 RGB，取值宜低以控制亮度",

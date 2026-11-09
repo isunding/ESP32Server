@@ -1,0 +1,102 @@
+#!/bin/sh
+# 万年历（当日信息）代理 CGI — 24 小时缓存 + 单飞锁
+#   ?a=list     当日农历 / 干支 / 节气 / 宜忌 / 生肖等，JSON 原样透传
+#   ?a=cache    缓存状态
+#   ?a=flush    清缓存
+#
+# 数据源 接口盒子 cn.apihz.cn/api/time/getday.php
+# 需在后台申请 id / key 后填入下面两行。内容一天一变，缓存 TTL 取 24 小时。
+
+Q_ID=""
+Q_KEY=""
+
+CACHE=${ALM_CACHE:-/tmp/almanac_cache.json}
+TS=$CACHE.ts
+LOCK=/tmp/almanac.lock
+TTL=86400
+ENDPOINT="https://cn.apihz.cn/api/time/getday.php"
+
+hdr() {
+  printf 'Content-Type: application/json; charset=utf-8\r\n'
+  printf 'Cache-Control: no-store\r\n\r\n'
+}
+getp() {
+  printf '%s' "$QUERY_STRING" | tr '&' '\n' | grep "^$1=" | head -1 | cut -d= -f2- \
+    | sed 's/+/ /g'
+}
+
+fetch() {
+  curl -s -m 20 -H 'User-Agent: ra81-iptv' \
+    "$ENDPOINT?id=$Q_ID&key=$Q_KEY" 2>/dev/null
+}
+
+fresh() {
+  [ -s "$CACHE" ] && [ -f "$TS" ] || return 1
+  [ $(( $(date +%s) - $(cat "$TS" 2>/dev/null || echo 0) )) -lt "$TTL" ]
+}
+
+wait_cache() {
+  n=0
+  while [ $n -lt 3 ]; do
+    [ -s "$CACHE" ] && return 0
+    sleep 1
+    n=$((n + 1))
+  done
+  [ -s "$CACHE" ]
+}
+
+case "$(getp a)" in
+  cache)
+    hdr
+    if [ -s "$CACHE" ]; then
+      printf '{"ok":1,"ttl":%s,"bytes":%s,"age":%s}\n' "$TTL" \
+        "$(wc -c < "$CACHE" | tr -d ' ')" \
+        "$(( $(date +%s) - $(cat "$TS" 2>/dev/null || echo 0) ))"
+    else
+      printf '{"ok":1,"ttl":%s,"bytes":0}\n' "$TTL"
+    fi
+    ;;
+  flush)
+    rm -f "$CACHE" "$TS"
+    rmdir "$LOCK" 2>/dev/null
+    hdr
+    printf '{"ok":1,"msg":"缓存已清"}\n'
+    ;;
+  *)
+    if [ -z "$Q_ID" ] || [ -z "$Q_KEY" ]; then
+      hdr
+      printf '{"code":400,"msg":"未配置接口凭据，请在 CGI 中填写 Q_ID 与 Q_KEY"}\n'
+      exit 0
+    fi
+    if fresh; then
+      hdr
+      cat "$CACHE"
+      exit 0
+    fi
+    if mkdir "$LOCK" 2>/dev/null; then
+      trap 'rmdir "$LOCK" 2>/dev/null' EXIT INT TERM
+      body=$(fetch)
+      if printf '%s' "$body" | grep -q '"code"[[:space:]]*:[[:space:]]*200'; then
+        printf '%s' "$body" > "$CACHE.tmp" && mv -f "$CACHE.tmp" "$CACHE"
+        date +%s > "$TS"
+        hdr
+        printf '%s' "$body"
+      else
+        hdr
+        if [ -s "$CACHE" ]; then
+          cat "$CACHE"
+        else
+          printf '%s\n' "${body:-{\"code\":502,\"msg\":\"上游无响应\"}}"
+        fi
+      fi
+    else
+      if wait_cache; then
+        hdr
+        cat "$CACHE"
+      else
+        hdr
+        printf '{"code":503,"msg":"取数中，请稍后重试"}\n'
+      fi
+    fi
+    ;;
+esac

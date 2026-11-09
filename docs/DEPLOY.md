@@ -230,11 +230,13 @@ Windows 下可使用 `mpremote connect COM3` 或串口工具。
 | `news` | `/data/iptv/www/cgi-bin/news` | `?a=list` 最新一页（本地算上游签名，缓存 5 分钟）；`?a=page&last_time=<秒>` 往前翻页，不缓存 |
 | `quake` | `/data/iptv/www/cgi-bin/quake` | `?a=list` 国内速报（`dizhen.php`）、`?a=global` 全球震情速报（`dizhensu.php`，含海外），两路缓存各 30 分钟、锁与缓存文件各自独立 |
 | `usgs` | `/data/iptv/www/cgi-bin/usgs` | `?a=list` USGS M2.5+ 近 24 小时（CSV 原样透传），缓存 15 分钟；公开源，无需凭据 |
+| `oil` | `/data/iptv/www/cgi-bin/oil` | `?a=list` 全国油价（默认安徽，`?sheng=` 指定省份），JSON 原样透传，缓存 24 小时；需在文件头填写 `Q_ID` / `Q_KEY` |
+| `almanac` | `/data/iptv/www/cgi-bin/almanac` | `?a=list` 当日万年历，缓存 24 小时；同样需要 `Q_ID` / `Q_KEY` |
 
 ```bash
 # 必须是 LF 换行，否则 #!/bin/sh^M 报 not found
 scp router/cgi/news router/cgi/quake root@<路由器>:/data/iptv/www/cgi-bin/
-ssh root@<路由器> 'chmod 755 /data/iptv/www/cgi-bin/news /data/iptv/www/cgi-bin/quake /data/iptv/www/cgi-bin/usgs'
+ssh root@<路由器> 'chmod 755 /data/iptv/www/cgi-bin/news /data/iptv/www/cgi-bin/quake /data/iptv/www/cgi-bin/usgs /data/iptv/www/cgi-bin/oil /data/iptv/www/cgi-bin/almanac'
 
 # 地震接口凭据（600 权限）
 ssh root@<路由器> "printf 'Q_ID=你的ID\nQ_KEY=你的KEY\n' > /data/iptv/etc/quake.conf && \
@@ -253,6 +255,8 @@ curl --noproxy "*" "http://<路由器>:8088/cgi-bin/quake?a=list"
 curl --noproxy "*" "http://<路由器>:8088/cgi-bin/quake?a=global"
 curl --noproxy "*" "http://<路由器>:8088/cgi-bin/usgs?a=list"
 curl --noproxy "*" "http://<路由器>:8088/cgi-bin/usgs?a=cache"
+curl --noproxy "*" "http://<路由器>:8088/cgi-bin/oil?a=list"
+curl --noproxy "*" "http://<路由器>:8088/cgi-bin/almanac?a=list"
 ```
 
 两个脚本均支持 `?a=flush`；`quake` 同时清理国内与全球缓存。

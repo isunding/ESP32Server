@@ -127,6 +127,9 @@ cp esp32-s3/config.example.json esp32-s3/config.json    # ESP32-S3
 （`news-YYYYMMDD.csv`、`quake-YYYYMMDD.csv`、`quakeg-YYYYMMDD.csv`、`usgs-YYYYMMDD.csv`），
 保留最近 7 天。`usgs_ms` 默认 30 分钟，对应路由器端 15 分钟缓存。
 
+`oil_ms` / `almanac_ms` 为油价与万年历的板端缓存，两者一天一变，默认 24 小时，
+对应路由器端 24 小时缓存；数据只驻内存，重启后由路由器缓存命中，不重复回源。
+
 新闻按 `news_tick_ms`（默认 1 小时）定时补采，由主循环设置补刷标记，不占用
 请求路径。每次从最新一页开始，以本页最早一条的时间作为 `last_time` 逐页
 向前，直到追平上次采集时刻或达到 `news_pages`（默认 6 页）。翻页请求经

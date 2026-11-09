@@ -144,7 +144,8 @@ DEFAULT_CFG = {
     "poll": {"weather_ms": 600000, "weatherhist_ms": 43200000,
              "channels_ms": 300000, "news_ms": 3600000,
              "news_tick_ms": 3600000, "news_pages": 6,
-             "quake_ms": 10800000, "usgs_ms": 1800000},
+             "quake_ms": 10800000, "usgs_ms": 1800000,
+             "oil_ms": 86400000, "almanac_ms": 86400000},
     # 板载指示灯：低亮度心跳（on=0 为彻底关闭）
     "led": {"on": 1, "kind": "np", "pin": 48, "color": [0, 10, 0],
             "period_ms": 2000, "pulse_ms": 60},
@@ -185,6 +186,17 @@ P_NEWS_PAGE = "/cgi-bin/news?a=page&last_time=%d"
 P_QUAKE = "/cgi-bin/quake?a=list"
 P_QUAKE_GLOBAL = "/cgi-bin/quake?a=global"
 P_USGS = "/cgi-bin/usgs?a=list"
+P_OIL = "/cgi-bin/oil?a=list"
+P_ALMANAC = "/cgi-bin/almanac?a=list"
+
+# 油价字段：价格与波动成对出现，接口里没有的油品返回 null
+OIL_FIELDS = ("92", "92bd", "95", "95bd", "98", "98bd", "89", "89bd",
+              "0h", "0hbd", "10h", "10hbd", "20h", "20hbd", "35h", "35hbd")
+# 万年历只留页面用到的字段，其余（彭祖百忌、二十八宿等）不占内存
+ALM_FIELDS = ("id", "ynian", "yyue", "yri", "xingqi", "nnian", "nyue",
+              "nri", "YEARGANZHI", "ganzhiyue", "ganzhiri", "shengxiao",
+              "jieqi", "JIEQICN", "WUHOU", "yi", "ji", "DAYCHONGDESC",
+              "xingzuo", "jieri", "jieqimsg")
 
 WEATHER_FILE = "weather.json"   # 天气太大，落盘后由 HTTP 层流式吐出
 WHIST_FILE = "whist.json"        # 过去 7 天历史（约 34KB），同样落盘
@@ -604,6 +616,13 @@ class App:
         self.usgs_ts = 0
         self.usgs_fail_ts = 0
         self.usgs_ids = set()
+        # 油价 / 万年历：一天一变，只放内存；重启后由路由器缓存命中，不重复回源
+        self.oil = None
+        self.oil_ts = 0
+        self.oil_err = ""
+        self.alm = None
+        self.alm_ts = 0
+        self.alm_err = ""
 
         self.t_wifi = 0
         self.reboot_at = 0
@@ -767,6 +786,8 @@ class App:
         w.route("GET", "/api/config", self.h_get_cfg)
         w.route("GET", "/api/news", self.h_news)
         w.route("GET", "/api/quake", self.h_quake)
+        w.route("GET", "/api/oil", self.h_oil)
+        w.route("GET", "/api/almanac", self.h_almanac)
         w.route("POST", "/api/config", self.h_set_cfg)
         w.route("POST", "/api/led", self.h_led_action)
 
@@ -1533,6 +1554,80 @@ class App:
         # 统计随列表一起返回，页面不用再发一次请求；等待取数时也能先画出空图
         return self._h_daily(prefix, ttl, QUAKE_ROWS_MAX, req,
                              {"stat": self._csv_stats(prefix)})
+
+    def _fetch_oil(self):
+        """油价：整份响应只保留价格字段，省份与调价日期一并带上。"""
+        try:
+            d = self.api_aux.get_json(P_OIL, 8192)
+        except Exception as e:
+            print("[oil]", e)
+            self.oil_err = "取数失败"
+            return False
+        if not d or d.get("code") != 200:
+            self.oil_err = (d or {}).get("msg") or "上游返回异常"
+            return False
+        zones = []
+        for name, zone in (d.get("data") or {}).items():
+            if not isinstance(zone, dict):
+                continue
+            price = {}
+            for f in OIL_FIELDS:
+                v = zone.get(f)
+                if v is not None:
+                    price[f] = v
+            zones.append({"jq": zone.get("jq") or name,
+                          "area": zone.get("area") or "", "p": price})
+        self.oil = {"sheng": d.get("sheng") or "", "date": d.get("date") or "",
+                    "zones": zones}
+        self.oil_ts = time.ticks_ms()
+        self.oil_err = ""
+        return True
+
+    def _fetch_alm(self):
+        """万年历：只留页面要用的字段。"""
+        try:
+            d = self.api_aux.get_json(P_ALMANAC, 8192)
+        except Exception as e:
+            print("[almanac]", e)
+            self.alm_err = "取数失败"
+            return False
+        if not d or d.get("code") != 200:
+            self.alm_err = (d or {}).get("msg") or "上游返回异常"
+            return False
+        alm = {}
+        for f in ALM_FIELDS:
+            v = d.get(f)
+            if v is not None:
+                alm[f] = v
+        self.alm = alm
+        self.alm_ts = time.ticks_ms()
+        self.alm_err = ""
+        return True
+
+    def h_oil(self, req):
+        ttl = self.cfg["poll"].get("oil_ms", 86400000)
+        now = time.ticks_ms()
+        if (req.arg("force") == "1" or not self.oil_ts or
+                time.ticks_diff(now, self.oil_ts) >= ttl):
+            self._fetch_oil()
+        if not self.oil:
+            return httpsrv.json_resp({"ok": 0, "msg": self.oil_err or "油价暂不可用"})
+        out = {"ok": 1, "age": int(time.ticks_diff(now, self.oil_ts) / 1000)}
+        out.update(self.oil)
+        return httpsrv.json_resp(out)
+
+    def h_almanac(self, req):
+        ttl = self.cfg["poll"].get("almanac_ms", 86400000)
+        now = time.ticks_ms()
+        if (req.arg("force") == "1" or not self.alm_ts or
+                time.ticks_diff(now, self.alm_ts) >= ttl):
+            self._fetch_alm()
+        if not self.alm:
+            return httpsrv.json_resp({"ok": 0,
+                                      "msg": self.alm_err or "万年历暂不可用"})
+        out = {"ok": 1, "age": int(time.ticks_diff(now, self.alm_ts) / 1000),
+               "alm": self.alm}
+        return httpsrv.json_resp(out)
 
     def _news_last_ctime(self):
         """从近几天的 CSV 里找出已收录的最新时间，供重启后接续翻页。"""

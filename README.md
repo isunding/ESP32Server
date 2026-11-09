@@ -16,7 +16,8 @@
 | `esp32-s3/` | ESP32-S3 N16R8 | 240 MHz | 16MB / 8MB PSRAM | Python 堆在 PSRAM、原生 USB 串口、WS2812 指示灯、空闲降频 |
 
 两版页面与 API 基本一致，差异限于 LED 驱动、WiFi 省电、内存布局与频率管理；
-新闻、地震两个页面及 `/api/news`、`/api/quake`、`/api/led` 仅 S3 版提供。
+新闻、地震两个页面及 `/api/news`、`/api/quake`、`/api/led`、`/api/oil`、`/api/almanac`
+仅 S3 版提供。
 
 ---
 
@@ -26,12 +27,12 @@
 |---|---|---|
 | 首页 | `/` | 设备状态、今日农历、天气实况、功能入口 |
 | 天气 | `/weather.html` | 实况、24 小时、7 天预报、空气质量、生活指数 |
-| 行情 | `/market.html` | 三大指数、汇率、自选股（存于板上） |
+| 行情 | `/market.html` | 三大指数、汇率、自选股（存于板上）、安徽油价（按天缓存）（油价仅 S3） |
 | 电台 | `/radio.html` | 67 个电台 / 9 个分类，支持搜索与折叠 |
 | 新闻 | `/news.html` | 单列卡片、时间与重要度置于标题行、正文完整显示、标签置于卡片下方、重要度与主题筛选、`【】` 标题加粗、股票标签点选加入 / 移出自选、每小时定时补采（仅 S3） |
 | 地震 | `/quake.html` | 国内 / 全球 / USGS 三路切换、近 7 天柱状图与 M3 / M4 / M5 分档统计、震级块 + 位置 + 深度 + 经纬度的卡片、按震级筛选与配色（仅 S3） |
 | 本机 | `/info.html` | 固件、板型、CPU、芯片温度、内部 RAM 分块、MAC、堆、Flash、休眠记录与时间轴 |
-| NTP | `/ntp.html` | 板载 NTP 服务端状态、上游同步、时区设置、农历 |
+| NTP | `/ntp.html` | 万年历（农历 / 干支 / 宜忌 / 节气，按天缓存）、板载 NTP 服务端状态、上游同步、时区设置 |
 | IPTV | `/iptv.html` | 频道库浏览与网页播放 |
 
 页面共用 `web/theme.css` 与 `web/ui.js`，支持系统深浅色；构建后为单文件形式，CSS/JS 内联并生成 gzip 预压缩版本。顶栏统一显示设备 IP、状态点与指示灯心跳开关（仅 S3）。
@@ -150,6 +151,8 @@ python esp32-s3/scripts/flash.py esp32-s3/main.py esp32-s3/www/index.html ...
 | GET | `/api/services` | rtp2httpd / udpxy 运行状态 |
 | GET | `/api/calendar` | 农历、节气、节日 |
 | GET | `/api/quote` | 指数与汇率，10 分钟 TTL，`?force=1` 强制刷新 |
+| GET | `/api/oil` | 安徽油价（92 / 95 / 98 / 0 号柴油等），24 小时 TTL，`?force=1` 强制刷新（仅 S3） |
+| GET | `/api/almanac` | 当日万年历（农历、干支、宜忌、生肖、冲煞），24 小时 TTL（仅 S3） |
 | GET | `/api/watch` | 自选股行情（`?a=codes` 只返回代码清单，不查行情；无行情的条目返回占位行） |
 | POST | `/api/watch` | `{"op":"add"/"del","code":"sh600519"}`，上限 20 支 |
 | GET | `/api/ntp` | NTP 状态、上游、时区 |

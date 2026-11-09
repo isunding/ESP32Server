@@ -68,8 +68,14 @@
     <div id="listFx"><div class="skel"></div><div class="skel"></div></div>
   </div>
 
+  <div class="card" id="cardOil">
+    <h2>安徽油价 <span class="muted small" id="oilAt"></span></h2>
+    <div id="listOil"><div class="skel"></div></div>
+  </div>
+
   <p class="foot" id="foot">
-    数据来自新浪财经 <code>hq.sinajs.cn</code>，一次批量取 · 未打开本页时不联网
+    指数、汇率与自选来自新浪财经 <code>hq.sinajs.cn</code>，一次批量取 · 未打开本页时不联网<br>
+    安徽油价经路由器转发，按天缓存，一天只取一次
   </p>
 </div>
 
@@ -224,6 +230,52 @@ MR.$("wCode").addEventListener("keydown", function (e) {
   if (e.key === "Enter") MR.$("wAdd").click();
 });
 
+/* ---------- 安徽油价 ---------- */
+/* 板子按天缓存：一天只回源一次，页面反复打开都读缓存，不会真的联网 */
+var OIL_NAME = { "92": "92 号汽油", "95": "95 号汽油", "98": "98 号汽油",
+  "89": "89 号汽油", "0h": "0 号柴油", "10h": "-10 号柴油",
+  "20h": "-20 号柴油", "35h": "-35 号柴油" };
+var OIL_ORDER = ["92", "95", "98", "89", "0h", "10h", "20h", "35h"];
+
+function oilRows(zone) {
+  var p = zone.p || {};
+  return OIL_ORDER.filter(function (k) {
+    return p[k] !== undefined && p[k] !== null;
+  }).map(function (k) {
+    var v = Number(p[k]), bd = Number(p[k + "bd"]);
+    var cls = bd > 0 ? "up" : (bd < 0 ? "down" : "flat");
+    var sub = "元/升" + (zone.jq ? " · " + zone.jq : "") +
+              (zone.area ? "（" + zone.area + "）" : "");
+    return '<div class="mkrow ' + cls + '">' +
+      '<div><div class="nm">' + MR.esc(OIL_NAME[k] || k) + '</div>' +
+      '<div class="sub">' + MR.esc(sub) + '</div></div>' +
+      '<div><div class="pv">' + v.toFixed(2) + '</div>' +
+      '<div class="ch">' + (isFinite(bd) ? signed(bd, 2) + " 元" : "—") + '</div></div>' +
+    '</div>';
+  }).join("");
+}
+
+function renderOil(d) {
+  if (!d || !d.ok) {
+    MR.$("oilAt").textContent = (d && d.msg) || "不可用";
+    MR.$("listOil").innerHTML = '<span class="muted small">油价暂不可用</span>';
+    return;
+  }
+  var html = "";
+  (d.zones || []).forEach(function (z) { html += oilRows(z); });
+  MR.$("listOil").innerHTML = html || '<span class="muted small">暂无数据</span>';
+  MR.$("oilAt").textContent = (d.sheng || "") +
+    (d.date ? " · 调价 " + d.date : "");
+}
+
+function loadOil(force) {
+  return MR.api(force ? "/api/oil?force=1" : "/api/oil").then(renderOil)
+    .catch(function () {
+      MR.$("oilAt").textContent = "取数失败";
+      MR.$("listOil").innerHTML = '<span class="muted small">油价暂不可用</span>';
+    });
+}
+
 function load(force) {
   var p = force ? "/api/quote?force=1" : "/api/quote";
   return MR.api(p).then(render).catch(function () {
@@ -235,13 +287,15 @@ MR.$("btnRefresh").addEventListener("click", function () {
   var b = this;
   b.disabled = true;
   MR.$("updAt").textContent = "取数中…";
-  load(true).then(function () { return loadWatch(true); }).then(function () {
-    b.disabled = false;
-  });
+  load(true).then(function () { return loadWatch(true); })
+    .then(function () { return loadOil(true); }).then(function () {
+      b.disabled = false;
+    });
 });
 
-/* 串行：先指数/汇率，再自选股——单线程板子别同时被两次外网请求占住 */
-load(false).then(function () { return loadWatch(false); });
+/* 串行：先指数/汇率，再自选股，最后油价——单线程板子别同时被几次外网请求占住 */
+load(false).then(function () { return loadWatch(false); })
+  .then(function () { return loadOil(false); });
 /* 页面停留时每 60 秒静默取一次：板子有 10 分钟 TTL，
    绝大多数请求直接命中缓存，不会真的联网。 */
 var tick = setInterval(function () {
