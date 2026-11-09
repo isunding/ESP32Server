@@ -1450,43 +1450,59 @@ class App:
     def _csv_stats(self, prefix):
         """近 7 天按天计数与震级分档（M3 / M4 / M5 以上）。
 
-        一个日文件就是一天，按文件名归组即可，不用解析行内时间字符串；
-        震级取第 2 列，非数值行只计入当天总数，不参与分档。
+        按事件时间归组，不按文件日期：上游一次返回的 30 条可能横跨好几天，
+        按文件算会把它们全堆在抓取当天。震级取第 2 列，时间串取第 3 列前 10 位，
+        解析不出日期的行跳过，落在 7 天窗口外的也不计。
         """
-        days = []
-        tot_n = tot3 = tot4 = tot5 = 0
+        keys = []
         for back in range(CSV_KEEP_DAYS - 1, -1, -1):
-            day = _ymd(back)
-            fn = "%s-%s.csv" % (prefix, day)
-            n = n3 = n4 = n5 = 0
-            if self._file_ok(fn):
-                try:
-                    with open(fn) as f:
-                        for line in f:
-                            line = line.strip()
-                            if not line:
-                                continue
-                            n += 1
-                            parts = line.split(",", 2)
-                            try:
-                                mag = float(parts[1].strip('"'))
-                            except (IndexError, ValueError):
-                                continue
-                            if mag >= 3:
-                                n3 += 1
-                            if mag >= 4:
-                                n4 += 1
-                            if mag >= 5:
-                                n5 += 1
-                except OSError:
-                    pass
-            days.append({"d": day[4:6] + "-" + day[6:8], "n": n,
-                         "m3": n3, "m4": n4, "m5": n5})
-            tot_n += n
-            tot3 += n3
-            tot4 += n4
-            tot5 += n5
-        return {"days": days, "n": tot_n, "m3": tot3, "m4": tot4, "m5": tot5}
+            d = _ymd(back)
+            keys.append(d[4:6] + "-" + d[6:8])
+        idx = {}
+        for i in range(len(keys)):
+            idx[keys[i]] = i
+        n = [0] * CSV_KEEP_DAYS
+        n3 = [0] * CSV_KEEP_DAYS
+        n4 = [0] * CSV_KEEP_DAYS
+        n5 = [0] * CSV_KEEP_DAYS
+        for back in range(CSV_KEEP_DAYS):
+            fn = "%s-%s.csv" % (prefix, _ymd(back))
+            if not self._file_ok(fn):
+                continue
+            try:
+                with open(fn) as f:
+                    for line in f:
+                        line = line.strip()
+                        if not line:
+                            continue
+                        parts = line.split(",", 2)
+                        if len(parts) < 3:
+                            continue
+                        stamp = parts[2].strip('"')[:10]
+                        if len(stamp) != 10 or stamp[4] != "-" or stamp[7] != "-":
+                            continue
+                        i = idx.get(stamp[5:7] + "-" + stamp[8:10])
+                        if i is None:
+                            continue
+                        n[i] += 1
+                        try:
+                            mag = float(parts[1].strip('"'))
+                        except ValueError:
+                            continue
+                        if mag >= 3:
+                            n3[i] += 1
+                        if mag >= 4:
+                            n4[i] += 1
+                        if mag >= 5:
+                            n5[i] += 1
+            except OSError:
+                pass
+        days = []
+        for i in range(len(keys)):
+            days.append({"d": keys[i], "n": n[i],
+                         "m3": n3[i], "m4": n4[i], "m5": n5[i]})
+        return {"days": days, "n": sum(n), "m3": sum(n3),
+                "m4": sum(n4), "m5": sum(n5)}
 
     def _h_daily(self, prefix, ttl_key, cap, req, extra=None):
         """把最近几天的 CSV 行原样拼成 JSON 吐给页面。
