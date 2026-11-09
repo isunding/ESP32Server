@@ -221,8 +221,20 @@ def _ymd(back=0):
     return "%04d%02d%02d" % (t[0], t[1], t[2])
 
 
+def _clock_ok():
+    """系统时间是否可信。
+
+    断电重启后、NTP 同步完成前，localtime 停在 2000 年。此时按日期落盘会把
+    数据写进错误日期的文件，紧接着的 prune 又会按错误的「保留集合」删掉真实
+    历史 —— 取数与清理都必须先过这一关。
+    """
+    return time.localtime()[0] >= 2024
+
+
 def _csv_prune(prefix):
     """删掉 7 天之前的日文件。目录里就几十个文件，直接扫。"""
+    if not _clock_ok():
+        return
     keep = set("%s-%s.csv" % (prefix, _ymd(i)) for i in range(CSV_KEEP_DAYS))
     try:
         for name in os.listdir():
@@ -1368,6 +1380,8 @@ class App:
 
     def refresh_news(self):
         """新闻电报：按 last_time 往前翻页，追平上次采集时刻后逐页落盘。"""
+        if not _clock_ok():
+            return False          # 时间未同步：不落盘、不推进边界，下一轮再试
         self.news_due = False
         t0 = time.ticks_ms()
         cfg = self.cfg["poll"]
@@ -1387,6 +1401,7 @@ class App:
         cursor = 0
         done = False
         pages_used = 0
+        why = "未完成"
         try:
             with open(fn, "a") as f:
                 for page in range(pages):
@@ -1394,10 +1409,12 @@ class App:
                     try:
                         d = self.api_aux.get_json(path, 65536)
                     except Exception as e:
+                        why = "上游错"
                         print("[news] page", page, e)
                         break
                     rd = ((d or {}).get("data") or {}).get("roll_data") or []
                     if not rd:
+                        why = "空页"
                         break
                     pages_used = page + 1
                     times = []
@@ -1427,12 +1444,15 @@ class App:
                         added += 1
                     cursor = min(times) if times else 0
                     if not cursor:
+                        why = "无时间"
                         break
                     if boundary and cursor <= boundary:
                         done = True
+                        why = "追平"
                         break
                     if page == pages - 1:
                         done = True      # 翻满页数，接受已覆盖的区间
+                        why = "满页"
         except OSError as e:
             print("[news] write", e)
             self.news_fail_ts = time.ticks_ms()
@@ -1446,13 +1466,15 @@ class App:
             self.news_fail_ts = time.ticks_ms()
         self.news_ts = time.ticks_ms()
         _csv_prune("news")
-        print("[news] +%d 条 共%d 页%d %dms" % (
+        print("[news] +%d 条 共%d 页%d %dms %s" % (
             added, len(self.news_ids), pages_used,
-            time.ticks_diff(self.news_ts, t0)))
+            time.ticks_diff(self.news_ts, t0), why))
         return True
 
     def refresh_quake(self):
         """地震：取最近 30 条，按「时间_震级」去重后追加到当天 CSV。"""
+        if not _clock_ok():
+            return False
         self.quake_due = False
         t0 = time.ticks_ms()
         try:
@@ -1498,6 +1520,8 @@ class App:
 
     def refresh_quake_global(self):
         """全球震情速报：取最近 10 条（含海外），按「时间_震级」去重落盘。"""
+        if not _clock_ok():
+            return False
         self.quakeg_due = False
         t0 = time.ticks_ms()
         try:
@@ -1673,8 +1697,10 @@ class App:
                 self.svc_due = False
                 self.poll_services()
             news_tick = self.cfg["poll"].get("news_tick_ms", 3600000)
-            if news_tick and (self.t_news == 0 or
-                              time.ticks_diff(now, self.t_news) >= news_tick):
+            # 时钟判断放最后：多数轮次前两个条件就不成立，免得每轮都调 localtime
+            if (news_tick and (self.t_news == 0 or
+                               time.ticks_diff(now, self.t_news) >= news_tick)
+                    and _clock_ok()):
                 self.t_news = now
                 self.news_due = True
             if self.news_due:

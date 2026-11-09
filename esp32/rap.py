@@ -498,14 +498,18 @@ def sina_quotes(codes, timeout=3.0):
                b"Host: hq.sinajs.cn\r\n"
                b"Referer: https://finance.sina.com.cn\r\n"
                b"User-Agent: esp32-terminal\r\n\r\n")
-        # 缓冲按标的数估：A 股一条约 200B，外汇约 230B，再留 200B 头部。
-        cap = 200 + len(codes) * 260
-        while len(buf) < cap:
+        # 结束条件是收齐 len(codes) 个结尾引号，不能拿估算的字节数当循环条件：
+        # A 股一条 250~300B，按 260 估算在标的变多时会把最后一条截断。
+        # cap 只作异常保护，防止上游不发结束标记时缓冲无限增长。
+        cap = 400 + len(codes) * 320
+        while True:
             c = s.recv(256)
             if not c:
                 break
             buf += c
             if buf.count(b'";') >= len(codes):
+                break
+            if len(buf) >= cap:
                 break
     finally:
         try:

@@ -101,10 +101,13 @@ function render() {
     var stk = "";
     if (x.stk) {
       stk = x.stk.split(" ").filter(Boolean).map(function (s) {
-        var raw = s.replace(/[^0-9]/g, ""), name = s.replace(/[0-9]/g, "");
+        /* 上游把交易所前缀和名称连写（sz300708聚灿光电），显示与入库都要去掉前缀 */
+        var raw = s.replace(/[^0-9]/g, "");
+        var name = s.replace(/[0-9]/g, "").replace(/^(sh|sz|bj)/i, "");
         var code = mkt(raw), added = !!WATCH[code];
         return '<button class="fbtn' + (added ? " added" : "") +
-          '" data-code="' + esc(code) + '" title="' +
+          '" data-code="' + esc(code) + '" data-name="' + esc(name || raw) +
+          '" title="' +
           (added ? "已在自选，点击移除" : "点击加入自选") + '">' +
           esc(name || raw) + " " + esc(raw) + "</button>";
       }).join("");
@@ -214,7 +217,7 @@ $("list").addEventListener("click", function (e) {
     fetch("/api/watch", {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ op: added ? "del" : "add", code: code,
-                             name: btn.textContent.split(" ")[0] })
+                             name: btn.getAttribute("data-name") || "" })
     }).then(function (r) { return r.json(); }).then(function (r) {
       btn.disabled = false;
       if (!r.ok) { MR.toast(r.msg || "操作失败"); return; }
