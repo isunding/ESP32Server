@@ -227,7 +227,7 @@ Windows 下可使用 `mpremote connect COM3` 或串口工具。
 
 | 文件 | 部署到 | 说明 |
 |---|---|---|
-| `news` | `/data/iptv/www/cgi-bin/news` | 新闻电报，本地算上游签名，缓存 5 分钟 |
+| `news` | `/data/iptv/www/cgi-bin/news` | `?a=list` 最新一页（本地算上游签名，缓存 5 分钟）；`?a=page&last_time=<秒>` 往前翻页，不缓存 |
 | `quake` | `/data/iptv/www/cgi-bin/quake` | `?a=list` 国内速报（`dizhen.php`）、`?a=global` 全球震情速报（`dizhensu.php`，含海外），两路缓存各 30 分钟、锁与缓存文件各自独立 |
 
 ```bash

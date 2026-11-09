@@ -39,17 +39,17 @@ BOOT_MS = time.ticks_ms()
 
 # 板载指示灯。S3 DevKit 是单颗 WS2812（GPIO48），旧板是普通 GPIO 接的单色灯。
 # kind="np" 用 neopixel 驱动，kind="gpio" 用引脚电平。
-# on=0 时上电立刻写黑、全程不驱动 —— 这就是彻底关灯的开关。
+# on=0 时上电立刻写黑、全程不驱动；on=1 时按低亮度心跳运行。
 # 心跳非阻塞（主循环用 ticks 判断，不 sleep），否则会拖慢 HTTP 响应。
 LED_PIN = 48
 LED_KIND = "np"
 LED_ON = 1                   # gpio 模式的点亮电平
 HB_PERIOD_MS = 2000          # 心跳周期
-HB_PULSE_MS = 70             # 每次点亮时长
+HB_PULSE_MS = 60             # 每次点亮时长
 
 _led = None
 _np = None
-_led_rgb = (0, 127, 0)       # np 模式的心跳颜色
+_led_rgb = (0, 10, 0)        # np 模式的低亮度心跳颜色
 _led_ts = 0
 _led_beat = False
 _hb_enable = False           # 默认不闪，由 config 的 led.on 打开
@@ -140,11 +140,14 @@ DEFAULT_CFG = {
         "sync_ms": 1800000,   # 30 分钟同步一次
         "tz": 8,              # 时区小时数，+8 = 北京时间
     },
-    # 只留「缓存 TTL」：数据多久算过期。没有任何周期性后台采集了。
+    # 缓存 TTL；news_tick_ms 为新闻的定时补采周期（S3）。
     "poll": {"weather_ms": 600000, "weatherhist_ms": 43200000,
-             "channels_ms": 300000, "news_ms": 300000, "quake_ms": 10800000},
-    # 板载蓝灯：启动时常亮，就绪后按此节奏心跳（0 = 关闭，就绪后熄灭）
-    "led": {"on": 0, "period_ms": 2000, "pulse_ms": 70},
+             "channels_ms": 300000, "news_ms": 3600000,
+             "news_tick_ms": 3600000, "news_pages": 6,
+             "quake_ms": 10800000},
+    # 板载指示灯：低亮度心跳（on=0 为彻底关闭）
+    "led": {"on": 1, "kind": "np", "pin": 48, "color": [0, 10, 0],
+            "period_ms": 2000, "pulse_ms": 60},
     # 空闲降频：连续 idle_after_s 秒没有任何 HTTP 请求就把 CPU 降到 idle_mhz，
     # 下一个请求一到立刻回满频。80MHz 是硬下限——WiFi 和 Octal PSRAM 都要求
     # 时钟不低于它，再低就不是慢而是断网/崩堆了。
@@ -178,6 +181,7 @@ P_CHANNELS = "/cgi-bin/iptv?a=list"
 P_SVC = "/cgi-bin/svcstat?port=%d"
 P_NTP = "/cgi-bin/ntpctl?a=status"
 P_NEWS = "/cgi-bin/news?a=list"
+P_NEWS_PAGE = "/cgi-bin/news?a=page&last_time=%d"
 P_QUAKE = "/cgi-bin/quake?a=list"
 P_QUAKE_GLOBAL = "/cgi-bin/quake?a=global"
 
@@ -458,11 +462,13 @@ class App:
         self.watch_ts = 0
         self.watch_partial = 0
 
-        # 新闻 / 地震：只在有人看页面且过期时才取，取回增量追加到当天 CSV
+        # 新闻 / 地震：新闻另按 news_tick_ms 定时补采，取回增量追加到当天 CSV
         self.news_due = False
         self.news_ts = 0
         self.news_fail_ts = 0
         self.news_ids = set()
+        self.news_last_ctime = 0
+        self.t_news = 0
         self.quake_due = False
         self.quake_ts = 0
         self.quake_fail_ts = 0
@@ -1317,53 +1323,112 @@ class App:
         return self._h_daily(prefix, "quake_ms", QUAKE_ROWS_MAX,
                              req.arg("force") == "1")
 
+    def _news_last_ctime(self):
+        """从近几天的 CSV 里找出已收录的最新时间，供重启后接续翻页。"""
+        best = 0
+        for back in range(CSV_KEEP_DAYS):
+            fn = "news-%s.csv" % _ymd(back)
+            if not self._file_ok(fn):
+                continue
+            try:
+                with open(fn) as f:
+                    for line in f:
+                        parts = line.split(",", 2)
+                        if len(parts) < 2:
+                            continue
+                        try:
+                            v = int(parts[1])
+                        except ValueError:
+                            continue
+                        if v > best:
+                            best = v
+            except OSError:
+                pass
+        return best
+
     def refresh_news(self):
-        """新闻电报：取 20 条，按 id 去重后追加到当天 CSV。"""
+        """新闻电报：按 last_time 往前翻页，追平上次采集时刻后逐页落盘。"""
         self.news_due = False
         t0 = time.ticks_ms()
-        try:
-            d = self.api_aux.get_json(P_NEWS, 65536)
-        except Exception as e:
-            print("[news]", e)
-            self.news_fail_ts = time.ticks_ms()
-            return False
-        rd = ((d or {}).get("data") or {}).get("roll_data") or []
-        if not rd:
-            self.news_fail_ts = time.ticks_ms()
-            return False
+        cfg = self.cfg["poll"]
+        pages = int(cfg.get("news_pages", 6))
+        if pages < 1:
+            pages = 1
+        if pages > 24:
+            pages = 24
         if not self.news_ids:
             self.news_ids = self._daily_ids("news")
+        if not self.news_last_ctime:
+            self.news_last_ctime = self._news_last_ctime()
+        boundary = self.news_last_ctime
         fn = "news-%s.csv" % _ymd()
         added = 0
+        newest = boundary
+        cursor = 0
+        done = False
+        pages_used = 0
         try:
             with open(fn, "a") as f:
-                for n in rd:
-                    nid = n.get("id")
-                    if nid is None:
-                        continue
-                    k = str(nid)
-                    if k in self.news_ids:
-                        continue
-                    self.news_ids.add(k)
-                    subj = " ".join((s.get("subject_name") or "")
-                                    for s in (n.get("subjects") or [])[:2])
-                    stk = " ".join(((s.get("StockID") or s.get("stock_id") or "")
-                                    + (s.get("name") or ""))
-                                   for s in (n.get("stock_list") or [])[:3])
-                    f.write("%s,%s,%s,%s,%s,%s,%s\n" % (
-                        k, n.get("ctime") or 0, n.get("level") or "",
-                        _csv_q(subj), _csv_q(stk),
-                        _csv_q(n.get("title") or n.get("brief") or ""),
-                        _csv_q((n.get("content") or "")[:400])))
-                    added += 1
+                for page in range(pages):
+                    path = P_NEWS if page == 0 else P_NEWS_PAGE % cursor
+                    try:
+                        d = self.api_aux.get_json(path, 65536)
+                    except Exception as e:
+                        print("[news] page", page, e)
+                        break
+                    rd = ((d or {}).get("data") or {}).get("roll_data") or []
+                    if not rd:
+                        break
+                    pages_used = page + 1
+                    times = []
+                    for n in rd:
+                        ct = int(n.get("ctime") or 0)
+                        if ct:
+                            times.append(ct)
+                            if ct > newest:
+                                newest = ct
+                        nid = n.get("id")
+                        if nid is None:
+                            continue
+                        k = str(nid)
+                        if k in self.news_ids:
+                            continue
+                        self.news_ids.add(k)
+                        subj = " ".join((s.get("subject_name") or "")
+                                        for s in (n.get("subjects") or [])[:2])
+                        stk = " ".join(((s.get("StockID") or s.get("stock_id") or "")
+                                        + (s.get("name") or ""))
+                                       for s in (n.get("stock_list") or [])[:3])
+                        f.write("%s,%s,%s,%s,%s,%s,%s\n" % (
+                            k, ct, n.get("level") or "",
+                            _csv_q(subj), _csv_q(stk),
+                            _csv_q(n.get("title") or n.get("brief") or ""),
+                            _csv_q((n.get("content") or "")[:1000])))
+                        added += 1
+                    cursor = min(times) if times else 0
+                    if not cursor:
+                        break
+                    if boundary and cursor <= boundary:
+                        done = True
+                        break
+                    if page == pages - 1:
+                        done = True      # 翻满页数，接受已覆盖的区间
         except OSError as e:
             print("[news] write", e)
             self.news_fail_ts = time.ticks_ms()
             return False
+        if not pages_used:
+            self.news_fail_ts = time.ticks_ms()
+            return False
+        if done:
+            self.news_last_ctime = newest
+        else:
+            self.news_fail_ts = time.ticks_ms()
         self.news_ts = time.ticks_ms()
         _csv_prune("news")
-        print("[news] +%d 条 共%d %dms" % (added, len(self.news_ids),
-                                          time.ticks_diff(self.news_ts, t0)))
+        print("[news] +%d 条 共%d 页%d %dms" % (
+            added, len(self.news_ids), pages_used,
+            time.ticks_diff(self.news_ts, t0)))
         return True
 
     def refresh_quake(self):
@@ -1587,6 +1652,11 @@ class App:
             if self.svc_due:
                 self.svc_due = False
                 self.poll_services()
+            news_tick = self.cfg["poll"].get("news_tick_ms", 3600000)
+            if news_tick and (self.t_news == 0 or
+                              time.ticks_diff(now, self.t_news) >= news_tick):
+                self.t_news = now
+                self.news_due = True
             if self.news_due:
                 self.refresh_news()
             if self.quake_due:

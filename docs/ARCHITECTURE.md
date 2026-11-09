@@ -66,6 +66,7 @@ loop:
     idle_power()            空闲降频：有请求回满频，久无访问降频（仅 S3 版）
     led_heartbeat()         LED 心跳（非阻塞）
     ntpsrv.serve() × 3      板载 NTP 服务端
+    news_tick → news_due    新闻定时补采标记（仅 S3 版）
     channels_due → refresh  缓存到期补刷
     svc_due → poll          服务状态补刷
     每 30s 检查 WiFi 状态
@@ -74,7 +75,8 @@ loop:
     sleep_ms(30)
 ```
 
-主循环内无周期性取数。数据在请求到达且缓存过期时才拉取。
+除新闻按 `poll.news_tick_ms` 定时置补刷标记外，主循环内无周期性取数。
+数据在请求到达且缓存过期时才拉取。
 
 ### 空闲降频
 
@@ -178,6 +180,11 @@ flowchart TD
 天气手动刷新分两步：`/api/weather?force=1` 清除路由器 CGI 缓存与板端内存缓存，
 立即返回 `refreshing`；取数由主循环以 20 秒读超时完成，页面在数据时间戳变化后
 重新渲染。取数不占用 HTTP 请求的等待时间。
+
+新闻补采按页进行：`/cgi-bin/news?a=list` 取最新一页，随后以本页最早一条的
+时间作为 `last_time` 逐页向前，直到覆盖上次采集时刻或达到 `news_pages`。
+每页解析后按 `id` 去重追加到当天 CSV，内存占用与页数无关。重启后从近几天
+的 CSV 恢复采集进度。
 
 ---
 

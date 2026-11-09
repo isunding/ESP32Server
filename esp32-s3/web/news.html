@@ -231,8 +231,6 @@ $("list").addEventListener("click", function (e) {
     });
     return;
   }
-  var it = e.target.closest ? e.target.closest(".frow") : null;
-  if (it) it.classList.toggle("open");
 });
 
 $("btnRefresh").addEventListener("click", function () {

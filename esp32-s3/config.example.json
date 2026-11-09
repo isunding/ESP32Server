@@ -1,8 +1,6 @@
 {
   "_说明": "复制本文件为 config.json 后修改。config.json 已在 .gitignore 里，不会被提交。字段删掉时使用代码内置默认值。",
-
   "device_name": "客厅终端",
-
   "wifi": {
     "_说明": "ssid 留空则开机直接进配网热点模式",
     "ssid": "YOUR_WIFI_SSID",
@@ -12,7 +10,6 @@
     "_ap_pass说明": "配网热点密码，至少 8 位；部署后建议改成自己的",
     "ap_pass": "esp32setup123"
   },
-
   "router": {
     "_说明": "数据源路由器；需在其上部署 legacy/router 与 legacy/cgi 里的 CGI",
     "host": "192.168.1.1",
@@ -20,7 +17,6 @@
     "r2h_port": 5140,
     "udpxy_port": 12123
   },
-
   "ntp": {
     "_说明": "板子自带 NTP 服务端（UDP 123），这里是它的上游与时钟设置",
     "upstream": [
@@ -32,24 +28,29 @@
     "_tz说明": "时区小时数：+8=北京时间，+5.5=印度，-5=美东。注意是小数小时，不是分钟",
     "tz": 8
   },
-
   "poll": {
-    "_说明": "只有缓存 TTL（多久算过期），没有后台轮询任务",
+    "_说明": "缓存 TTL；news_tick_ms 为新闻定时补采周期，news_pages 为每次最多翻页数（仅 S3）",
     "weather_ms": 600000,
     "weatherhist_ms": 43200000,
-    "channels_ms": 300000
+    "channels_ms": 300000,
+    "news_ms": 3600000,
+    "news_tick_ms": 3600000,
+    "news_pages": 6,
+    "quake_ms": 10800000
   },
-
   "led": {
-    "_说明": "kind=np 用 neopixel 驱动 WS2812（S3 板 GPIO48）；kind=gpio 用普通引脚电平。on=0 时上电即写黑并全程不驱动，即彻底关灯；on=1 时按 period_ms/pulse_ms 心跳，color 是 np 模式的 RGB",
-    "on": 0,
+    "_说明": "kind=np 用 neopixel 驱动 WS2812（S3 板 GPIO48）；kind=gpio 用普通引脚电平。on=0 时上电写黑并全程不驱动；on=1 时按 period_ms/pulse_ms 心跳，color 是 np 模式的 RGB，取值宜低以控制亮度",
+    "on": 1,
     "kind": "np",
     "pin": 48,
-    "color": [0, 127, 0],
+    "color": [
+      0,
+      10,
+      0
+    ],
     "period_ms": 2000,
-    "pulse_ms": 70
+    "pulse_ms": 60
   },
-
   "power": {
     "_说明": "空闲降频。连续 idle_after_s 秒没有 HTTP 请求就把 CPU 降到 idle_mhz，下一个请求进来立刻回满频。idle_mhz 不能低于 80——WiFi 和 PSRAM 都要求时钟不低于它；配成 80 以下的会被忽略并按不开启处理。max_mhz 是开机时拉回的满频，必须写死在配置里：时钟配置不随软复位恢复，不写死的话软复位会把当时的低频当成满频",
     "on": true,
@@ -57,18 +58,41 @@
     "idle_mhz": 80,
     "idle_after_s": 20
   },
-
   "quote": {
     "_说明": "行情页标的。kind 只影响页面分组：index=指数，fx=汇率；code 用新浪行情代码",
     "on": true,
     "ttl_ms": 600000,
     "items": [
-      { "code": "sh000001", "name": "上证指数", "kind": "index" },
-      { "code": "sz399001", "name": "深证成指", "kind": "index" },
-      { "code": "sz399006", "name": "创业板指", "kind": "index" },
-      { "code": "fx_susdcny", "name": "美元 / 人民币", "kind": "fx" },
-      { "code": "fx_seurcny", "name": "欧元 / 人民币", "kind": "fx" },
-      { "code": "fx_shkdcny", "name": "港元 / 人民币", "kind": "fx" }
+      {
+        "code": "sh000001",
+        "name": "上证指数",
+        "kind": "index"
+      },
+      {
+        "code": "sz399001",
+        "name": "深证成指",
+        "kind": "index"
+      },
+      {
+        "code": "sz399006",
+        "name": "创业板指",
+        "kind": "index"
+      },
+      {
+        "code": "fx_susdcny",
+        "name": "美元 / 人民币",
+        "kind": "fx"
+      },
+      {
+        "code": "fx_seurcny",
+        "name": "欧元 / 人民币",
+        "kind": "fx"
+      },
+      {
+        "code": "fx_shkdcny",
+        "name": "港元 / 人民币",
+        "kind": "fx"
+      }
     ]
   }
 }

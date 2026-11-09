@@ -26,6 +26,8 @@ S3 版 Python 堆在 8MB PSRAM、内部 SRAM 留给 WiFi 与 lwIP。
 - CGI 文件必须是 LF 换行。CRLF 会让 `#!/bin/sh^M` 报 not found
 - 缓存写在 `/tmp`（tmpfs），不要写 `/data`，免得反复擦写 flash
 - 并发只用一个 `mkdir` 原子锁做单飞，不要用 `flock`（busybox 不一定有）
+- 新闻 CGI 的 `?a=page&last_time=<秒>` 用于往前翻页，不进入首页缓存；
+  参数按字典序参与签名，且只接受纯数字时间戳
 
 ---
 
@@ -42,7 +44,7 @@ S3 版 Python 堆在 8MB PSRAM、内部 SRAM 留给 WiFi 与 lwIP。
 | `httpsrv.py` `_in_poll` | 重入计数上限 2 | 移除后嵌套 `poll()` 无限递归 |
 | `rap.py` 下载路径 | 边接收边写文件，单次分配 ≤ 8KB | GC 不压缩内存，大块连续分配失败后堆难以恢复 |
 | `rap.py` 落盘 | 写 `.tmp` 后 rename，优先覆盖 | 先删旧再改名会留下空窗，并发读拿到 404 |
-| `main.py` 主循环 | 无周期性取数 | 路由器 CGI 需 1~1.6 秒，后台轮询会阻塞单线程主循环 |
+| `main.py` 主循环 | 除新闻定时补采外无周期性取数 | 路由器 CGI 需 1~1.6 秒；周期性并发取数会阻塞单线程主循环 |
 | `main.py` `h_weatherhist()` | 只吐落盘文件，取数交给 `refresh_weather_history()` | 历史天气要串行汇总 7 天，冷启动 5~15 秒，放进请求路径会堵死主循环 |
 | `main.py` `idle_power()`（S3） | `idle_mhz` 不低于 80，调用点放在 `web.poll()` 之后 | 80MHz 是 WiFi 的 APB 与 Octal PSRAM 时序的下限，更低会断网或崩堆；放在 poll 之前会漏掉本轮 accept |
 | `main.py` 频率基准 | 满频取配置 `power.max_mhz`，不读 `machine.freq()` | `esp_pm` 时钟配置不随软复位恢复 |
@@ -64,7 +66,9 @@ S3 版 Python 堆在 8MB PSRAM、内部 SRAM 留给 WiFi 与 lwIP。
 4. **不要在请求处理中做超过 1 秒的阻塞操作**（除非配合 TTL 缓存）。
 5. **不要在页面中引用 CDN**（外部 CSS/JS/字体/图片）。
 6. **不要在 JS 注释里写 `*/`**（例如 `ngcdn*/cnr.cn`），会提前闭合块注释导致整段脚本不执行。
-7. **不要把新增联网接口做成后台轮询**，只在请求到达且缓存过期时拉取。
+7. **除新闻的每小时定时补采外，不要把联网接口做成后台轮询**，
+   只在请求到达且缓存过期时拉取。新闻补采周期由 `poll.news_tick_ms` 控制，
+   每次最多 `poll.news_pages` 页，取数仍在主循环内完成。
 
 ---
 

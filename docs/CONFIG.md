@@ -117,7 +117,7 @@ cp esp32-s3/config.example.json esp32-s3/config.json    # ESP32-S3
 
 ### `poll`
 
-缓存有效期，无后台轮询。数据过期后由下一次请求触发拉取。
+缓存有效期。除新闻定时补采外，数据过期后由下一次请求触发拉取。
 
 `weather_ms` 为板端缓存有效期。路由器 CGI 另有独立缓存；手动刷新
 （`/api/weather?force=1`）同时清除两级缓存，取数在主循环后台完成，
@@ -126,6 +126,12 @@ cp esp32-s3/config.example.json esp32-s3/config.json    # ESP32-S3
 `news_ms` / `quake_ms` 只对 S3 版生效。取回的数据按天追加到板上的 CSV
 （`news-YYYYMMDD.csv`、`quake-YYYYMMDD.csv`、`quakeg-YYYYMMDD.csv`），保留最近 7 天。
 
+新闻按 `news_tick_ms`（默认 1 小时）定时补采，由主循环设置补刷标记，不占用
+请求路径。每次从最新一页开始，以本页最早一条的时间作为 `last_time` 逐页
+向前，直到追平上次采集时刻或达到 `news_pages`（默认 6 页）。翻页请求经
+路由器 CGI 的 `?a=page&last_time=<秒>` 转发，不进入首页缓存。调大
+`news_pages` 可覆盖更长的历史空档，取数耗时随之增加。
+
 ### `router.aux_port`
 
 新闻与地震 CGI 经路由器 uhttpd 端口（默认 8088）直连。
@@ -133,17 +139,22 @@ nginx 仅代理白名单内的 `/cgi-bin/xxx`，无需修改其配置。
 
 ### `led`
 
-板载 LED（GPIO2）指示：上电常亮，服务就绪后按 `period_ms` 闪烁 `pulse_ms` 毫秒。
-`on: 0` 时就绪后熄灭。部分开发板 LED 未连接 GPIO2，此时无显示。
+板载指示灯。`on: 1` 时按 `period_ms` 周期点亮 `pulse_ms` 毫秒，
+`on: 0` 时上电写入一次关闭值，之后不再驱动。
 
-S3 版改为单颗 WS2812（GPIO48），用 `kind` 区分驱动方式：
+S3 版为单颗 WS2812（GPIO48），ESP32 版为普通引脚单色灯，用 `kind` 区分驱动方式：
 
 ```json
-"led": { "on": 0, "kind": "np", "pin": 48, "color": [0, 127, 0] }
+"led": { "on": 1, "kind": "np", "pin": 48, "color": [0, 10, 0],
+         "period_ms": 2000, "pulse_ms": 60 }
 ```
 
 `kind: "np"` 走 neopixel（RMT），`kind: "gpio"` 走普通引脚电平。
-`on: 0` 时上电写入一次关闭值，之后不再驱动。
+`color` 为 WS2812 的 RGB 值，低亮度心跳取较小数值；`pulse_ms` 相对
+`period_ms` 越小，占空比越低。
+
+板载 RX / TX 指示灯由 USB-UART 桥接芯片的 RXD / TXD 电平直接驱动，
+与 ESP32 的 GPIO 无连接，不受本配置控制。
 
 ### `power`
 

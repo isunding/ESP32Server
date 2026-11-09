@@ -27,7 +27,7 @@
 | 天气 | `/weather.html` | 实况、24 小时、7 天预报、空气质量、生活指数 |
 | 行情 | `/market.html` | 三大指数、汇率、自选股（存于板上） |
 | 电台 | `/radio.html` | 67 个电台 / 9 个分类，支持搜索与折叠 |
-| 新闻 | `/news.html` | 单列卡片、时间与重要度置于标题行、标签置于卡片下方、重要度与主题筛选、`【】` 标题加粗、股票标签点选加入 / 移出自选（仅 S3） |
+| 新闻 | `/news.html` | 单列卡片、时间与重要度置于标题行、正文完整显示、标签置于卡片下方、重要度与主题筛选、`【】` 标题加粗、股票标签点选加入 / 移出自选（仅 S3） |
 | 地震 | `/quake.html` | 单列卡片、国内 / 全球切换、近 7 天列表、按震级筛选与配色、经纬度标注 N/S/E/W（仅 S3） |
 | 本机 | `/info.html` | 固件、板型、CPU、芯片温度、内部 RAM 分块、MAC、堆、Flash、休眠记录与时间轴 |
 | NTP | `/ntp.html` | 板载 NTP 服务端状态、上游同步、时区设置、农历 |
@@ -155,7 +155,7 @@ python esp32-s3/scripts/flash.py esp32-s3/main.py esp32-s3/www/index.html ...
 | POST | `/api/ntp` | `sync` / `srv` / `upstream` / `interval` / `tz` |
 | GET | `/api/config` | 读取配置（密码打码） |
 | POST | `/api/config` | 保存配置并重启 |
-| GET | `/api/news` | 新闻电报（近 7 天，本地 CSV，`?force=1` 触发刷新） |
+| GET | `/api/news` | 新闻电报（近 7 天，本地 CSV，`?force=1` 触发刷新）；每小时定时补采并翻页追平 |
 | GET | `/api/quake` | 地震列表（近 7 天，本地 CSV）；`?a=global` 切全球视图，`?force=1` 触发刷新 |
 
 ---
