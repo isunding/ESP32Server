@@ -15,6 +15,7 @@
 ## 2026-11-11
 
 ### 变更
+- 增加英文版 `README.en.md`，两个版本顶部互相切换
 - 路由器端组件集中到 `mirouter/`：数据与状态 CGI、IPTV 启停与播放列表生成脚本、
   控制台页面、原厂管理页注入片段、udpxy 与 rtp2httpd 二进制、部署脚本 `tools/deploy.py`；
   原 `router/cgi/` 一并迁入 `mirouter/cgi/`

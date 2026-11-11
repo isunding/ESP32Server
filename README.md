@@ -3,6 +3,8 @@
 基于 ESP32 + MicroPython 的无头终端服务器。运行单线程 HTTP 服务，向局域网提供页面与 API，
 数据来自路由器上的 CGI 接口。
 
+[English](README.en.md) · 简体中文
+
 ![MicroPython](https://img.shields.io/badge/MicroPython-v1.26.1%20%2F%20v1.29.0-2b2728?logo=python&logoColor=white)
 ![Platform](https://img.shields.io/badge/ESP32-D0WD--V3%20%7C%20S3-e7352c)
 ![License](https://img.shields.io/badge/license-MIT-green)
