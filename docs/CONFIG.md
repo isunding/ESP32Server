@@ -1,5 +1,7 @@
 # 配置说明
 
+[English](CONFIG.en.md) · 简体中文
+
 ## 一、配置文件
 
 板端配置文件为 `/config.json`（文件系统根目录）。仓库提供脱敏模板，
@@ -102,12 +104,17 @@ cp esp32-s3/config.example.json esp32-s3/config.json    # ESP32-S3
 
 | 路径 | 用途 |
 |---|---|
-| `/cgi-bin/sysstat?a=stat` `?a=dhcp` `?a=arp` | 设备状态、客户端列表 |
+| `/cgi-bin/sysstat?a=stat` `?a=dhcp` `?a=arp` | 设备状态、租约、ARP |
+| `/cgi-bin/netperip` | 按设备汇总的流量 |
 | `/cgi-bin/weather?a=data` | 天气聚合数据 |
+| `/cgi-bin/weatherhist?a=history` | 近 7 天历史天气 |
 | `/cgi-bin/iptv?a=list` | 频道库 |
+| `/cgi-bin/svcstat?port=<端口>` | 服务端口状态 |
+| `/cgi-bin/ntpctl?a=status` | 校时状态 |
+| `/cgi-bin/news` `quake` `usgs` `oil` `almanac` | 新闻、地震、油价、万年历（仅 S3） |
 
-上述 CGI 需单独部署，不在本仓库内。未提供时天气、频道与服务状态为空，
-其余功能不受影响。
+脚本在 `mirouter/cgi/`，清单与部署方式见 [mirouter/README.md](../mirouter/README.md)。
+某一项未部署时对应页面无数据，其余功能不受影响。
 
 ### `ntp`
 

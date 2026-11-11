@@ -3,6 +3,8 @@
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/) 格式，条目分为
 `新增`、`变更`、`修复`、`移除`、`安全` 五类。
 
+[English](CHANGELOG.en.md) · 简体中文
+
 ## 版本
 
 | 版本 | 日期 | 内容 |
@@ -15,7 +17,8 @@
 ## 2026-11-11
 
 ### 变更
-- 增加英文版 `README.en.md`，两个版本顶部互相切换
+- 增加英文版：`README.en.md` 与 `docs/ARCHITECTURE`、`docs/CONFIG`、`docs/DEPLOY`、`CHANGELOG`
+  各自的 `*.en.md`，同名文件顶部互相切换
 - `docs/ARCHITECTURE.md` 更新主循环与路由器端组件说明，补充「新增路由器 CGI」流程
 - 路由器端组件集中到 `mirouter/`：数据与状态 CGI、IPTV 启停与播放列表生成脚本、
   控制台页面、原厂管理页注入片段、udpxy 与 rtp2httpd 二进制、部署脚本 `tools/deploy.py`；

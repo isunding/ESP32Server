@@ -192,9 +192,9 @@ python esp32-s3/scripts/flash.py esp32-s3/main.py esp32-s3/www/index.html ...
 │   ├── bin/               udpxy、rtp2httpd
 │   └── tools/             部署脚本
 └── docs/
-    ├── ARCHITECTURE.md
-    ├── CONFIG.md
-    └── DEPLOY.md
+    ├── ARCHITECTURE.md  ARCHITECTURE.en.md
+    ├── CONFIG.md        CONFIG.en.md
+    └── DEPLOY.md        DEPLOY.en.md
 ```
 
 `www/` 由 `web/` 经 `scripts/build.py` 生成；页面修改应在 `web/` 下进行。

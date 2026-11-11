@@ -57,7 +57,7 @@ top bar shows the device IP, a status dot and the LED heartbeat toggle (S3 only)
 
 No SD card or peripherals required. On the S3 build the Python heap lives in PSRAM while
 internal SRAM is left to WiFi and lwIP. The data source is a router running the CGI
-endpoints, see [docs/CONFIG.md](docs/CONFIG.md).
+endpoints, see [docs/CONFIG.en.md](docs/CONFIG.en.md).
 
 ---
 
@@ -91,7 +91,7 @@ flowchart LR
 ```
 
 Boot sequence, request lifecycle and the build pipeline are described in
-[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+[docs/ARCHITECTURE.en.md](docs/ARCHITECTURE.en.md).
 
 ---
 
@@ -117,7 +117,7 @@ esptool.py --chip esp32s3 --port COM3 --baud 460800 write_flash -z 0x0 \
 ```
 
 The ESP32 build must preserve the RF calibration data at `0xF000`, see
-[docs/DEPLOY.md](docs/DEPLOY.md).
+[docs/DEPLOY.en.md](docs/DEPLOY.en.md).
 
 ### 2. Configure
 
@@ -126,7 +126,7 @@ cp esp32/config.example.json esp32/config.json          # or esp32-s3/config.exa
 # edit wifi.ssid / wifi.password / router.host
 ```
 
-`config.json` is excluded by `.gitignore`. Field reference: [docs/CONFIG.md](docs/CONFIG.md).
+`config.json` is excluded by `.gitignore`. Field reference: [docs/CONFIG.en.md](docs/CONFIG.en.md).
 
 ### 3. Deploy
 
@@ -143,7 +143,7 @@ python esp32-s3/scripts/flash.py esp32-s3/main.py esp32-s3/www/index.html ...
 `/api/health` self-check. For larger file sets use `scripts/up_batch.py` to upload in
 batches. `scripts/mpy.py` precompiles core modules to `.mpy`.
 
-Both board directories use the same scripts. Full steps: [docs/DEPLOY.md](docs/DEPLOY.md).
+Both board directories use the same scripts. Full steps: [docs/DEPLOY.en.md](docs/DEPLOY.en.md).
 
 ---
 
@@ -199,14 +199,14 @@ Both board directories use the same scripts. Full steps: [docs/DEPLOY.md](docs/D
 │   ├── bin/               udpxy, rtp2httpd
 │   └── tools/             Deploy script
 └── docs/
-    ├── ARCHITECTURE.md
-    ├── CONFIG.md
-    └── DEPLOY.md
+    ├── ARCHITECTURE.md  ARCHITECTURE.en.md
+    ├── CONFIG.md        CONFIG.en.md
+    └── DEPLOY.md        DEPLOY.en.md
 ```
 
 `www/` is generated from `web/` by `scripts/build.py`; edit pages under `web/`.
 Router-side components and their deployment rules: [mirouter/README.md](mirouter/README.md).
-Files under `docs/` and `mirouter/` are written in Chinese.
+Files under `mirouter/` are written in Chinese.
 
 ---
 

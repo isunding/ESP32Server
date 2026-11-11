@@ -1,5 +1,7 @@
 # 架构与流程
 
+[English](ARCHITECTURE.en.md) · 简体中文
+
 系统运行于单线程，可用 TCP PCB 约 10 个。ESP32 版堆约 70KB（内部 SRAM）；
 S3 版 Python 堆位于 8MB PSRAM，内部 SRAM 供 WiFi 与 lwIP 使用。
 

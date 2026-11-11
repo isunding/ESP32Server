@@ -1,5 +1,7 @@
 # 烧写与部署
 
+[English](DEPLOY.en.md) · 简体中文
+
 适用于 Windows 环境，工具为 esptool 与 mpremote。两个板级目录的部署流程一致，
 差异为固件变体、烧写偏移与 USB 串口形态。
 
