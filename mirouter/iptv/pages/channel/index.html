@@ -1,0 +1,1174 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>IPTV 频道管理器</title>
+<style>
+:root{
+  --bg:#0f1216; --bg2:#161b22; --bg3:#1c232c; --line:#283141;
+  --fg:#e6edf3; --fg2:#8b98a9; --accent:#3b82f6; --accent2:#2563eb;
+  --ok:#22c55e; --bad:#ef4444; --warn:#f59e0b; --radius:10px;
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;padding:0;height:100%}
+body{
+  background:var(--bg);color:var(--fg);
+  font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+  display:flex;flex-direction:column;height:100vh;overflow:hidden;
+}
+button,input,select,textarea{font:inherit;color:inherit}
+button{
+  background:var(--bg3);border:1px solid var(--line);color:var(--fg);
+  padding:7px 13px;border-radius:8px;cursor:pointer;white-space:nowrap;transition:.12s;
+}
+button:hover{background:#25303d;border-color:#3a4757}
+button:active{transform:translateY(1px)}
+button:disabled{opacity:.45;cursor:not-allowed}
+button.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+button.primary:hover{background:var(--accent2)}
+button.danger{border-color:#7f2d2d;color:#ff9b9b}
+button.danger:hover{background:#3a1e1e}
+button.sm{padding:4px 9px;font-size:13px;border-radius:6px}
+input,select,textarea{
+  background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:7px 10px;outline:none;
+}
+input:focus,select:focus,textarea:focus{border-color:var(--accent)}
+
+/* ---------- 顶栏 ---------- */
+header{
+  display:flex;align-items:center;gap:12px;padding:12px 16px;
+  background:var(--bg2);border-bottom:1px solid var(--line);flex-wrap:wrap;
+}
+header h1{font-size:16px;margin:0;font-weight:600;letter-spacing:.3px}
+.back{display:inline-flex;align-items:center;gap:4px;font-size:13px;
+  padding:5px 11px;border-radius:8px;text-decoration:none;color:var(--fg2);
+  background:var(--bg3);border:1px solid var(--line);white-space:nowrap}
+.back:hover{color:var(--acc);border-color:var(--acc)}
+header .sp{flex:1}
+.badge{
+  display:inline-flex;align-items:center;gap:6px;font-size:12px;padding:3px 10px;
+  border-radius:999px;background:var(--bg3);border:1px solid var(--line);
+}
+.dot{width:7px;height:7px;border-radius:50%;background:var(--fg2)}
+.dot.on{background:var(--ok);box-shadow:0 0 8px var(--ok)}
+.dot.busy{background:var(--warn);animation:pulse 1s infinite}
+@keyframes pulse{50%{opacity:.25}}
+
+/* ---------- 统计 ---------- */
+.stats{display:flex;gap:8px;padding:10px 16px;flex-wrap:wrap;border-bottom:1px solid var(--line);background:var(--bg2)}
+.stat{
+  display:flex;align-items:center;gap:7px;background:var(--bg3);border:1px solid var(--line);
+  border-radius:8px;padding:5px 11px;font-size:13px;cursor:pointer;
+}
+.stat b{font-size:15px;font-weight:600}
+.stat.live b{color:var(--ok)} .stat.dead b{color:var(--bad)} .stat.unk b{color:var(--fg2)}
+.stat.act{border-color:var(--accent)}
+
+/* ---------- 工具条 ---------- */
+.toolbar{display:flex;gap:8px;padding:10px 16px;flex-wrap:wrap;align-items:center;border-bottom:1px solid var(--line)}
+.toolbar .sp{flex:1}
+#q{width:190px}
+
+/* ---------- 表格 ---------- */
+.wrap{flex:1;overflow:auto;-webkit-overflow-scrolling:touch}
+table{width:100%;border-collapse:collapse;font-size:13.5px}
+thead th{
+  position:sticky;top:0;z-index:2;background:var(--bg3);text-align:left;
+  padding:9px 10px;font-weight:600;color:var(--fg2);border-bottom:1px solid var(--line);white-space:nowrap;
+}
+tbody td{padding:7px 10px;border-bottom:1px solid #1e2530;vertical-align:middle}
+tbody tr:hover{background:var(--bg2)}
+tbody tr.sel{background:#17263c}
+.cb{width:34px;text-align:center}
+.num{color:var(--fg2);font-variant-numeric:tabular-nums}
+.mono{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12.5px}
+.st{display:inline-flex;align-items:center;gap:5px;font-size:12.5px;white-space:nowrap}
+.st i{width:7px;height:7px;border-radius:50%;display:inline-block}
+.st.s1{color:var(--ok)} .st.s1 i{background:var(--ok)}
+.st.s0{color:var(--bad)} .st.s0 i{background:var(--bad)}
+.st.sm1{color:var(--fg2)} .st.sm1 i{background:var(--fg2)}
+.name{cursor:text;border-radius:5px;padding:2px 5px;display:inline-block;min-width:40px}
+.name:hover{background:var(--bg3);outline:1px dashed var(--line)}
+.grp{font-size:12px;color:var(--fg2);background:var(--bg3);border:1px solid var(--line);border-radius:5px;padding:1px 7px}
+.empty{padding:60px 20px;text-align:center;color:var(--fg2)}
+
+/* ---------- 弹窗 ---------- */
+.mask{position:fixed;inset:0;background:rgba(0,0,0,.6);display:none;align-items:center;justify-content:center;z-index:50;padding:16px}
+.mask.on{display:flex}
+.modal{
+  background:var(--bg2);border:1px solid var(--line);border-radius:var(--radius);
+  width:100%;max-width:620px;max-height:88vh;display:flex;flex-direction:column;
+  overflow:hidden;box-shadow:0 20px 60px rgba(0,0,0,.6);
+}
+.modal h3{margin:0;padding:13px 16px;font-size:15px;border-bottom:1px solid var(--line);
+  display:flex;align-items:center;gap:10px;flex:0 0 auto}
+.modal h3 .sp{flex:1}
+.modal h3 .x{background:none;border:none;font-size:22px;line-height:1;padding:0 6px;
+  color:var(--fg2);cursor:pointer;border-radius:6px}
+.modal h3 .x:hover{color:var(--fg);background:var(--bg3)}
+.modal .body{padding:16px 18px;overflow:auto;flex:1 1 auto;min-height:0}
+.modal .foot{padding:13px 18px;border-top:1px solid var(--line);display:flex;gap:9px;
+  justify-content:flex-end;flex-wrap:wrap;flex:0 0 auto}
+.field{display:flex;align-items:center;gap:10px;margin-bottom:11px}
+.field label{width:130px;flex-shrink:0;color:var(--fg2);font-size:13px}
+.field input,.field select{flex:1;min-width:0}
+.hint{color:var(--fg2);font-size:12px;margin:-4px 0 12px 140px}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:9px}
+.bar{height:8px;background:var(--bg3);border-radius:99px;overflow:hidden;margin:12px 0}
+.bar>i{display:block;height:100%;background:linear-gradient(90deg,var(--accent),#60a5fa);width:0;transition:width .3s}
+pre.log{
+  background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:10px;
+  font-size:12px;max-height:150px;overflow:auto;white-space:pre-wrap;word-break:break-all;margin:0;
+  font-family:ui-monospace,Menlo,Consolas,monospace;color:var(--fg2);
+}
+textarea{width:100%;min-height:170px;resize:vertical;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12.5px}
+.toast{
+  position:fixed;left:50%;bottom:28px;transform:translateX(-50%) translateY(20px);
+  background:#1f2937;border:1px solid var(--line);padding:10px 18px;border-radius:9px;
+  opacity:0;transition:.25s;pointer-events:none;z-index:99;font-size:13.5px;box-shadow:0 8px 30px rgba(0,0,0,.5);
+}
+.toast.on{opacity:1;transform:translateX(-50%) translateY(0)}
+
+/* ---------- 播放器 / EPG / 排序 ---------- */
+.modal.wide{max-width:980px}
+.modal.wide .body{padding:0;background:#000}
+.modal.wide iframe{width:100%;height:72vh;border:0;display:block;background:#000}
+.epg{font-size:12px;line-height:1.35;max-width:200px}
+.epg b{display:block;font-weight:500;color:var(--fg);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.epg span{color:var(--fg2);font-size:11px}
+.epg .pb{height:3px;background:var(--bg3);border-radius:99px;margin-top:3px;overflow:hidden}
+.epg .pb>i{display:block;height:100%;background:var(--accent)}
+.ords{display:inline-flex;flex-direction:column;gap:1px;vertical-align:middle;margin-right:2px}
+.ords button{padding:0 4px;font-size:9px;line-height:11px;border-radius:3px}
+.srcs{font-size:11px;color:var(--fg2)}
+.srcs em{color:var(--warn);font-style:normal}
+@media(max-width:720px){
+  .hide-sm{display:none}
+  #q{width:100%}
+  .field label{width:100px}
+  .hint{margin-left:110px}
+}
+</style>
+</head>
+<body>
+
+<header>
+  <a class="back" href="/manage/" title="返回路由控制台">← 返回</a>
+  <h1>📺 IPTV 频道管理器</h1>
+  <span class="badge"><span class="dot" id="dot"></span><span id="taskTxt">空闲</span></span>
+  <span class="sp"></span>
+  <button class="sm" onclick="openCfg()">⚙ 设置</button>
+</header>
+
+<div class="stats">
+  <div class="stat" data-f="all"  onclick="filt('all',this)">全部 <b id="cAll">0</b></div>
+  <div class="stat live" data-f="1" onclick="filt('1',this)">在线 <b id="cLive">0</b></div>
+  <div class="stat dead" data-f="0" onclick="filt('0',this)">失效 <b id="cDead">0</b></div>
+  <div class="stat unk" data-f="-1" onclick="filt('-1',this)">未检测 <b id="cUnk">0</b></div>
+</div>
+
+<div class="toolbar">
+  <input id="q" placeholder="搜索名称 / 地址…" oninput="render()">
+  <select id="fgrp" onchange="render()"><option value="">全部分组</option></select>
+  <button class="sm" onclick="selAll()">全选</button>
+  <button class="sm" onclick="selNone()">取消</button>
+  <button class="sm" onclick="openRename()">✎ 批量改名</button>
+  <span class="sp"></span>
+  <button class="sm" onclick="openPlayer('')">▶ 播放器</button>
+  <button class="sm" onclick="window.open(r2hUrl('/status'),'_blank')">📊 状态</button>
+  <button class="sm" onclick="startTask('verify','stale')">🔍 检测未验证</button>
+  <button class="sm primary" onclick="startTask('verify','all')">⚡ 检测全部</button>
+  <button class="sm primary" onclick="openScan()">📡 自动搜索</button>
+  <button class="sm" onclick="openImport()">📥 导入</button>
+  <button class="sm" onclick="openExport()">📤 导出</button>
+</div>
+
+<div class="wrap">
+  <table>
+    <thead><tr>
+      <th class="cb"><input type="checkbox" id="ckAll" onchange="selAll(this.checked)"></th>
+      <th style="width:30px">#</th>
+      <th>名称</th>
+      <th class="hide-sm">分组</th>
+      <th>组播地址</th>
+      <th style="width:78px">状态</th>
+      <th class="hide-sm" style="width:64px">码率</th>
+      <th class="hide-sm">当前节目</th>
+      <th style="width:126px"></th>
+    </tr></thead>
+    <tbody id="tb"></tbody>
+  </table>
+  <div class="empty" id="empty" style="display:none">没有匹配的频道<br><br>点击「导入」载入播放列表，或点「自动搜索」扫描组播网段</div>
+</div>
+
+<!-- 进度弹窗 -->
+<div class="mask" id="mProg"><div class="modal" style="max-width:520px">
+  <h3 id="progTitle">任务进行中<span class="sp"></span><button class="x" onclick="hideProg()" title="后台运行">×</button></h3>
+  <div class="body">
+    <div style="display:flex;justify-content:space-between;font-size:13px">
+      <span id="progMsg">准备中…</span><span class="num" id="progNum">0 / 0</span>
+    </div>
+    <div class="bar"><i id="progBar"></i></div>
+    <div style="font-size:12.5px;color:var(--fg2);margin-bottom:8px" id="progFound"></div>
+    <pre class="log" id="progLog"></pre>
+  </div>
+  <div class="foot">
+    <button class="danger" onclick="stopTask()">停止任务</button>
+    <button onclick="close_('mProg')">后台运行</button>
+  </div>
+</div></div>
+
+<!-- 自动搜索 -->
+<div class="mask" id="mScan"><div class="modal">
+  <h3>📡 自动搜索组播频道<span class="sp"></span><button class="x" onclick="close_('mScan')" title="关闭">×</button></h3>
+  <div class="body">
+    <p style="color:var(--fg2);font-size:13px;margin:0 0 14px">
+      原理：逐个加入候选组播组，能收到数据流的即为有效频道。<br>
+      端口按运营商规律推算：<b>端口 = 基准 + 8 × IP末位</b>。
+    </p>
+    <div class="field"><label>组播前缀</label><input id="sPre" placeholder="238.1.78 238.1.79"></div>
+    <div class="field"><label>端口基准</label><input id="sBase" placeholder="5872 5928 4112"></div>
+    <div class="field"><label>IP末位范围</label>
+      <input id="sFrom" type="number" min="0" max="255" style="max-width:80px"> <span>—</span>
+      <input id="sTo" type="number" min="0" max="255" style="max-width:80px"></div>
+    <div class="field"><label>并发扫描器</label><input id="sPar" type="number" min="1" max="12" style="max-width:80px"></div>
+    <div class="hint" id="sEst"></div>
+    <div class="field"><label>操作</label>
+      <button class="sm" onclick="estScan()">估算耗时</button>
+      <button class="sm" onclick="useKnownBases()">用已知规律填充</button></div>
+  </div>
+  <div class="foot">
+    <button onclick="close_('mScan')">取消</button>
+    <button class="primary" onclick="doScan()">开始搜索</button>
+  </div>
+</div></div>
+
+<!-- 导入 -->
+<div class="mask" id="mImp"><div class="modal">
+  <h3>📥 导入播放列表<span class="sp"></span><button class="x" onclick="close_('mImp')" title="关闭">×</button></h3>
+  <div class="body">
+    <p style="color:var(--fg2);font-size:13px;margin:0 0 10px">
+      支持 m3u / m3u8、TVBox(名称,地址) 文本。自动识别 <span class="mono">rtp://</span>、
+      <span class="mono">/rtp/</span> 形式的地址。
+    </p>
+    <input type="file" id="impFile" accept=".m3u,.m3u8,.txt,text/*" onchange="pickFile(this)" style="margin-bottom:10px">
+    <textarea id="impText" placeholder="#EXTM3U&#10;#EXTINF:-1 group-title=&quot;央视&quot;,CCTV-1&#10;rtp://238.1.78.166:7200&#10;…&#10;&#10;或 TVBox 格式：&#10;央视,#genre#&#10;CCTV-1,http://10.0.0.11:12123/rtp/238.1.78.166:7200"></textarea>
+    <div class="field" style="margin-top:12px">
+      <label>导入方式</label>
+      <select id="impMode">
+        <option value="1">合并（同地址更新，新地址追加）</option>
+        <option value="0">覆盖（清空后重建）</option>
+      </select>
+    </div>
+  </div>
+  <div class="foot">
+    <button onclick="close_('mImp')">取消</button>
+    <button class="primary" onclick="doImport()">开始导入</button>
+  </div>
+</div></div>
+
+<!-- 导出 -->
+<div class="mask" id="mExp"><div class="modal" style="max-width:460px">
+  <h3>📤 导出 / 保存<span class="sp"></span><button class="x" onclick="close_('mExp')" title="关闭">×</button></h3>
+  <div class="body">
+    <p style="color:var(--fg2);font-size:13px;margin:0 0 12px">播放列表已自动生成到盒子的 <span class="mono">/www/</span> 目录，可直接被播放器订阅。</p>
+    <div style="display:flex;flex-direction:column;gap:8px">
+      <button onclick="dl('m3u')">⬇ iptv.m3u — 转单播（推荐给局域网播放器）</button>
+      <button onclick="dl('rtp')">⬇ iptv-rtp.m3u — 原始组播 rtp://</button>
+      <button onclick="dl('txt')">⬇ iptv.txt — TVBox / DIYP 格式</button>
+      <button onclick="dl('tsv')">⬇ channels.tsv — 原始数据库</button>
+    </div>
+    <p style="color:var(--fg2);font-size:12.5px;margin:14px 0 0">订阅地址：<br>
+      <span class="mono" id="subUrl"></span></p>
+  </div>
+  <div class="foot"><button onclick="close_('mExp')">关闭</button></div>
+</div></div>
+
+<!-- 设置 -->
+<div class="mask" id="mCfg"><div class="modal">
+  <h3>⚙ 设置<span class="sp"></span><button class="x" onclick="close_('mCfg')" title="关闭">×</button></h3>
+  <div class="body">
+    <div class="field"><label>组播网卡</label><input id="cIface"></div>
+    <div class="field"><label>msd_lite 端口</label><input id="cMsdPort" type="number"></div>
+    <div class="field"><label>对外地址</label><input id="cPublic"></div>
+    <div class="hint">播放列表里 URL 使用的主机名（局域网客户端填盒子的 LAN IP）</div>
+    <div class="field"><label>扫描器数量</label><input id="cScanners" type="number" min="1" max="12"></div>
+    <div class="hint">每个扫描器是一个独立 msd_lite 实例，越多越快，但更占内存</div>
+    <div class="field"><label>探测超时(秒)</label><input id="cTimeout" type="number" step="0.5" min="1"></div>
+    <div class="field"><label>有效阈值(字节)</label><input id="cMinBytes" type="number"></div>
+    <div class="field"><label>扫描前缀</label><input id="cPrefixes"></div>
+    <div class="field"><label>默认端口基准</label><input id="cBases"></div>
+    <div class="field"><label>IP末位范围</label>
+      <input id="cFrom" type="number" style="max-width:80px"> <span>—</span>
+      <input id="cTo" type="number" style="max-width:80px"></div>
+    <div class="field"><label>EPG 地址</label><input id="cEpg"></div>
+    <div class="field"><label>台标前缀</label><input id="cLogo"></div>
+    <div class="field"><label>兼容原文件名</label>
+      <select id="cLegacy"><option value="0">否（只写 iptv.*）</option><option value="1">是（同时更新 new.m3u / new.txt / anycast.m3u）</option></select></div>
+    <div class="hint">开启后会覆盖 /www 下原有的 new.m3u、new.txt、anycast.m3u</div>
+
+    <h4 style="margin:18px 0 10px;color:var(--fg2);font-size:13px;border-top:1px solid var(--line);padding-top:14px">rtp2httpd（第二引擎 · 浏览器播放 / EPG / 状态面板）</h4>
+    <div class="field"><label>启用</label>
+      <select id="cR2hEnable"><option value="1">启用</option><option value="0">停用</option></select></div>
+    <div class="field"><label>端口</label><input id="cR2hPort" type="number"></div>
+    <div class="field"><label>鉴权令牌</label><input id="cR2hToken" placeholder="留空 = 不鉴权"></div>
+
+    <h4 style="margin:18px 0 10px;color:var(--fg2);font-size:13px;border-top:1px solid var(--line);padding-top:14px">FCC 快速换台</h4>
+    <div class="field"><label>FCC 地址</label><input id="cFccAddr" placeholder="IP:端口"></div>
+    <div class="field"><label>协议类型</label>
+      <select id="cFccType"><option value="telecom">电信/中兴/烽火 (telecom)</option><option value="huawei">华为 (huawei)</option></select></div>
+    <div class="field"><label>写入播放列表</label>
+      <select id="cFccEnable"><option value="0">否</option><option value="1">是（URL 带 ?fcc= 参数）</option></select></div>
+    <div class="field"><label></label>
+      <button class="sm" onclick="probeFcc()">🔎 探测该 FCC 地址</button>
+      <span id="fccRes" style="font-size:12.5px;color:var(--fg2)"></span></div>
+    <div class="hint">实测本机：FCC 请求能发出但服务器不响应（IPTV 网段无 IPv4 网关）。地址有效时改这里即可生效</div>
+
+    <h4 style="margin:18px 0 10px;color:var(--fg2);font-size:13px;border-top:1px solid var(--line);padding-top:14px">RTSP 时移回看</h4>
+    <div class="field"><label>启用</label>
+      <select id="cRtspEnable"><option value="0">否</option><option value="1">是</option></select></div>
+    <div class="field"><label>地址模板</label><input id="cRtspTmpl" placeholder="rtsp://IP:554/xxx?channel={name}&playseek=${(b)yyyyMMddHHmmss}-${(e)yyyyMMddHHmmss}"></div>
+    <div class="hint">用 {name} 代表频道名；时间占位符由播放器解析。需要你提供运营商的 RTSP 回看地址</div>
+  </div>
+  <div class="foot">
+    <button onclick="close_('mCfg')">取消</button>
+    <button class="primary" onclick="saveCfg()">保存设置</button>
+  </div>
+</div></div>
+
+<!-- 播放器 -->
+<div class="mask" id="mPlayer"><div class="modal wide">
+  <h3><span id="playerTitle">▶ 播放</span><span class="sp"></span>
+    <a id="playerOpen" href="#" target="_blank" style="font-size:12.5px;color:var(--accent);text-decoration:none;margin-right:6px">新窗口打开</a>
+    <button class="x" onclick="closePlayer()" title="关闭">×</button></h3>
+  <div class="body"><iframe id="playerFrame" allow="autoplay; fullscreen" allowfullscreen></iframe></div>
+</div></div>
+
+<!-- 备用源 -->
+<div class="mask" id="mSrc"><div class="modal" style="max-width:520px">
+  <h3><span id="srcTitle">🔀 备用源</span><span class="sp"></span><button class="x" onclick="close_('mSrc')" title="关闭">×</button></h3>
+  <div class="body">
+    <p style="color:var(--fg2);font-size:13px;margin:0 0 10px">
+      给同一频道挂多个源（高清 / 标清）。主源：<span class="mono" id="srcMain"></span>
+    </p>
+    <textarea id="srcList" placeholder="每行一个，格式 ip:端口&#10;238.1.78.166:7200&#10;238.1.79.23:4296"></textarea>
+    <p style="color:var(--fg2);font-size:12px;margin:10px 0 0">
+      保存后会写进播放列表（一个频道多条地址），播放器的源选择器可切换。
+    </p>
+  </div>
+  <div class="foot">
+    <button onclick="close_('mSrc')">取消</button>
+    <button class="primary" onclick="saveSrc()">保存</button>
+  </div>
+</div></div>
+
+<!-- 批量改名 -->
+<div class="mask" id="mRen"><div class="modal" style="max-width:580px">
+  <h3>✎ 频道改名 / 改分组<span class="sp"></span><button class="x" onclick="close_('mRen')" title="关闭">×</button></h3>
+  <div class="body">
+    <div class="field"><label>作用范围</label>
+      <select id="renScope" onchange="renPreview()">
+        <option value="sel">仅选中的频道</option>
+        <option value="filter">当前筛选出的频道</option>
+        <option value="all">全部频道</option>
+      </select></div>
+    <div class="field"><label>操作</label>
+      <select id="renMode" onchange="renModeChange()">
+        <option value="rep">查找并替换</option>
+        <option value="pre">在名称前加</option>
+        <option value="suf">在名称后加</option>
+        <option value="strip">删除名称中的内容</option>
+        <option value="grp">批量设置分组</option>
+      </select></div>
+    <div class="field" id="renRowA"><label id="renLabA">查找</label><input id="renA" oninput="renPreview()"></div>
+    <div class="field" id="renRowB"><label id="renLabB">替换为</label><input id="renB" oninput="renPreview()"></div>
+    <div class="hint" id="renHint"></div>
+    <div style="margin-top:12px">
+      <div style="font-size:12.5px;color:var(--fg2);margin-bottom:6px">预览 <span id="renCnt"></span></div>
+      <pre class="log" id="renPre" style="max-height:200px"></pre>
+    </div>
+  </div>
+  <div class="foot">
+    <button onclick="close_('mRen')">取消</button>
+    <button class="primary" onclick="applyRename()">应用</button>
+  </div>
+</div></div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+'use strict';
+const API = '/cgi-bin/iptv';
+let items = [];                    // [name, group, ip, port, status, ts, kbps]
+let sel = new Set();
+let filter = 'all', state = {}, timer = null, running = false;
+
+/* ---------------- 基础 ---------------- */
+const $ = id => document.getElementById(id);
+const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const key = it => it[2] + ':' + it[3];
+
+function toast(msg, ms) {
+  const t = $('toast'); t.textContent = msg; t.classList.add('on');
+  clearTimeout(t._h); t._h = setTimeout(() => t.classList.remove('on'), ms || 2200);
+}
+function close_(id) { $(id).classList.remove('on'); }
+function open_(id) { $(id).classList.add('on'); }
+
+async function get(a, params) {
+  const q = new URLSearchParams(Object.assign({ a }, params || {}));
+  const r = await fetch(API + '?' + q, { cache: 'no-store' });
+  if (!r.ok) throw new Error('HTTP ' + r.status);
+  return r.json();
+}
+async function post(a, body, params) {
+  const q = new URLSearchParams(Object.assign({ a }, params || {}));
+  const r = await fetch(API + '?' + q, { method: 'POST', body: body, cache: 'no-store' });
+  if (!r.ok) throw new Error('HTTP ' + r.status);
+  return r.json();
+}
+
+/* ---------------- 状态与列表 ---------------- */
+// 任务指纹: 用"开始时间 + 模式 + 候选数"区分不同任务, 同一任务内轮询保持不变
+function taskKey(st) {
+  if (!st) return '';
+  const log = String(st.log || '').split('|')[0] || '';
+  return (st.mode || '') + '#' + (st.total || 0) + '#' + log;
+}
+
+// 纯刷新统计，不触发任务结束逻辑
+async function loadState_(silent) {
+  try {
+    const st = await get('state');
+    const c = st.counts || {};
+    $('cAll').textContent = c.all || 0;
+    $('cLive').textContent = c.live || 0;
+    $('cDead').textContent = c.dead || 0;
+    $('cUnk').textContent = c.unknown || 0;
+  } catch (e) {}
+}
+
+async function loadState() {
+  try {
+    state = await get('state');
+  } catch (e) { $('taskTxt').textContent = '连接失败'; $('dot').className = 'dot'; return; }
+  const c = state.counts || {};
+  $('cAll').textContent = c.all || 0; $('cLive').textContent = c.live || 0;
+  $('cDead').textContent = c.dead || 0; $('cUnk').textContent = c.unknown || 0;
+  const wasRunning = running;
+  running = !!state.running;
+  const d = $('dot');
+  if (running) {
+    d.className = 'dot busy';
+    $('taskTxt').textContent = (state.mode === 'discover' ? '搜索中' : '检测中') +
+      ' ' + (state.done || 0) + '/' + (state.total || 0);
+  } else {
+    d.className = 'dot on';
+    $('taskTxt').textContent = '空闲';
+  }
+  if (wasRunning && !running) {
+    // 任务结束: 清掉隐藏标记, 避免下一次任务被误判为"已隐藏"
+    sessionStorage.removeItem('progHidden');
+    await loadList();
+    await loadState_(true);   // 刷新一次统计（带写回结果）
+    // 任务完成后自动关闭进度弹窗
+    if ($('mProg').classList.contains('on')) close_('mProg');
+    toast('任务已完成，结果已保存');
+  }
+  // 只有"当前任务的指纹 != 用户隐藏时记录的任务指纹"才自动弹窗;
+  // 同一任务的后续轮询永远不会把弹窗重新拉回来。
+  if (running && !$('mProg').classList.contains('on')) {
+    const hiddenFor = sessionStorage.getItem('progHidden');
+    if (!hiddenFor || hiddenFor !== taskKey(state)) open_('mProg');
+  }
+  if ($('mProg').classList.contains('on')) updateProg();
+  schedule();
+}
+
+function schedule() {
+  clearTimeout(timer);
+  timer = setTimeout(loadState, running ? 1000 : 8000);
+}
+
+function updateProg() {
+  const t = state.total || 0, d = state.done || 0;
+  $('progTitle').textContent = state.mode === 'discover' ? '📡 正在搜索新频道' : '🔍 正在检测频道';
+  $('progNum').textContent = d + ' / ' + t;
+  $('progBar').style.width = (t ? Math.min(100, d / t * 100) : 0) + '%';
+  $('progMsg').textContent = running ? '进行中…' : '已结束';
+  $('progFound').textContent = '已发现有效流：' + (state.found || 0) + ' 个';
+  $('progLog').textContent = (state.log || '').split('|').filter(Boolean).join('\n');
+}
+
+async function loadList() {
+  try {
+    const r = await get('list');
+    items = r.items || [];
+  } catch (e) { toast('读取列表失败: ' + e.message); return; }
+  const gs = [...new Set(items.map(i => i[1]).filter(Boolean))].sort();
+  const cur = $('fgrp').value;
+  $('fgrp').innerHTML = '<option value="">全部分组</option>' +
+    gs.map(g => '<option value="' + esc(g) + '">' + esc(g) + '</option>').join('');
+  $('fgrp').value = gs.includes(cur) ? cur : '';
+  render();
+}
+
+/* ---------------- 渲染 ---------------- */
+function view() {
+  const q = $('q').value.trim().toLowerCase();
+  const g = $('fgrp').value;
+  return items.map((it, i) => ({ it, i })).filter(({ it }) => {
+    if (g && it[1] !== g) return false;
+    if (filter === '1' && it[4] !== '1') return false;
+    if (filter === '0' && it[4] !== '0') return false;
+    if (filter === '-1' && (it[4] === '1' || it[4] === '0')) return false;
+    if (q && !(it[0] + ' ' + it[2] + ':' + it[3] + ' ' + it[1]).toLowerCase().includes(q)) return false;
+    return true;
+  });
+}
+
+function stCell(s) {
+  if (s === '1') return '<span class="st s1"><i></i>在线</span>';
+  if (s === '0') return '<span class="st s0"><i></i>失效</span>';
+  return '<span class="st sm1"><i></i>未检测</span>';
+}
+
+function render() {
+  const rows = view();
+  const tb = $('tb');
+  tb.innerHTML = rows.map(({ it, i }) => {
+    const k = key(it), on = sel.has(k);
+    const kbps = it[6] && it[6] !== '0' ? Math.round(it[6]) + 'k' : '—';
+    const nsrc = (it[8] || '').split('|').filter(Boolean).length;
+    return '<tr class="' + (on ? 'sel' : '') + '">' +
+      '<td class="cb"><input type="checkbox" ' + (on ? 'checked' : '') +
+        ' onchange="toggleSel(\'' + k + '\',this.checked)"></td>' +
+      '<td class="num">' + (i + 1) + '</td>' +
+      '<td><span class="name" onclick="editName(this,' + i + ')" title="点击改名">' + esc(it[0]) + '</span>' +
+        (nsrc ? ' <span class="srcs"><em>+' + nsrc + '源</em></span>' : '') + '</td>' +
+      '<td class="hide-sm"><span class="grp" onclick="editGrp(this,' + i + ')" style="cursor:text">' + esc(it[1] || '未分组') + '</span></td>' +
+      '<td class="mono">' + esc(it[2]) + ':' + esc(it[3]) + '</td>' +
+      '<td>' + stCell(it[4]) + '</td>' +
+      '<td class="hide-sm num">' + kbps + '</td>' +
+      '<td class="hide-sm">' + epgCell(it[0]) + '</td>' +
+      '<td><span class="ords">' +
+          '<button class="sm" onclick="moveCh(' + i + ',-1)" title="上移">▲</button>' +
+          '<button class="sm" onclick="moveCh(' + i + ',1)" title="下移">▼</button></span>' +
+        '<button class="sm" onclick="editName(null,' + i + ')" title="重命名">✎</button> ' +
+        '<button class="sm" onclick="openPlayerIdx(' + i + ')" title="播放">▶</button> ' +
+        '<button class="sm" onclick="editSrc(' + i + ')" title="备用源' + (nsrc ? '(' + nsrc + ')' : '') + '">源</button> ' +
+        '<button class="sm danger" onclick="del1(\'' + k + '\')" title="删除">删</button></td>' +
+    '</tr>';
+  }).join('');
+  $('empty').style.display = rows.length ? 'none' : 'block';
+  $('ckAll').checked = rows.length > 0 && rows.every(({ it }) => sel.has(key(it)));
+}
+
+function filt(f, el) {
+  filter = f;
+  document.querySelectorAll('.stat').forEach(s => s.classList.remove('act'));
+  if (el) el.classList.add('act');
+  render();
+}
+function selAll(on) {
+  const rows = view();
+  if (on === undefined) on = true;
+  rows.forEach(({ it }) => on ? sel.add(key(it)) : sel.delete(key(it)));
+  render();
+}
+function selNone() { sel.clear(); render(); }
+function toggleSel(k, on) { on ? sel.add(k) : sel.delete(k); render(); }
+
+/* ---------------- 编辑 ---------------- */
+function editName(el, i) {
+  const old = items[i][0];
+  const v = prompt('频道名称', old);
+  if (v === null || v === old) return;
+  items[i][0] = v;
+  sendEdit([['set', v, '', items[i][2], items[i][3]]]);
+}
+function editGrp(el, i) {
+  const old = items[i][1];
+  const v = prompt('分组名称', old || '未分组');
+  if (v === null || v === old) return;
+  items[i][1] = v;
+  sendEdit([['set', '', v, items[i][2], items[i][3]]]);
+}
+function del1(k) {
+  const it = items.find(x => key(x) === k);
+  if (!it || !confirm('确定删除「' + it[0] + '」？')) return;
+  sendEdit([['del', '', '', it[2], it[3]]]);
+}
+async function sendEdit(ops) {
+  const body = ops.map(o => o.join('\t')).join('\n');
+  await post('edit', body);
+  await loadList();
+  toast('已保存');
+}
+
+/* ---------------- 批量操作 ---------------- */
+async function batch(fn) {
+  if (!sel.size) { toast('请先选择频道'); return; }
+  const ops = [];
+  items.forEach(it => { if (sel.has(key(it))) fn(it, ops); });
+  if (!ops.length) return;
+  await sendEdit(ops);
+  sel.clear();
+}
+
+/* ---------------- 任务 ---------------- */
+async function startTask(mode, scope) {
+  try {
+    // 以后端状态为准，避免前端 running 残留导致「按钮无效」
+    const cur = await get('state').catch(() => null);
+    if (cur && (cur.running === 1 || cur.running === '1')) {
+      running = true;
+      toast('已有任务在运行');
+      open_('mProg');
+      loadState();
+      return;
+    }
+    running = false;
+
+    const r = await get('start', { mode, scope });
+    if (!r.ok) { toast(r.msg || '启动失败'); running = false; return; }
+
+    // 二次确认：后端确实跑起来了
+    let started = false;
+    for (let i = 0; i < 6; i++) {
+      await new Promise(res => setTimeout(res, 400));
+      const st = await get('state').catch(() => null);
+      if (st && (st.running === 1 || st.running === '1')) { started = true; break; }
+    }
+    if (!started) {
+      running = false;
+      toast('任务未能启动（可能刚结束或状态异常）', 4000);
+      loadState();
+      return;
+    }
+
+    sessionStorage.removeItem('progHidden');
+    open_('mProg');
+    running = true;
+    loadState();
+  } catch (e) {
+    running = false;
+    toast('启动失败: ' + e.message, 4000);
+  }
+}
+async function stopTask() {
+  toast('正在停止…');
+  try {
+    await get('stop');
+  } catch (e) {
+    toast('停止请求失败', 4000);
+    return;
+  }
+
+  // 等后端真正停下（trap 里要写回数据库，可能要几秒）
+  let stopped = false;
+  for (let i = 0; i < 40; i++) {
+    await new Promise(res => setTimeout(res, 500));
+    const st = await get('state').catch(() => null);
+    if (st && !(st.running === 1 || st.running === '1')) {
+      stopped = true;
+      break;
+    }
+  }
+
+  running = false;
+  sessionStorage.removeItem('progHidden');
+  if ($('mProg').classList.contains('on')) close_('mProg');
+  await loadList();
+  await loadState_(true);
+
+  if (stopped) {
+    toast('任务已停止，已保存扫描结果');
+  } else {
+    toast('停止超时，请稍后重试', 4000);
+  }
+  loadState();
+}
+
+async function test1(k) {
+  const it = items.find(x => key(x) === k);
+  if (!it) return;
+  toast('正在测试 ' + it[0] + ' …');
+  // 借道 msd_lite 直接取一小段，判断是否可播
+  const url = 'http://' + location.hostname + ':' + (state.cfg.msd_port || 12123) + '/rtp/' + it[2] + ':' + it[3];
+  const t0 = Date.now();
+  try {
+    const ctl = new AbortController();
+    const to = setTimeout(() => ctl.abort(), 3000);
+    const r = await fetch(url, { signal: ctl.signal, cache: 'no-store' });
+    clearTimeout(to);
+    if (r.ok) {
+      const rd = r.body && r.body.getReader ? r.body.getReader() : null;
+      let n = 0;
+      if (rd) {
+        while (n < 200000) {
+          const { done, value } = await rd.read();
+          if (done) break;
+          n += value.length;
+        }
+        try { rd.cancel(); } catch (e) {}
+      }
+      const sec = Math.max(0.2, (Date.now() - t0) / 1000);
+      toast(it[0] + '：收到 ' + Math.round(n / 1024) + ' KB，约 ' + Math.round(n * 8 / sec / 1000) + ' kbps', 3500);
+    } else {
+      toast(it[0] + '：HTTP ' + r.status + '（可能无数据）', 3000);
+    }
+  } catch (e) {
+    toast(it[0] + '：3 秒内无数据，可能已失效', 3000);
+  }
+}
+
+/* ---------------- 自动搜索 ---------------- */
+async function openScan() {
+  // state 可能在页面刚加载时还是空的，这里主动取一次最新配置
+  let c = (state && state.cfg) || {};
+  if (!c.prefixes || !c.base_ports) {
+    try {
+      const fresh = await get('state');
+      if (fresh && fresh.cfg) {
+        c = fresh.cfg;
+        state = Object.assign(state || {}, fresh);
+      }
+    } catch (e) {}
+  }
+  const DEFAULTS = {
+    prefixes: '238.1.78 238.1.79',
+    base_ports: '5872 4112 5928 4136',
+    scan_from: '0',
+    scan_to: '255',
+    scanners: '4'
+  };
+  $('sPre').value = c.prefixes || DEFAULTS.prefixes;
+  $('sBase').value = c.base_ports || DEFAULTS.base_ports;
+  $('sFrom').value = (c.scan_from != null && c.scan_from !== '' ? c.scan_from : DEFAULTS.scan_from);
+  $('sTo').value = (c.scan_to != null && c.scan_to !== '' ? c.scan_to : DEFAULTS.scan_to);
+  $('sPar').value = c.scanners || DEFAULTS.scanners;
+  estScan();
+  open_('mScan');
+}
+function estScan() {
+  const pres = $('sPre').value.trim().split(/\s+/).filter(Boolean).length || 1;
+  const bases = $('sBase').value.trim().split(/\s+/).filter(Boolean).length || 1;
+  const from = +$('sFrom').value || 0, to = +$('sTo').value || 0;
+  const par = +$('sPar').value || 4;
+  const n = pres * bases * Math.max(0, to - from + 1);
+  const per = 1.1;   // 实测: 盒子约 0.9 次探测/秒
+  const secs = Math.round(n * per / Math.min(par, 4));
+  $('sEst').textContent = '共 ' + n + ' 次探测，预计约 ' + fmtSec(secs) + '（' + par + ' 路并发）';
+  return { n, secs };
+}
+function fmtSec(s) {
+  if (s < 60) return s + ' 秒';
+  if (s < 3600) return Math.round(s / 60) + ' 分钟';
+  return (s / 3600).toFixed(1) + ' 小时';
+}
+async function useKnownBases() {
+  const r = await get('list');
+  const all = r.items || [];
+  const map = {};
+  all.forEach(i => {
+    const last = +String(i[2]).split('.').pop();
+    const b = (+i[3]) - 8 * last;
+    if (b > 0 && b < 65535) map[b] = (map[b] || 0) + 1;
+  });
+  const bases = Object.keys(map).sort((a, b) => map[b] - map[a]).slice(0, 8);
+  const pres = [...new Set(all.map(i => String(i[2]).split('.').slice(0, 3).join('.')))];
+  if (pres.length) $('sPre').value = pres.join(' ');
+  if (bases.length) $('sBase').value = bases.join(' ');
+  estScan();
+  toast('已从现有 ' + all.length + ' 个频道推算规律');
+}
+async function doScan() {
+  const pre = $('sPre').value.trim();
+  const base = $('sBase').value.trim();
+
+  // 前置校验：组播前缀和基础端口不能为空，否则后端扫不出任何东西
+  if (!pre) { toast('请填写组播前缀，如 238.1.78', 4000); return; }
+  if (!base) { toast('请填写基础端口，如 5872 4112', 4000); return; }
+  if (!/^[\d.\s]+$/.test(pre)) { toast('组播前缀格式不正确', 4000); return; }
+  if (!/^[\d\s]+$/.test(base)) { toast('基础端口格式不正确', 4000); return; }
+
+  try {
+    const r = await post('savecfg', [
+      ['PREFIXES', pre],
+      ['BASE_PORTS', base],
+      ['SCAN_FROM', String(+$('sFrom').value || 0)],
+      ['SCAN_TO', String(+$('sTo').value || 255)],
+      ['SCANNERS', String(+$('sPar').value || 4)]
+    ].map(x => x.join('\t')).join('\n') + '\n');
+    if (!r || !r.ok) throw new Error((r && r.msg) || '保存配置失败');
+
+    close_('mScan');
+    await startTask('discover', 'all');
+  } catch (e) {
+    toast('启动失败: ' + e.message, 4000);
+  }
+}
+
+/* ---------------- 导入导出 ---------------- */
+function openImport() { open_('mImp'); }
+function pickFile(el) {
+  const f = el.files[0]; if (!f) return;
+  const r = new FileReader();
+  r.onload = () => { $('impText').value = r.result; };
+  r.readAsText(f, 'utf-8');
+}
+async function doImport() {
+  const txt = $('impText').value;
+  if (!txt.trim()) { toast('内容为空'); return; }
+  toast('正在导入…');
+  try {
+    const r = await post('import', txt, { merge: $('impMode').value });
+    if (!r || !r.ok) throw new Error((r && r.msg) || '服务器返回异常');
+    close_('mImp');
+    $('impText').value = '';
+    await loadList(); await loadState();
+    toast('导入完成，解析出 ' + (r.parsed || 0) + ' 个频道');
+  } catch (e) {
+    toast('导入失败: ' + e.message, 4000);
+  }
+}
+function openExport() {
+  $('subUrl').textContent = location.origin + '/iptv.m3u';
+  open_('mExp');
+}
+function dl(fmt) { location.href = API + '?a=export&fmt=' + fmt; }
+
+/* ---------------- 设置 ---------------- */
+function openCfg() {
+  const c = state.cfg || {};
+  $('cIface').value = c.iface || ''; $('cMsdPort').value = c.msd_port || '';
+  $('cPublic').value = c.public_host || ''; $('cScanners').value = c.scanners || 4;
+  $('cTimeout').value = c.probe_timeout || 2; $('cMinBytes').value = c.min_bytes || 2000;
+  $('cPrefixes').value = c.prefixes || ''; $('cBases').value = c.base_ports || '';
+  $('cFrom').value = c.scan_from || 0; $('cTo').value = c.scan_to || 255;
+  $('cEpg').value = c.epg_url || ''; $('cLogo').value = c.logo_base || '';
+  $('cLegacy').value = c.legacy || '0';
+  $('cR2hEnable').value = c.r2h_enable || '1';
+  $('cR2hPort').value = c.r2h_port || 5140;
+  $('cR2hToken').value = c.r2h_token || '';
+  $('cFccAddr').value = c.fcc_addr || '';
+  $('cFccType').value = c.fcc_type || 'telecom';
+  $('cFccEnable').value = c.fcc_enable || '0';
+  $('cRtspEnable').value = c.rtsp_enable || '0';
+  $('cRtspTmpl').value = c.rtsp_tmpl || '';
+  $('fccRes').textContent = '';
+  open_('mCfg');
+}
+async function saveCfg() {
+  try {
+    const body = [
+      ['IFACE', $('cIface').value.trim()], ['MSD_PORT', $('cMsdPort').value.trim()],
+      ['PUBLIC_HOST', $('cPublic').value.trim()], ['SCANNERS', $('cScanners').value.trim()],
+      ['PROBE_TIMEOUT', $('cTimeout').value.trim()], ['MIN_BYTES', $('cMinBytes').value.trim()],
+      ['PREFIXES', $('cPrefixes').value.trim()], ['BASE_PORTS', $('cBases').value.trim()],
+      ['SCAN_FROM', $('cFrom').value.trim()], ['SCAN_TO', $('cTo').value.trim()],
+      ['EPG_URL', $('cEpg').value.trim()], ['LOGO_BASE', $('cLogo').value.trim()],
+      ['LEGACY_NAMES', $('cLegacy').value],
+      ['R2H_ENABLE', $('cR2hEnable').value], ['R2H_PORT', $('cR2hPort').value.trim()],
+      ['R2H_TOKEN', $('cR2hToken').value.trim()],
+      ['FCC_ADDR', $('cFccAddr').value.trim()], ['FCC_TYPE', $('cFccType').value],
+      ['FCC_ENABLE', $('cFccEnable').value],
+      ['RTSP_ENABLE', $('cRtspEnable').value], ['RTSP_TMPL', $('cRtspTmpl').value.trim()]
+    ].map(x => x.join('\t')).join('\n') + '\n';
+    const r = await post('savecfg', body);
+    if (!r || !r.ok) throw new Error((r && r.msg) || '服务器返回异常');
+    await get('r2happly');     // 把 rtp2httpd 相关设置应用到 UCI 并重启
+    await get('gen');
+    close_('mCfg');
+    await loadState();
+    toast('设置已保存，播放列表已重新生成');
+  } catch (e) {
+    toast('保存失败: ' + e.message, 5000);
+  }
+}
+
+/* ---------------- rtp2httpd 集成 ---------------- */
+function r2hUrl(p) {
+  const c = state.cfg || {};
+  return location.protocol + '//' + location.hostname + ':' + (c.r2h_port || 5140) + p;
+}
+function openPlayerIdx(i) {
+  const it = items[i];
+  if (it) openPlayer(it[0]);
+}
+function openPlayer(name) {
+  const c = state.cfg || {};
+  if (c.r2h_enable !== '1') { toast('rtp2httpd 未启用，无法在线播放'); return; }
+  const url = r2hUrl('/player') + (name ? '#' + encodeURIComponent(name) : '');
+  $('playerFrame').src = url;
+  $('playerTitle').textContent = '▶ ' + (name || '全部频道');
+  $('playerOpen').href = url;
+  open_('mPlayer');
+}
+function closePlayer() {
+  $('playerFrame').src = 'about:blank';   // 停止播放，释放连接
+  close_('mPlayer');
+}
+
+/* ---------------- EPG 节目单 ---------------- */
+let epgMap = null, epgProgs = null, epgNameId = null, epgLoading = false, epgAt = 0;
+
+const normName = s => String(s || '').toLowerCase()
+  .replace(/[\s\-·—_（）()]/g, '')
+  .replace(/(4k|hd|高清|标清|超清)$/, '');
+
+// 频道名 -> EPG id：依次尝试 全名、空格前部分、去括号部分
+function resolveEpgId(name) {
+  if (!epgNameId) return null;
+  const cands = [name];
+  const sp = String(name).split(/[\s·]+/).filter(Boolean);
+  if (sp.length > 1) cands.push(sp[0], sp.slice(0, 2).join(''));
+  for (const c of cands) {
+    const n = normName(c);
+    if (n && epgNameId[n]) return epgNameId[n];
+  }
+  return null;
+}
+
+const parseXmlTime = s => {
+  const m = String(s || '').match(/^(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})/);
+  return m ? new Date(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +m[6]).getTime() : 0;
+};
+
+async function loadEpg(force) {
+  if (epgLoading) return;
+  if (!force && epgMap && Date.now() - epgAt < 1800000) return;
+  const c = state.cfg || {};
+  if (c.r2h_enable !== '1') return;
+  epgLoading = true;
+  toast('正在加载节目单…（首次约 10-20 秒）', 4000);
+  try {
+    const r = await fetch(r2hUrl('/epg.xml') + (force ? '?t=' + Date.now() : ''), { cache: 'default' });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    parseEpg(await r.text());
+    epgAt = Date.now();
+    render();
+    let hit = Object.keys(epgMap).length;
+    toast('节目单已加载：匹配到 ' + hit + ' / ' + items.length + ' 个频道', 3500);
+  } catch (e) {
+    toast('节目单加载失败: ' + e.message, 5000);
+  } finally { epgLoading = false; }
+}
+
+function parseEpg(txt) {
+  const doc = new DOMParser().parseFromString(txt, 'text/xml');
+  const idName = {};
+  doc.querySelectorAll('channel').forEach(ch => {
+    const id = ch.getAttribute('id');
+    const dn = ch.querySelector('display-name');
+    if (id && dn) idName[id] = normName(dn.textContent);
+  });
+  const nameId = {};
+  Object.keys(idName).forEach(id => { const n = idName[id]; if (n && !(n in nameId)) nameId[n] = id; });
+  epgNameId = nameId;
+  const map = {};
+  items.forEach(it => { const id = resolveEpgId(it[0]); if (id) map[it[0]] = id; });
+  const progs = {};
+  doc.querySelectorAll('programme').forEach(p => {
+    const ch = p.getAttribute('channel');
+    const t = p.querySelector('title');
+    (progs[ch] = progs[ch] || []).push({
+      s: parseXmlTime(p.getAttribute('start')),
+      e: parseXmlTime(p.getAttribute('stop')),
+      t: t ? t.textContent : ''
+    });
+  });
+  Object.keys(progs).forEach(k => progs[k].sort((a, b) => a.s - b.s));
+  epgMap = map; epgProgs = progs;
+}
+
+function epgCell(name) {
+  if (!epgMap) return '<span style="color:var(--fg2);font-size:11px">—</span>';
+  const id = epgMap[name];
+  const list = id && epgProgs ? epgProgs[id] : null;
+  if (!list || !list.length) return '<span style="color:var(--fg2);font-size:11px">无节目单</span>';
+  const now = Date.now();
+  const cur = list.find(p => p.s <= now && now < p.e);
+  if (!cur) return '<span style="color:var(--fg2);font-size:11px">—</span>';
+  const pc = Math.max(0, Math.min(100, (now - cur.s) / (cur.e - cur.s) * 100));
+  const hm = t => new Date(t).toTimeString().slice(0, 5);
+  return '<div class="epg"><b title="' + esc(cur.t) + '">' + esc(cur.t) + '</b>' +
+    '<span>' + hm(cur.s) + '–' + hm(cur.e) + '</span>' +
+    '<div class="pb"><i style="width:' + pc.toFixed(1) + '%"></i></div></div>';
+}
+
+/* ---------------- 排序 ---------------- */
+async function moveCh(i, dir) {
+  const j = i + dir;
+  if (i < 0 || j < 0 || i >= items.length || j >= items.length) return;
+  const t = items[i]; items[i] = items[j]; items[j] = t;
+  render();
+  try {
+    await post('sort', items.map(it => it[2] + ':' + it[3]).join('\n'));
+    toast('顺序已保存');
+  } catch (e) { toast('保存顺序失败: ' + e.message, 4000); }
+}
+
+/* ---------------- 备用源 (同频道多源) ---------------- */
+let srcIdx = -1;
+function editSrc(i) {
+  srcIdx = i;
+  const it = items[i];
+  $('srcTitle').textContent = '备用源 — ' + it[0];
+  $('srcMain').textContent = it[2] + ':' + it[3];
+  $('srcList').value = (it[8] || '').split('|').filter(Boolean).join('\n');
+  open_('mSrc');
+}
+async function saveSrc() {
+  if (srcIdx < 0) return;
+  const it = items[srcIdx];
+  const v = $('srcList').value.split(/[\s,;]+/).filter(Boolean)
+    .filter(x => /^[0-9.]+:[0-9]+$/.test(x)).join('|');
+  try {
+    await post('src', 'set\t' + it[2] + '\t' + it[3] + '\t' + v + '\n');
+    close_('mSrc');
+    await loadList();
+    toast('备用源已保存（' + (v ? v.split('|').length : 0) + ' 个）');
+  } catch (e) { toast('保存失败: ' + e.message, 4000); }
+}
+
+/* ---------------- FCC 探测 ---------------- */
+async function probeFcc() {
+  const addr = $('cFccAddr').value.trim();
+  if (!addr) { toast('请先填写 FCC 地址'); return; }
+  $('fccRes').textContent = '探测中（需要几秒）…';
+  try {
+    const r = await get('fccprobe', { addr: addr, type: $('cFccType').value });
+    const m = {
+      active:   '✅ 可用 — FCC 生效，换台可达 1 秒内',
+      fallback: '❌ 服务器无响应 — 会回退到组播，换台 2-5 秒',
+      unknown:  '⚠️ 无法判断（未拿到 R2H-FCC-Status 头）',
+      r2h_off:  '⚠️ rtp2httpd 未运行，无法探测'
+    };
+    $('fccRes').textContent = (m[r.status] || r.status) + '  [' + r.status + ']';
+  } catch (e) { $('fccRes').textContent = '探测失败: ' + e.message; }
+}
+
+/* ---------------- 改名 / 改分组 ---------------- */
+function openRename() {
+  $('renA').value = ''; $('renB').value = '';
+  $('renMode').value = 'rep';
+  $('renScope').value = sel.size ? 'sel' : 'all';
+  renModeChange();
+  open_('mRen');
+}
+
+function renModeChange() {
+  const m = $('renMode').value;
+  const hint = {
+    rep:   '把名称里的「查找」内容替换成「替换为」。「替换为」留空 = 删除该内容。',
+    pre:   '在名称最前面加内容。',
+    suf:   '在名称最后面加内容。',
+    strip: '删除名称里出现的指定内容。',
+    grp:   '把频道的分组统一改成指定值（不改名称）。'
+  };
+  $('renHint').textContent = hint[m] || '';
+  if (m === 'grp') {
+    $('renRowA').style.display = ''; $('renRowB').style.display = 'none';
+    $('renLabA').textContent = '新分组名'; $('renA').placeholder = '例如：央视频道';
+  } else if (m === 'pre' || m === 'suf') {
+    $('renRowA').style.display = ''; $('renRowB').style.display = 'none';
+    $('renLabA').textContent = (m === 'pre' ? '前缀' : '后缀'); $('renA').placeholder = '';
+  } else if (m === 'strip') {
+    $('renRowA').style.display = ''; $('renRowB').style.display = 'none';
+    $('renLabA').textContent = '要删除的内容'; $('renA').placeholder = '例如：超全高清';
+  } else {
+    $('renRowA').style.display = ''; $('renRowB').style.display = '';
+    $('renLabA').textContent = '查找'; $('renLabB').textContent = '替换为';
+    $('renA').placeholder = '例如：超全高清';
+    $('renB').placeholder = '例如：超高清（留空 = 删除）';
+  }
+  renPreview();
+}
+
+function renTargets() {
+  const sc = $('renScope').value;
+  if (sc === 'all') return items.map((it, i) => i);
+  if (sc === 'filter') return view().map(r => r.i);
+  return items.map((it, i) => i).filter(i => sel.has(key(items[i])));
+}
+
+function renApply(name) {
+  const m = $('renMode').value, a = $('renA').value, b = $('renB').value;
+  if (m === 'grp') return name;
+  if (m === 'pre') return a + name;
+  if (m === 'suf') return name + a;
+  if (m === 'strip') return a ? name.split(a).join('') : name;
+  if (!a) return name;
+  return name.split(a).join(b);
+}
+
+function renPreview() {
+  const idx = renTargets(), m = $('renMode').value, a = $('renA').value, b = $('renB').value;
+  const chg = [];
+  idx.forEach(i => {
+    const it = items[i];
+    if (m === 'grp') { if (a && it[1] !== a) chg.push([it[0], '分组 → ' + a]); }
+    else { const nn = renApply(it[0]); if (nn && nn !== it[0]) chg.push([it[0], nn]); }
+  });
+  $('renCnt').textContent = '（范围内 ' + idx.length + ' 个，将改动 ' + chg.length + ' 个）';
+  $('renPre').textContent = chg.slice(0, 12).map(x => x[0] + '  →  ' + x[1]).join('\n')
+    || (idx.length ? '（当前规则不会产生改动）' : '（范围内没有频道）');
+}
+
+async function applyRename() {
+  const idx = renTargets();
+  if (!idx.length) { toast('没有可处理的频道'); return; }
+  const m = $('renMode').value, a = $('renA').value;
+  if (m === 'grp' && !a) { toast('请填写新分组名'); return; }
+  if ((m === 'rep' || m === 'strip') && !a) { toast('请填写要查找/删除的内容'); return; }
+  if ((m === 'pre' || m === 'suf') && !a) { toast('请填写要添加的内容'); return; }
+  const ops = [];
+  idx.forEach(i => {
+    const it = items[i];
+    if (m === 'grp') { if (it[1] !== a) ops.push(['set', '', a, it[2], it[3]]); }
+    else { const nn = renApply(it[0]); if (nn && nn !== it[0]) ops.push(['set', nn, '', it[2], it[3]]); }
+  });
+  if (!ops.length) { toast('没有需要改动的频道'); return; }
+  try {
+    await sendEdit(ops);
+    close_('mRen');
+    sel.clear();
+    toast('已处理 ' + ops.length + ' 个频道，播放列表已重建');
+  } catch (e) { toast('改名失败: ' + e.message, 4000); }
+}
+
+/* ---------------- 弹窗通用行为 ---------------- */
+// "后台运行": 记录当前任务的指纹, 同一任务后续的轮询不会再自动弹回;
+// 新任务 (指纹变化) 仍会正常弹出。
+function hideProg() {
+  sessionStorage.setItem('progHidden', taskKey(state));
+  close_('mProg');
+}
+
+// 点遮罩关闭（进度弹窗 = 转为后台运行）
+document.querySelectorAll('.mask').forEach(m => {
+  m.addEventListener('click', e => {
+    if (e.target !== m) return;
+    if (m.id === 'mProg') hideProg(); else close_(m.id);
+  });
+});
+// Esc 关闭最上层弹窗
+document.addEventListener('keydown', e => {
+  if (e.key !== 'Escape') return;
+  const open = [...document.querySelectorAll('.mask.on')].pop();
+  if (!open) return;
+  if (open.id === 'mProg') hideProg(); else close_(open.id);
+});
+
+/* ---------------- 启动 ---------------- */
+loadState().then(loadList).then(() => {
+  loadEpg();
+  // 节目进度条每分钟刷新一次
+  setInterval(() => { if (epgMap) render(); }, 60000);
+});
+</script>
+</body>
+</html>

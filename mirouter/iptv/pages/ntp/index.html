@@ -1,0 +1,341 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>NTP 时间服务</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🕒</text></svg>">
+<style>
+:root{
+  --bg:#0f1216; --bg2:#161b22; --bg3:#1c232c; --line:#283141;
+  --fg:#e6edf3; --fg2:#8b98a9; --acc:#ff6a00; --ok:#3fb950; --err:#f85149;
+}
+@media(prefers-color-scheme:light){
+  :root{--bg:#f6f8fa;--bg2:#fff;--bg3:#eef1f5;--line:#d8dee4;--fg:#1f2328;--fg2:#59636e;}
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);
+  font:15px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}
+.wrap{max-width:680px;margin:0 auto;padding:20px 16px 40px}
+header{display:flex;align-items:center;gap:12px;margin-bottom:18px}
+header h1{font-size:20px;margin:0;flex:1}
+.back{color:var(--acc);text-decoration:none;font-size:14px}
+.clock{background:var(--bg2);border:1px solid var(--line);border-radius:14px;
+  padding:18px 20px;margin-bottom:16px;text-align:center}
+.clock .t{font:600 34px/1.2 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  letter-spacing:1px}
+.clock .d{color:var(--fg2);font-size:13px;margin-top:4px}
+.clock .date{font-size:14px;color:var(--fg);letter-spacing:.5px;
+  margin-bottom:2px;font-weight:500}
+.dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--fg2);margin-right:6px}
+.dot.on{background:var(--ok);box-shadow:0 0 0 3px rgba(63,185,80,.18)}
+.dot.off{background:var(--err)}
+
+/* 心跳指示灯 */
+.beat{display:inline-flex;align-items:center;gap:7px;font-size:13px;
+  font-family:ui-monospace,Menlo,Consolas,monospace;color:var(--fg2)}
+.beat .pulse{position:relative;width:9px;height:9px;border-radius:50%;
+  background:#3fb950;flex:0 0 9px}
+.beat .pulse::after{content:'';position:absolute;left:50%;top:50%;
+  width:9px;height:9px;margin:-4.5px 0 0 -4.5px;border-radius:50%;
+  background:#3fb950;opacity:.75;animation:heartbeat 1.4s ease-out infinite}
+.beat.ok{color:#3fb950}
+.beat.idle .pulse{background:#8b949e}
+.beat.idle .pulse::after{display:none}
+.beat.idle{color:var(--fg2)}
+@keyframes heartbeat{
+  0%{transform:scale(1);opacity:.75}
+  70%{transform:scale(2.6);opacity:0}
+  100%{transform:scale(2.6);opacity:0}
+}
+.card{background:var(--bg2);border:1px solid var(--line);border-radius:14px;
+  padding:16px 18px;margin-bottom:14px}
+.card h2{font-size:14px;margin:0 0 12px;color:var(--fg2);font-weight:600;letter-spacing:.4px}
+.row{display:flex;align-items:center;gap:10px;justify-content:space-between;margin:10px 0}
+.row label{font-size:14px}
+.row .v{color:var(--fg2);font-size:13px;font-family:ui-monospace,Menlo,Consolas,monospace}
+input[type=text]{flex:1;background:var(--bg3);border:1px solid var(--line);color:var(--fg);
+  border-radius:9px;padding:9px 11px;font:inherit;font-size:14px;min-width:0}
+input[type=text]:focus{outline:none;border-color:var(--acc)}
+button{background:var(--bg3);border:1px solid var(--line);color:var(--fg);
+  border-radius:9px;padding:9px 16px;font:inherit;font-size:14px;cursor:pointer}
+button:hover{border-color:var(--acc);color:var(--acc)}
+button.primary{background:var(--acc);border-color:var(--acc);color:#fff}
+button.primary:hover{filter:brightness(1.08);color:#fff}
+button.danger{color:var(--err);border-color:rgba(248,81,73,.5)}
+.sw{position:relative;width:48px;height:27px;flex:0 0 auto}
+.sw input{opacity:0;width:0;height:0}
+.sw span{position:absolute;inset:0;background:var(--bg3);border:1px solid var(--line);
+  border-radius:99px;transition:.2s;cursor:pointer}
+.sw span:before{content:"";position:absolute;width:19px;height:19px;left:3px;top:3px;
+  background:var(--fg2);border-radius:50%;transition:.2s}
+.sw input:checked+span{background:rgba(63,185,80,.25);border-color:var(--ok)}
+.sw input:checked+span:before{transform:translateX(21px);background:var(--ok)}
+.hint{color:var(--fg2);font-size:12.5px;margin:8px 0 0}
+.tag{font:12px ui-monospace,Menlo,Consolas,monospace;background:var(--bg3);
+  border:1px solid var(--line);border-radius:6px;padding:2px 7px;color:var(--fg2)}
+.toast{position:fixed;left:50%;bottom:28px;transform:translateX(-50%) translateY(20px);
+  background:#222a33;color:#fff;padding:11px 20px;border-radius:11px;font-size:14px;
+  opacity:0;pointer-events:none;transition:.25s;z-index:99;max-width:88vw;text-align:center}
+.toast.on{opacity:1;transform:translateX(-50%) translateY(0)}
+.toast.err{background:#7a1f1f}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <span style="font-size:26px">🕒</span>
+  <h1>NTP 时间服务</h1>
+  <a class="back" href="/iptv/">← 返回</a>
+</header>
+
+<div class="clock">
+  <div class="date" id="clkdate">----年--月--日 星期-</div>
+  <div class="t" id="clk">--:--:--</div>
+  <div class="d" id="clkd">--</div>
+  <div class="d" style="margin-top:8px">
+    <span class="dot" id="sdot"></span><span id="stxt">读取中…</span>
+  </div>
+</div>
+
+<div class="card">
+  <h2>服务开关</h2>
+  <div class="row">
+    <div>
+      <label>对外提供 NTP 服务</label>
+      <div class="hint">开启后内网设备可用 <span class="tag">10.0.0.1</span> 作为时间源</div>
+    </div>
+    <label class="sw"><input type="checkbox" id="swServer"><span></span></label>
+  </div>
+  <div class="row">
+    <label>监听接口</label>
+    <select id="selIface" style="background:var(--bg3);border:1px solid var(--line);
+      color:var(--fg);border-radius:9px;padding:8px 10px;font:inherit;font-size:14px">
+      <option value="lan">仅 LAN（推荐）</option>
+      <option value="all">所有接口</option>
+    </select>
+  </div>
+  <div class="row">
+    <span id="runTxt" class="beat" style="justify-content:flex-start">
+      <i class="pulse"></i><b style="font-weight:600">运行状态</b>
+      <span class="txt" style="color:inherit;font-weight:normal">—</span>
+    </span>
+    <span class="tag" id="portTxt">UDP 123</span>
+  </div>
+</div>
+
+<div class="card">
+  <h2>上游时间源</h2>
+  <div class="row">
+    <input type="text" id="inUp" placeholder="0.cn.pool.ntp.org,ntp.aliyun.com">
+    <button class="primary" onclick="saveUp()">保存</button>
+  </div>
+  <p class="hint">多个地址用逗号分隔。国内推荐：<br>
+    <span class="tag">ntp.aliyun.com</span>
+    <span class="tag">ntp.tencent.com</span>
+    <span class="tag">0.cn.pool.ntp.org</span>
+    <span class="tag">time.windows.com</span>
+  </p>
+</div>
+
+<div class="card">
+  <h2>同步间隔</h2>
+  <div class="row">
+    <select id="selIv" style="background:var(--bg3);border:1px solid var(--line);
+      color:var(--fg);border-radius:9px;padding:8px 10px;font:inherit;font-size:14px">
+      <option value="300">5 分钟</option>
+      <option value="900">15 分钟（默认）</option>
+      <option value="1800">30 分钟</option>
+      <option value="3600">1 小时</option>
+      <option value="7200">2 小时</option>
+      <option value="21600">6 小时</option>
+    </select>
+    <button class="primary" onclick="saveIv()">应用</button>
+  </div>
+  <p class="hint">ntpd 向外部时间源查询的轮询间隔（秒）。数值越大越省流量，校准越慢。</p>
+</div>
+
+<div class="card">
+  <h2>时区</h2>
+  <div class="row">
+    <select id="selTz" style="background:var(--bg3);border:1px solid var(--line);
+      color:var(--fg);border-radius:9px;padding:8px 10px;font:inherit;font-size:14px">
+      <option value="CST-8">CST-8（北京时间 UTC+8）</option>
+      <option value="CST-7">CST-7（东七区）</option>
+      <option value="CST-9">CST-9（东九区）</option>
+      <option value="UTC">UTC</option>
+    </select>
+    <button onclick="saveTz()">应用</button>
+  </div>
+</div>
+
+<div class="card">
+  <h2>客户端使用方法</h2>
+  <p class="hint" style="line-height:2">
+    <b>Windows</b>：<br>
+    <span class="tag">w32tm /config /manualpeerlist:10.0.0.1 /syncfromflags:manual /update</span><br>
+    <span class="tag">net stop w32time &amp;&amp; net start w32time</span><br>
+    <b>Linux</b>：<code class="tag">server 10.0.0.1 iburst</code><br>
+    <b>macOS / iOS / Android / 电视</b>：时间服务器填 <span class="tag">10.0.0.1</span>
+  </p>
+</div>
+
+<div class="toast" id="toast"></div>
+</div>
+
+<script>
+/* ===== 农历（2026 丙午马年，查表法）===== */
+var LUNAR_DAYS = ["初一","初二","初三","初四","初五","初六","初七","初八","初九","初十",
+  "十一","十二","十三","十四","十五","十六","十七","十八","十九","二十",
+  "廿一","廿二","廿三","廿四","廿五","廿六","廿七","廿八","廿九","三十"];
+
+var LUNAR_MONTHS = [["2025-12-20", "冬月"], ["2026-01-19", "腊月"], ["2026-02-17", "正月"], ["2026-03-19", "二月"], ["2026-04-17", "三月"], ["2026-05-17", "四月"], ["2026-06-15", "五月"], ["2026-07-14", "六月"], ["2026-08-13", "七月"], ["2026-09-11", "八月"], ["2026-10-10", "九月"], ["2026-11-09", "十月"], ["2026-12-09", "冬月"], ["2027-01-08", "腊月"]];
+
+var JIEQI = [["01-05", "小寒"], ["01-20", "大寒"], ["02-04", "立春"], ["02-18", "雨水"], ["03-05", "惊蛰"], ["03-20", "春分"], ["04-05", "清明"], ["04-20", "谷雨"], ["05-05", "立夏"], ["05-21", "小满"], ["06-05", "芒种"], ["06-21", "夏至"], ["07-07", "小暑"], ["07-23", "大暑"], ["08-07", "立秋"], ["08-23", "处暑"], ["09-07", "白露"], ["09-23", "秋分"], ["10-08", "寒露"], ["10-23", "霜降"], ["11-07", "立冬"], ["11-22", "小雪"], ["12-07", "大雪"], ["12-21", "冬至"]];
+
+var LFEST = {"正月初一": "春节", "正月十五": "元宵节", "二月初二": "龙抬头", "五月初五": "端午节", "七月初七": "七夕", "七月十五": "中元节", "八月十五": "中秋节", "九月初九": "重阳节", "腊月初八": "腊八节", "腊月廿三": "小年"};
+
+function ymd(s){ var a = s.split('-'); return new Date(+a[0], +a[1]-1, +a[2]); }
+
+function lunarOf(d){
+  for (var i = 0; i < LUNAR_MONTHS.length; i++){
+    var s = ymd(LUNAR_MONTHS[i][0]);
+    var e;
+    if (i + 1 < LUNAR_MONTHS.length) {
+      e = new Date(ymd(LUNAR_MONTHS[i+1][0]).getTime() - 86400000);
+    } else {
+      e = new Date(s.getTime() + 29*86400000);
+    }
+    var t = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+    if (t >= s && t <= e) {
+      var idx = Math.round((t - s) / 86400000);
+      return { month: LUNAR_MONTHS[i][1], day: LUNAR_DAYS[idx], dayIdx: idx };
+    }
+  }
+  return null;
+}
+
+function jieqiOf(d){
+  var md = ('0'+(d.getMonth()+1)).slice(-2) + '-' + ('0'+d.getDate()).slice(-2);
+  for (var i = 0; i < JIEQI.length; i++){
+    if (JIEQI[i][0] === md) return JIEQI[i][1];
+  }
+  return null;
+}
+
+function lunarText(d){
+  var lr = lunarOf(d);
+  if (!lr) return '\u519c\u5386\u2014';
+  var txt = '\u519c\u5386 ' + lr.month + lr.day;
+  var f = LFEST[lr.month + lr.day];
+  if (f) txt += ' \u00b7 ' + f;
+  var jq = jieqiOf(d);
+  if (jq) txt += ' \u00b7 ' + jq;
+  return txt;
+}
+</script>
+<script>
+'use strict';
+var st = null;
+
+function $(id){ return document.getElementById(id); }
+function api(a, extra){
+  var q = 'a=' + a + (extra ? '&' + extra : '');
+  return fetch('/cgi-bin/ntpctl?' + q, {cache:'no-store'}).then(function(r){return r.json();});
+}
+function toast(msg, err){
+  var t = $('toast');
+  t.textContent = msg;
+  t.className = 'toast on' + (err ? ' err' : '');
+  clearTimeout(t._h);
+  t._h = setTimeout(function(){ t.className = 'toast'; }, 2600);
+}
+function pad(n){ return (n<10?'0':'') + n; }
+
+// 本地时钟
+setInterval(function(){
+  var d = new Date();
+  var wk = '日一二三四五六'[d.getDay()];
+  var dt = $('clkdate');
+  if (dt) dt.textContent = d.getFullYear()+'年'+pad(d.getMonth()+1)+'月'+pad(d.getDate())+'日  星期'+wk;
+  $('clk').textContent = pad(d.getHours())+':'+pad(d.getMinutes())+':'+pad(d.getSeconds());
+  var cd = $('clkd');
+  if (cd) cd.textContent = lunarText(d);
+}, 500);
+
+function upList(v){
+  if (Object.prototype.toString.call(v) === '[object Array]') return v.filter(Boolean);
+  return String(v || '').split(/[,\s]+/).filter(Boolean);
+}
+
+function render(){
+  var s = st || {};
+  var on = s.server === '1' || s.server === 1;
+  var run = s.running === '1' || s.running === 1;
+  var ups = upList(s.upstream);
+  $('swServer').checked = on;
+  $('selIface').value = s.interface === 'all' ? 'all' : 'lan';
+  $('inUp').value = ups.join(', ');
+  $('selTz').value = s.timezone || 'CST-8';
+  if (s.interval && +s.interval > 0) { $('selIv').value = String(s.interval); }
+  var rt = $('runTxt');
+  rt.className = 'beat ' + (run ? 'ok' : 'idle');
+  var rtTxt = rt.querySelector('.txt');
+  if (rtTxt) rtTxt.textContent = run ? '正在服务' : '未运行';
+  $('sdot').className = 'dot ' + (run ? 'on' : 'off');
+  $('stxt').textContent = run
+    ? 'NTP 服务' + (on ? '开启' : '关闭') + ' · 上游 ' + ups.length + ' 个'
+    : 'NTP 服务未运行';
+}
+
+function load(){
+  return api('status').then(function(s){ st = s; render(); })
+    .catch(function(){ toast('读取状态失败', true); });
+}
+
+$('swServer').addEventListener('change', function(){
+  var on = this.checked;
+  api(on ? 'on' : 'off').then(function(r){
+    toast(on ? '已开启 NTP 服务' : '已关闭 NTP 服务');
+    return load();
+  }).catch(function(){ toast('操作失败', true); load(); });
+});
+
+
+$('selIface').addEventListener('change', function(){
+  var v = this.value;
+  api('iface', v).then(function(){ toast('监听接口已设为 ' + (v==='all'?'所有':'仅LAN')); return load(); })
+    .catch(function(){ toast('操作失败', true); load(); });
+});
+
+function saveUp(){
+  var v = ($('inUp').value || '').replace(/\s+/g,' ').split(/[,，\s]+/).filter(Boolean).join(',');
+  if (!v) { toast('请填写上游时间源', true); return; }
+  api('set', 'up=' + encodeURIComponent(v)).then(function(r){
+    toast(r.ok ? '上游时间源已保存' : (r.msg || '保存失败'), !r.ok);
+    return load();
+  }).catch(function(){ toast('保存失败', true); });
+}
+
+function saveTz(){
+  var v = $('selTz').value;
+  api('tz', v).then(function(r){
+    toast(r.ok ? '时区已设为 ' + v : (r.msg || '设置失败'), !r.ok);
+    return load();
+  }).catch(function(){ toast('设置失败', true); });
+}
+
+function saveIv(){
+  var v = $('selIv').value;
+  api('interval', 'v=' + v).then(function(r){
+    toast(r.ok ? '同步间隔已设为 ' + v + ' 秒' : (r.msg || '设置失败'), !r.ok);
+    return load();
+  }).catch(function(){ toast('设置失败', true); });
+}
+
+load();
+setInterval(load, 5000);
+</script>
+</body>
+</html>

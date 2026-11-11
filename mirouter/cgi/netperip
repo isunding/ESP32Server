@@ -1,0 +1,83 @@
+#!/bin/sh
+#
+
+SNAP=/tmp/nettraffic.snap
+SNAP_TS=/tmp/nettraffic.ts
+
+HDR() {
+  printf 'Content-Type: application/json; charset=utf-8\r\n'
+  printf 'Cache-Control: no-store\r\n\r\n'
+}
+
+[ "$(cat /proc/sys/net/netfilter/nf_conntrack_acct 2>/dev/null)" = "1" ] || \
+  echo 1 > /proc/sys/net/netfilter/nf_conntrack_acct 2>/dev/null
+
+summarize() {
+  awk '
+    /^ipv4/ {
+      s1=""; d1=""; b1=0; s2=""; d2=""; b2=0
+      n=0
+      for (i = 1; i <= NF; i++) {
+        if ($i ~ /^src=/) { if (n==0) s1=substr($i,5); else s2=substr($i,5) }
+        if ($i ~ /^dst=/) { if (n==0) d1=substr($i,5); else d2=substr($i,5) }
+        if ($i ~ /^bytes=/) {
+          if (n==0) { b1=substr($i,7); n=1 } else { b2=substr($i,7) }
+        }
+      }
+      if (b1 == 0 && b2 == 0) next
+
+      if (s1 ~ /^10\.0\.0\./) {
+        up[s1] += b1
+        down[s1] += b2
+        hosts[s1] = 1
+      }
+      if (s2 ~ /^10\.0\.0\./) {
+        up[s2] += b2
+        down[s2] += b1
+        hosts[s2] = 1
+      }
+    }
+    END {
+      for (h in hosts) printf "%s\t%d\t%d\n", h, up[h], down[h]
+    }
+  ' /proc/net/nf_conntrack 2>/dev/null
+}
+
+case "$(printf '%s' "$QUERY_STRING" | tr '&' '\n' | grep '^a=' | head -1 | cut -d= -f2-)" in
+sample)
+  summarize > "$SNAP.tmp" 2>/dev/null
+  mv -f "$SNAP.tmp" "$SNAP" 2>/dev/null
+  date +%s > "$SNAP_TS"
+  HDR
+  printf '{"ok":1,"ts":%s,"count":%s}\n' "$(cat "$SNAP_TS" 2>/dev/null)" "$(grep -c . "$SNAP" 2>/dev/null)"
+  ;;
+
+*)
+  HDR
+  summarize > /tmp/nt.cur 2>/dev/null
+
+  printf '{"ok":1,"devices":['
+  first=1
+
+  awk '
+    FILENAME ~ /dhcp.leases/ { name[$3] = $4; next }
+    FILENAME ~ /nt.cur/ { up[$1] = $2; down[$1] = $3; seen[$1] = 1; next }
+    END {
+      for (ip in seen) {
+        printf "%s\t%s\t%d\t%d\n", ip, (name[ip] == "" || name[ip] == "*" ? "-" : name[ip]), up[ip], down[ip]
+      }
+    }
+  ' /tmp/dhcp.leases /tmp/nt.cur 2>/dev/null | sort -t'	' -k4 -rn | while IFS='	' read -r ip nm up down; do
+    [ -z "$ip" ] && continue
+    [ "$ip" = "10.0.0.1" ] && continue
+    [ $first -eq 1 ] && first=0 || printf ','
+    online=0
+    awk -v t="$ip" '$1==t && $4!="00:00:00:00:00:00" {f=1} END{exit !f}' /proc/net/arp 2>/dev/null && online=1
+    printf '{"ip":"%s","name":"%s","up":%s,"down":%s,"online":%s}' \
+      "$ip" "${nm:--}" "${up:-0}" "${down:-0}" "$online"
+  done
+
+  printf ']}\n'
+  rm -f /tmp/nt.cur
+  ;;
+esac

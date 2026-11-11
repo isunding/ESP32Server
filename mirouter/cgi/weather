@@ -1,0 +1,146 @@
+#!/bin/sh
+#   ?sethost=&setkey=&setloc=&setname=&setlat=&setlon=
+
+CONF=/data/iptv/etc/weather.conf
+CACHE=/tmp/weather_cache.json
+CACHE_TS=/tmp/weather_cache.ts
+TTL=10800
+
+hdr() {
+  printf 'Content-Type: application/json; charset=utf-8\r\n'
+  printf 'Cache-Control: no-store\r\n\r\n'
+}
+gp() {
+  printf '%s' "$QUERY_STRING" | tr '&' '\n' | grep "^$1=" | head -1 | cut -d= -f2- \
+    | sed 's/+/ /g; s/%2C/,/g; s/%3A/:/g; s/%2E/./g; s/%2D/-/g; s/%5F/_/g'
+}
+
+W_HOST="your-api-host.qweatherapi.com"  # 和风天气 API 主机，按账号填写
+W_KEY=""
+W_LOC="101220110"
+W_NAME="示例地区"
+W_LAT="31.75"
+W_LON="117.30"
+[ -f "$CONF" ] && . "$CONF"
+
+# conf 被重写时可能丢经纬度，缺省兜底；否则 /airquality/v1/current// 会 404
+[ -n "$W_LAT" ] || W_LAT="31.75"
+[ -n "$W_LON" ] || W_LON="117.30"
+
+TOKEN_F=/data/iptv/etc/weather.token
+# 认证: 有 JWT token 用 token，否则回退旧 API Key
+auth_hdr() {
+  if [ -s "$TOKEN_F" ]; then
+    printf 'Authorization: Bearer %s' "$(tr -d '\r\n' < "$TOKEN_F")"
+  elif [ -n "$W_KEY" ]; then
+    printf 'X-QW-Api-Key: %s' "$W_KEY"
+  fi
+}
+# token 剩余秒数（负数=已过期）；解析不出返回空
+tok_left() {
+  [ -s "$TOKEN_F" ] || return 0
+  exp=$(tr -d '\r\n' < "$TOKEN_F" | cut -d. -f2 | tr '_-' '/+' \
+    | base64 -d 2>/dev/null | sed -n 's/.*"exp":\([0-9]*\).*/\1/p')
+  case "$exp" in ''|*[!0-9]*) return 0 ;; esac
+  echo $((exp - $(date +%s)))
+}
+fetch() {
+  curl -s -m 15 -H "$(auth_hdr)" -H "User-Agent: ra81-iptv" \
+    "https://$W_HOST$1" 2>/dev/null | gzip -d 2>/dev/null
+}
+
+# air / alert 接口偶发空响应，重试一次；失败才回落空值
+fetch2() {
+  r=$(fetch "$1")
+  [ -n "$r" ] || r=$(fetch "$1")
+  printf '%s' "$r"
+}
+
+case "$(gp a)" in
+config)
+  hdr
+  if [ -s "$TOKEN_F" ]; then AUTH=jwt; elif [ -n "$W_KEY" ]; then AUTH=key; else AUTH=none; fi
+  hask=false; [ "$AUTH" = none ] || hask=true
+  left=$(tok_left); [ -n "$left" ] || left=null
+  printf '{"ok":1,"host":"%s","loc":"%s","name":"%s","lat":"%s","lon":"%s","ttl":%s,"auth":"%s","has_key":%s,"tok_left":%s}\n' \
+    "$W_HOST" "$W_LOC" "$W_NAME" "$W_LAT" "$W_LON" "$TTL" "$AUTH" "$hask" "$left"
+  ;;
+
+flush)
+  rm -f "$CACHE" "$CACHE_TS" /tmp/weather_hist.json /tmp/weather_hist.ts
+  hdr; printf '{"ok":1,"msg":"cache cleared"}\n'
+  ;;
+
+sethost|setkey|setloc|setname|setlat|setlon)
+  nh=$(gp sethost); nk=$(gp setkey); nl=$(gp setloc); nn=$(gp setname)
+  nla=$(gp setlat); nlo=$(gp setlon)
+  [ -n "$nh" ] && W_HOST="$nh"
+  [ -n "$nk" ] && W_KEY="$nk"
+  [ -n "$nl" ] && W_LOC="$nl"
+  [ -n "$nn" ] && W_NAME="$nn"
+  [ -n "$nla" ] && W_LAT="$nla"
+  [ -n "$nlo" ] && W_LON="$nlo"
+  mkdir -p /data/iptv/etc
+  umask 077
+  {
+    printf 'W_HOST="%s"\n' "$W_HOST"
+    printf 'W_KEY="%s"\n' "$W_KEY"
+    printf 'W_LOC="%s"\n' "$W_LOC"
+    printf 'W_NAME="%s"\n' "$W_NAME"
+    printf 'W_LAT="%s"\n' "$W_LAT"
+    printf 'W_LON="%s"\n' "$W_LON"
+  } > "$CONF"
+  chmod 600 "$CONF"
+  rm -f "$CACHE" "$CACHE_TS"
+  hdr; printf '{"ok":1,"host":"%s","loc":"%s","name":"%s","lat":"%s","lon":"%s"}\n' \
+    "$W_HOST" "$W_LOC" "$W_NAME" "$W_LAT" "$W_LON"
+  ;;
+
+data|"")
+  NOW=$(date +%s)
+  if [ -f "$CACHE" ] && [ -f "$CACHE_TS" ]; then
+    OLD=$(cat "$CACHE_TS" 2>/dev/null)
+    case "$OLD" in ''|*[!0-9]*) OLD=0 ;; esac
+    if [ $((NOW - OLD)) -lt $TTL ] && [ -s "$CACHE" ]; then
+      hdr; cat "$CACHE"; exit 0
+    fi
+  fi
+  if [ ! -s "$TOKEN_F" ] && [ -z "$W_KEY" ]; then
+    hdr; printf '{"ok":0,"msg":"no credentials (jwt token or api key)"}\n'; exit 0
+  fi
+
+  N=$(fetch "/v7/weather/now?location=$W_LOC")
+  H=$(fetch "/v7/weather/24h?location=$W_LOC")
+  D=$(fetch "/v7/weather/7d?location=$W_LOC")
+  I=$(fetch "/v7/indices/1d?location=$W_LOC&type=1,2,3,4,5,6,8,9")
+  A=$(fetch2 "/airquality/v1/current/$W_LAT/$W_LON")
+  AH=$(fetch2 "/airquality/v1/hourly/$W_LAT/$W_LON")
+  AD=$(fetch2 "/airquality/v1/daily/$W_LAT/$W_LON")
+  W1=$(fetch2 "/weatheralert/v1/current/$W_LAT/$W_LON")
+  W7=$(fetch "/v7/warning/now?location=$W_LOC")
+  case "$W1" in
+    *'"alerts"'*) W="$W1" ;;
+    *) W="$W7" ;;
+  esac
+
+  [ -n "$N" ] || N='{"code":"-1"}'
+  [ -n "$H" ] || H='{"code":"-1","hourly":[]}'
+  [ -n "$D" ] || D='{"code":"-1","daily":[]}'
+  [ -n "$I" ] || I='{"code":"-1","daily":[]}'
+  [ -n "$W" ] || W='{"code":"-1","warning":[],"alerts":[]}'
+  [ -n "$A" ] || A='{"indexes":[],"pollutants":[]}'
+  [ -n "$AH" ] || AH='{"hours":[]}'
+  [ -n "$AD" ] || AD='{"days":[]}'
+
+  mkdir -p "$(dirname "$CACHE")"
+  {
+    printf '{"ok":1,"loc":"%s","name":"%s","ts":%s,"now":%s,"hourly":%s,"daily":%s,"indices":%s,"warning":%s,"air":%s,"airh":%s,"aird":%s}\n' \
+      "$W_LOC" "$W_NAME" "$NOW" "$N" "$H" "$D" "$I" "$W" "$A" "$AH" "$AD"
+  } > "$CACHE.tmp" && mv -f "$CACHE.tmp" "$CACHE"
+  echo "$NOW" > "$CACHE_TS"
+
+  hdr; cat "$CACHE"
+  ;;
+
+*) hdr; printf '{"ok":0,"msg":"unknown"}\n' ;;
+esac

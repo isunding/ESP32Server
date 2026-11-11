@@ -1,0 +1,104 @@
+#!/bin/sh
+# 内存清理 CGI
+#   ?a=analyze   内存构成分析 + 进程排行
+#   ?a=clean     一键清理
+hdr() {
+  printf 'Content-Type: application/json; charset=utf-8\r\n'
+  printf 'Cache-Control: no-store\r\n\r\n'
+}
+
+mem_field() {
+  awk -v k="$1" '$1 == k":" {print $2}' /proc/meminfo
+}
+
+case "$(printf '%s' "$QUERY_STRING" | tr '&' '\n' | grep '^a=' | head -1 | cut -d= -f2-)" in
+analyze)
+  hdr
+  mt=$(mem_field MemTotal)
+  mf=$(mem_field MemFree)
+  ma=$(mem_field MemAvailable)
+  mb=$(mem_field Buffers)
+  mc=$(mem_field Cached)
+  sl=$(mem_field Slab)
+  sr=$(mem_field SReclaimable)
+  su=$(mem_field SUnreclaim)
+  an=$(mem_field AnonPages)
+  sh=$(mem_field Shmem)
+  ks=$(mem_field KernelStack)
+  pt=$(mem_field PageTables)
+
+  ct=0; cmax=0
+  [ -r /proc/sys/net/netfilter/nf_conntrack_count ] && ct=$(cat /proc/sys/net/netfilter/nf_conntrack_count)
+  [ -r /proc/sys/net/netfilter/nf_conntrack_max ] && cmax=$(cat /proc/sys/net/netfilter/nf_conntrack_max)
+
+  nproc=$(ls -d /proc/[0-9]* 2>/dev/null | wc -l)
+
+  printf '{"ok":1,"total":%s,"free":%s,"avail":%s,"buffers":%s,"cached":%s,' \
+    "${mt:-0}" "${mf:-0}" "${ma:-0}" "${mb:-0}" "${mc:-0}"
+  printf '"slab":{"total":%s,"reclaim":%s,"unreclaim":%s},' \
+    "${sl:-0}" "${sr:-0}" "${su:-0}"
+  printf '"anon":%s,"shmem":%s,"kstack":%s,"pagetables":%s,' \
+    "${an:-0}" "${sh:-0}" "${ks:-0}" "${pt:-0}"
+  printf '"conntrack":{"count":%s,"max":%s},"procs":%s,' "${ct:-0}" "${cmax:-0}" "$nproc"
+
+  # 姹囨€诲埌涓存椂鏂囦欢 (kb pid name)
+  TOPF=/tmp/.memtop.$$
+  : > "$TOPF"
+  for p in /proc/[0-9]*; do
+    pid=${p#/proc/}
+    [ -r "$p/statm" ] || continue
+    set -- $(cat "$p/statm" 2>/dev/null)
+    rss=${2:-0}
+    [ "$rss" -lt 100 ] && continue
+    kb=$((rss * 4))
+    name=$(tr '\0' ' ' < "$p/cmdline" 2>/dev/null | cut -c1-46)
+    [ -z "$name" ] && name="[$(cat "$p/comm" 2>/dev/null)]"
+    printf '%s\t%s\t%s\n' "$kb" "$pid" "$name" >> "$TOPF"
+  done 2>/dev/null
+
+  printf '"top":['
+  sort -rn "$TOPF" 2>/dev/null | head -15 | awk -F'\t' -v OFS='' '
+    BEGIN { first = 1 }
+    {
+      kb = $1; pid = $2; nm = $3
+      gsub(/\\/, "\\\\", nm)
+      gsub(/"/, "\\\"", nm)
+      if (!first) printf ","
+      first = 0
+      printf "{\"pid\":%s,\"kb\":%s,\"name\":\"%s\"}", pid, kb, nm
+    }'
+  printf ']}\n'
+  rm -f "$TOPF"
+  ;;
+
+clean)
+  hdr
+  before_a=$(mem_field MemAvailable)
+  before_c=$(mem_field Cached)
+  before_b=$(mem_field Buffers)
+
+  sync 2>/dev/null
+  echo 3 > /proc/sys/vm/drop_caches 2>/dev/null
+  rc=$?
+
+  # 娓呯悊鍙洖鏀剁殑 slab
+  echo 2 > /proc/sys/vm/drop_caches 2>/dev/null
+
+  sleep 1
+  after_a=$(mem_field MemAvailable)
+  after_c=$(mem_field Cached)
+  after_b=$(mem_field Buffers)
+
+  gain=$(( ${after_a:-0} - ${before_a:-0} ))
+
+  printf '{"ok":%s,"before":{"avail":%s,"cached":%s,"buffers":%s},' \
+    "$([ $rc -eq 0 ] && echo 1 || echo 0)" "${before_a:-0}" "${before_c:-0}" "${before_b:-0}"
+  printf '"after":{"avail":%s,"cached":%s,"buffers":%s},"gain":%s}\n' \
+    "${after_a:-0}" "${after_c:-0}" "${after_b:-0}" "$gain"
+  ;;
+
+*)
+  hdr
+  printf '{"ok":0,"msg":"use a=analyze|clean"}\n'
+  ;;
+esac

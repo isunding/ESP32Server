@@ -1,3 +1,5 @@
-# 路由器端 CGI 必须保持 LF：CRLF 会让 `#!/bin/sh^M` 报 not found，
+# 路由器端 CGI 与脚本必须保持 LF：CRLF 会让 `#!/bin/sh^M` 报 not found，
 # 而从 Windows 检出时默认可能被转成 CRLF。
-router/cgi/* text eol=lf
+mirouter/cgi/* text eol=lf
+mirouter/iptv/*.sh text eol=lf
+mirouter/inject/*.js text eol=lf

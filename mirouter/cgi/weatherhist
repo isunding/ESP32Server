@@ -1,0 +1,74 @@
+#!/bin/sh
+# 历史天气代理: 逐日抓取 (busybox date 不支持 -d, 用 epoch 运算)
+CONF=/data/iptv/etc/weather.conf
+HCACHE=/tmp/weather_hist.json
+HCACHE_TS=/tmp/weather_hist.ts
+HTTL=43200
+
+hdr() { printf 'Content-Type: application/json; charset=utf-8\r\nCache-Control: no-store\r\n\r\n'; }
+getp() { printf '%s' "$QUERY_STRING" | tr '&' '\n' | grep "^$1=" | head -1 | cut -d= -f2-; }
+
+W_HOST="your-api-host.qweatherapi.com"  # 和风天气 API 主机，按账号填写; W_KEY=""; W_LOC="101220110"; W_NAME=""
+[ -f "$CONF" ] && . "$CONF"
+
+TOKEN_F=/data/iptv/etc/weather.token
+# 认证: 有 JWT token 用 token，否则回退旧 API Key
+auth_hdr() {
+  if [ -s "$TOKEN_F" ]; then
+    printf 'Authorization: Bearer %s' "$(tr -d '\r\n' < "$TOKEN_F")"
+  elif [ -n "$W_KEY" ]; then
+    printf 'X-QW-Api-Key: %s' "$W_KEY"
+  fi
+}
+
+fetch() {
+  curl -s -m 15 -H "$(auth_hdr)" -H "User-Agent: ra81-iptv" \
+    "https://$W_HOST$1" 2>/dev/null | gzip -d 2>/dev/null
+}
+
+# 用 busybox date -d @epoch 计算 n 天前的 YYYYMMDD
+daysago() {
+  E=$(( $(date +%s) - $1 * 86400 ))
+  busybox date -d "@$E" +%Y%m%d 2>/dev/null || date -d "@$E" +%Y%m%d 2>/dev/null
+}
+
+case "$(getp a)" in
+  history)
+    NOW=$(date +%s)
+    if [ -f "$HCACHE" ] && [ -s "$HCACHE" ]; then
+      OLD=$(cat "$HCACHE_TS" 2>/dev/null); case "$OLD" in ''|*[!0-9]*) OLD=0 ;; esac
+      if [ $((NOW - OLD)) -lt $HTTL ]; then hdr; cat "$HCACHE"; exit 0; fi
+    fi
+    [ -s "$TOKEN_F" ] || [ -n "$W_KEY" ] || { hdr; printf '{"ok":0,"msg":"尚未配置凭据（JWT token 或 API Key）"}\n'; exit 0; }
+
+    : > "$HCACHE.tmp"
+    printf '{"ok":1,"ts":%s,"days":[' "$NOW" >> "$HCACHE.tmp"
+    first=1
+    cnt=0
+    i=1
+    while [ $i -le 7 ]; do
+      D=$(daysago $i)
+      if [ -n "$D" ]; then
+        R=$(fetch "/v7/historical/weather?location=$W_LOC&date=$D")
+        case "$R" in
+          *'"code":"200"'*)
+            if [ $first -eq 1 ]; then first=0; else printf ',' >> "$HCACHE.tmp"; fi
+            printf '%s' "$R" >> "$HCACHE.tmp"
+            cnt=$((cnt + 1))
+            ;;
+        esac
+      fi
+      i=$((i + 1))
+    done
+    printf ']}\n' >> "$HCACHE.tmp"
+
+    if [ "$cnt" -eq 0 ]; then
+      rm -f "$HCACHE.tmp"
+      hdr; printf '{"ok":0,"msg":"历史数据获取失败（可能超出免费额度或日期不可用）"}\n'; exit 0
+    fi
+    mv -f "$HCACHE.tmp" "$HCACHE"
+    echo "$NOW" > "$HCACHE_TS"
+    hdr; cat "$HCACHE"
+    ;;
+  *) hdr; printf '{"ok":0,"msg":"use a=history"}\n' ;;
+esac

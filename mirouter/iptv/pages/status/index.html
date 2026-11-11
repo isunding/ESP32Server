@@ -1,0 +1,558 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>路由器状态 · 路由控制台</title>
+<style>
+:root{
+  --bg:#0d1117; --bg2:#161b22; --bg3:#21262d; --line:#30363d;
+  --fg:#e6edf3; --fg2:#8b949e; --acc:#ff6a00;
+  --ok:#3fb950; --warn:#d29922; --bad:#f85149; --info:#58a6ff;
+  --radius:14px;
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+body{margin:0;background:var(--bg);color:var(--fg);
+  font:14px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+  padding:18px 14px 40px}
+.wrap{max-width:780px;margin:0 auto}
+header{display:flex;align-items:center;gap:10px;margin-bottom:18px}
+h1{font-size:19px;margin:0;font-weight:600}
+header .sp{flex:1}
+.btn{background:var(--bg2);border:1px solid var(--line);color:var(--fg);
+  padding:7px 14px;border-radius:9px;font:inherit;font-size:13px;cursor:pointer;
+  text-decoration:none;display:inline-block}
+.btn:hover{border-color:var(--acc);color:var(--acc)}
+.btn.primary{background:var(--acc);border-color:var(--acc);color:#fff}
+.card{background:var(--bg2);border:1px solid var(--line);border-radius:var(--radius);
+  padding:16px 18px;margin-bottom:14px}
+.card h2{font-size:13px;margin:0 0 14px;color:var(--fg2);font-weight:600;letter-spacing:.5px}
+
+/* 仪表盘 */
+.gauges{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:14px}
+.gauge{text-align:center}
+.gauge svg{display:block;margin:0 auto}
+.gauge .lbl{font-size:12px;color:var(--fg2);margin-top:2px}
+.gauge .val{font-size:19px;font-weight:700;letter-spacing:-.5px}
+.gauge .sub{font-size:10.5px;color:var(--fg2);margin-top:1px}
+
+/* 数值网格 */
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:9px}
+.g{background:var(--bg3);border:1px solid var(--line);border-radius:10px;
+  padding:10px 12px;cursor:help}
+.g .k{font-size:10.5px;color:var(--fg2);letter-spacing:.3px}
+.g .v{font-size:15px;font-weight:600;margin-top:3px;font-variant-numeric:tabular-nums}
+.g .v small{font-size:10.5px;font-weight:400;color:var(--fg2);margin-left:2px}
+
+/* 条 */
+.bar{height:7px;background:var(--bg3);border-radius:4px;overflow:hidden;margin-top:10px}
+.bar i{display:block;height:100%;border-radius:4px;transition:width .4s}
+
+/* 表格 */
+table{width:100%;border-collapse:collapse;font-size:12.5px}
+th{text-align:left;color:var(--fg2);font-weight:500;font-size:11px;
+  padding:0 8px 8px;border-bottom:1px solid var(--line);position:sticky;top:0;
+  background:var(--bg2);letter-spacing:.3px}
+td{padding:8px;border-bottom:1px solid rgba(48,54,61,.5);font-variant-numeric:tabular-nums;
+  white-space:nowrap}
+td.wrap-ok{white-space:normal}
+th{white-space:nowrap}
+tr:last-child td{border-bottom:0}
+td.mono{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:11.5px;color:var(--fg2)}
+.on-dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--ok);
+  margin-right:6px;vertical-align:middle;box-shadow:0 0 0 3px rgba(63,185,80,.15)}
+.scroll{max-height:420px;overflow-x:hidden;overflow-y:auto}
+@media(max-width:520px){
+  #tableBox table th:nth-child(4), #tableBox table td:nth-child(4){display:none}
+}
+.tabs{display:flex;gap:6px;margin-bottom:12px}
+.tabs button{flex:1;background:var(--bg3);border:1px solid var(--line);color:var(--fg2);
+  border-radius:9px;padding:7px 0;font:inherit;font-size:12.5px;cursor:pointer}
+.tabs button.on{background:rgba(255,106,0,.13);border-color:var(--acc);color:var(--acc);font-weight:600}
+.hint{font-size:11.5px;color:var(--fg2);margin-top:10px;line-height:1.7}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <h1>📊 路由器状态</h1>
+  <span class="sp"></span>
+  <button class="btn" onclick="refresh(true)">刷新</button>
+  <a class="btn" href="/manage/">← 返回</a>
+</header>
+
+<div class="card">
+  <h2>资源占用</h2>
+  <div class="gauges">
+    <div class="gauge" id="gCpu">
+      <svg width="110" height="110" viewBox="0 0 110 110"></svg>
+      <div class="val" id="vCpu">—</div>
+      <div class="lbl">CPU</div>
+      <div class="sub" id="sCpu">—</div>
+    </div>
+    <div class="gauge" id="gMem">
+      <svg width="110" height="110" viewBox="0 0 110 110"></svg>
+      <div class="val" id="vMem">—</div>
+      <div class="lbl">内存</div>
+      <div class="sub" id="sMem">—</div>
+    </div>
+    <div class="gauge" id="gTemp">
+      <svg width="110" height="110" viewBox="0 0 110 110"></svg>
+      <div class="val" id="vTemp">—</div>
+      <div class="lbl">温度</div>
+      <div class="sub" id="sTemp">—</div>
+    </div>
+    <div class="gauge" id="gDisk">
+      <svg width="110" height="110" viewBox="0 0 110 110"></svg>
+      <div class="val" id="vDisk">—</div>
+      <div class="lbl">存储</div>
+      <div class="sub" id="sDisk">—</div>
+    </div>
+  </div>
+</div>
+
+<div class="card">
+  <h2 style="display:flex;align-items:center;gap:8px"><span>内存占用分析</span><span style="flex:1"></span><button class="btn" onclick="cleanMem()" id="btnClean" style="padding:5px 12px;font-size:12px">CLEAN 一键清理</button></h2>
+  <div class="grid" id="memGrid"></div>
+  <div class="bar" style="margin-top:12px"><i id="memBar" style="width:0"></i></div>
+  <div class="hint" id="memHint"></div>
+  <div class="scroll" id="procBox" style="margin-top:12px"><div class="hint">加载中…</div></div>
+</div>
+
+<div class="card">
+  <h2>运行信息</h2>
+  <div class="grid" id="infoGrid"></div>
+</div>
+
+<div class="card">
+  <h2>IP 地址分配</h2>
+  <div class="tabs">
+    <button class="on" onclick="switchTab('dhcp',this)">DHCP 租约</button>
+    <button onclick="switchTab('arp',this)">在线设备 (ARP)</button>
+  </div>
+  <div class="scroll" id="tableBox"><div class="hint">加载中…</div></div>
+  <div class="hint" id="tabHint"></div>
+</div>
+
+<div class="card">
+  <h2>网络流量</h2>
+  <div class="hint" style="margin:0 0 10px">
+    ↓ <span style="color:#58a6ff">接收</span> = 进入该网口（如 WAN→路由器）　
+    ↑ <span style="color:#3fb950">发送</span> = 离开该网口（如 路由器→WAN）<br>
+    悬停查看完整方向说明
+  </div>
+  <div class="grid" id="netGrid"></div>
+</div>
+
+<div class="card">
+  <h2>终端流量排行</h2>
+  <div class="tabs">
+    <button class="on" onclick="switchDevSort('total',this)">总流量</button>
+    <button onclick="switchDevSort('down',this)">下行</button>
+    <button onclick="switchDevSort('up',this)">上行</button>
+  </div>
+  <div class="scroll" id="devBox"><div class="hint">加载中…</div></div>
+  <div class="hint" id="devHint">基于 conntrack 连接计数统计（重启后归零）</div>
+</div>
+
+</div>
+
+<script>
+'use strict';
+let CUR_TAB = 'dhcp';
+let LAST_NET = null;
+let TIMER = null;
+
+function $(id){ return document.getElementById(id); }
+function fmtBytes(n){
+  n = +n || 0;
+  var abs = Math.abs(n);
+  if (abs < 1024) return Math.round(n) + ' B';
+  if (abs < 1048576) return (n/1024).toFixed(0) + ' KB';
+  if (abs < 1073741824) return (n/1048576).toFixed(1) + ' MB';
+  return (n/1073741824).toFixed(2) + ' GB';
+}
+// 速率: 固定 1 位小数, 单位自动进位
+function fmtRate(bps){
+  bps = Math.max(0, +bps || 0);
+  if (bps < 1024) return bps.toFixed(2) + ' B/s';
+  if (bps < 1048576) return (bps/1024).toFixed(2) + ' KB/s';
+  return (bps/1048576).toFixed(2) + ' MB/s';
+}
+function fmtSec(s){
+  s = +s || 0;
+  const d = Math.floor(s/86400), h = Math.floor(s%86400/3600), m = Math.floor(s%3600/60);
+  if (d > 0) return d + ' 天 ' + h + ' 小时';
+  if (h > 0) return h + ' 小时 ' + m + ' 分';
+  return m + ' 分';
+}
+function colorOf(pct, warn, bad){
+  if (pct >= bad) return '#f85149';
+  if (pct >= warn) return '#d29922';
+  return '#3fb950';
+}
+
+/* ---------- 环形仪表盘 ---------- */
+function gauge(svg, pct, color){
+  const R = 44, C = 2 * Math.PI * R;
+  const p = Math.max(0, Math.min(100, +pct || 0));
+  svg.innerHTML = '';
+  const ns = 'http://www.w3.org/2000/svg';
+  const bg = document.createElementNS(ns, 'circle');
+  bg.setAttribute('cx', 55); bg.setAttribute('cy', 55); bg.setAttribute('r', R);
+  bg.setAttribute('fill', 'none'); bg.setAttribute('stroke', '#21262d');
+  bg.setAttribute('stroke-width', 9);
+  svg.appendChild(bg);
+
+  const arc = document.createElementNS(ns, 'circle');
+  arc.setAttribute('cx', 55); arc.setAttribute('cy', 55); arc.setAttribute('r', R);
+  arc.setAttribute('fill', 'none'); arc.setAttribute('stroke', color);
+  arc.setAttribute('stroke-width', 9);
+  arc.setAttribute('stroke-linecap', 'round');
+  arc.setAttribute('stroke-dasharray', C);
+  arc.setAttribute('stroke-dashoffset', C);
+  arc.setAttribute('transform', 'rotate(-90 55 55)');
+  arc.style.transition = 'stroke-dashoffset .5s ease';
+  svg.appendChild(arc);
+  requestAnimationFrame(() => {
+    arc.setAttribute('stroke-dashoffset', C * (1 - p / 100));
+  });
+
+  const t = document.createElementNS(ns, 'text');
+  t.setAttribute('x', 55); t.setAttribute('y', 61);
+  t.setAttribute('text-anchor', 'middle');
+  t.setAttribute('fill', color);
+  t.setAttribute('font-size', '17');
+  t.setAttribute('font-weight', '700');
+  t.textContent = Math.round(p) + '%';
+  svg.appendChild(t);
+}
+
+/* ---------- 渲染统计 ---------- */
+function renderStat(d){
+  const cpu = d.cpu || {};
+  const mem = d.mem || {};
+  const up = d.uptime || {};
+  const disk = d.disk || {};
+
+  gauge($('gCpu').querySelector('svg'), cpu.pct, colorOf(cpu.pct, 70, 90));
+  $('vCpu').textContent = (cpu.pct != null ? (+cpu.pct).toFixed(1) : '—') + '%';
+  $('sCpu').textContent = (cpu.cores || '?') + ' 核 · 负载 ' +
+    ((d.load && d.load[0]) || '—');
+
+  gauge($('gMem').querySelector('svg'), mem.pct, colorOf(mem.pct, 80, 92));
+  $('vMem').textContent = (mem.pct != null ? (+mem.pct).toFixed(1) : '—') + '%';
+  $('sMem').textContent = fmtBytes((mem.used||0)*1024) + ' / ' + fmtBytes((mem.total||0)*1024);
+
+  const temp = +d.temp || 0;
+  const tpct = temp ? Math.min(100, temp / 100 * 100) : 0;
+  gauge($('gTemp').querySelector('svg'), tpct, temp >= 80 ? '#f85149' : (temp >= 70 ? '#d29922' : '#3fb950'));
+  $('vTemp').textContent = temp ? temp + '°C' : '—';
+  $('sTemp').textContent = temp >= 80 ? '偏高' : (temp >= 70 ? '较热' : '正常');
+
+  const dpct = disk.total ? (disk.used / disk.total * 100) : 0;
+  gauge($('gDisk').querySelector('svg'), dpct, colorOf(dpct, 80, 92));
+  $('vDisk').textContent = dpct.toFixed(1) + '%';
+  $('sDisk').textContent = fmtBytes((disk.used||0)*1024) + ' / ' + fmtBytes((disk.total||0)*1024);
+
+  const L = d.load || [0,0,0];
+  $('infoGrid').innerHTML = [
+    ['运行时长', up.d > 0 ? up.d + ' 天 ' + up.h + ' 时' : up.h + ' 时 ' + up.m + ' 分'],
+    ['负载 (1/5/15)', L[0] + ' / ' + L[1] + ' / ' + L[2]],
+    ['内存可用', fmtBytes((mem.avail||0)*1024)],
+    ['缓存/缓冲', fmtBytes((mem.cache||0)*1024)],
+    ['空闲内存', fmtBytes((mem.free||0)*1024)],
+    ['存储剩余', fmtBytes((disk.avail||0)*1024)]
+  ].map(x => '<div class="g"><div class="k">' + x[0] + '</div><div class="v">' + x[1] + '</div></div>').join('');
+
+  renderNet(d.net || {});
+}
+
+/* ---------- 网络流量（按两次采样算速率） ---------- */
+// 网口名称 + 方向语义
+//   rx = 进入本接口（对本机而言是"收"）
+//   tx = 离开本接口（对本机而言是"发"）
+const NET_NAME = {
+  'eth0':    { n:'WAN',      inDir:'WAN → 路由器',   outDir:'路由器 → WAN',   d:'对外网口' },
+  'eth1':    { n:'LAN',      inDir:'LAN → 路由器',   outDir:'路由器 → LAN',   d:'对内网口' },
+  'eth1.43': { n:'IPTV',     inDir:'组播 → 路由器', outDir:'路由器 → 组播', d:'IPTV VLAN 43' },
+  'wl0':     { n:'WiFi 5G',  inDir:'WiFi → 路由器',   outDir:'路由器 → WiFi',   d:'5GHz 无线' },
+  'wl1':     { n:'WiFi 2.4G',inDir:'WiFi → 路由器',   outDir:'路由器 → WiFi',   d:'2.4GHz 无线' },
+  'br-lan':  { n:'LAN 桥', inDir:'LAN → 路由器',   outDir:'路由器 → LAN',   d:'内网桥' }
+};
+
+function netMeta(k){
+  return NET_NAME[k] || { n:k, inDir:'进入', outDir:'离开', d:k };
+}
+
+function renderNet(net){
+  const now = Date.now();
+  let html = '';
+  const names = Object.keys(net);
+  if (!names.length) { $('netGrid').innerHTML = '<div class="hint">无数据</div>'; return; }
+
+  names.forEach(function(k){
+    const v = net[k] || {};
+    const m = netMeta(k);
+    let rate = '';
+    let tip = m.n + '（' + m.d + '）\n' +
+              '收入累计: ' + fmtBytes(v.rx) + '  (' + m.inDir + ')\n' +
+              '发出累计: ' + fmtBytes(v.tx) + '  (' + m.outDir + ')';
+
+    if (LAST_NET && LAST_NET.t && LAST_NET.d[k]) {
+      const dt = (now - LAST_NET.t) / 1000;
+      if (dt > 0.5) {
+        const drx = (v.rx - LAST_NET.d[k].rx) / dt;
+        const dtx = (v.tx - LAST_NET.d[k].tx) / dt;
+        rate = '<div class="k" style="margin-top:4px;white-space:nowrap;font-size:10px;color:' +
+               (drx + dtx > 1048576 ? 'var(--warn)' : 'var(--fg2)') + '">' +
+               '↓' + fmtRate(drx) + ' ↑' + fmtRate(dtx) + '</div>';
+        tip += '\n实时收入: ' + fmtRate(drx) + '  (' + m.inDir + ')';
+        tip += '\n实时发出: ' + fmtRate(dtx) + '  (' + m.outDir + ')';
+      }
+    }
+
+    html += '<div class="g" title="' + esc(tip) + '">' +
+      '<div class="k">' + esc(m.n) + '</div>' +
+      '<div class="v" style="color:#58a6ff">↓ ' + fmtBytes(v.rx) + '</div>' +
+      '<div class="k" style="font-size:10.5px;color:#3fb950">↑ ' + fmtBytes(v.tx) + '</div>' +
+      '<div class="k" style="font-size:9.5px;opacity:.7;margin-top:3px;line-height:1.5">' +
+        '<span style="color:#58a6ff">↓</span> ' + esc(m.inDir) + '<br>' +
+        '<span style="color:#3fb950">↑</span> ' + esc(m.outDir) +
+      '</div>' +
+      rate + '</div>';
+  });
+  $('netGrid').innerHTML = html;
+  LAST_NET = { t: now, d: JSON.parse(JSON.stringify(net)) };
+}
+
+/* ---------- IP 分配表 ---------- */
+function switchTab(t, btn){
+  CUR_TAB = t;
+  document.querySelectorAll('.tabs button').forEach(b => b.classList.remove('on'));
+  if (btn) btn.classList.add('on');
+  loadTab();
+}
+
+async function loadTab(){
+  const box = $('tableBox');
+  try {
+    const r = await fetch('/cgi-bin/sysstat?a=' + CUR_TAB, {cache:'no-store'});
+    const d = await r.json();
+    if (CUR_TAB === 'dhcp') {
+      const ls = (d.leases || []).slice().sort((a,b) => a.ip.localeCompare(b.ip, undefined, {numeric:true}));
+      box.innerHTML = '<table><thead><tr>' +
+        '<th style="width:14px"></th><th>主机名</th><th>IP</th><th>MAC</th><th>剩余</th>' +
+        '</tr></thead><tbody>' + ls.map(function(x){
+          const left = +x.left || 0;
+          const t = left > 43200 ? Math.round(left/3600) + 'h' : Math.round(left/60) + 'm';
+          const nm = (x.name === '*' || !x.name) ? '—' : x.name;
+          return '<tr>' +
+            '<td><span class="on-dot"></span></td>' +
+            '<td style="max-width:130px;overflow:hidden;text-overflow:ellipsis">' + esc(nm) + '</td>' +
+            '<td class="mono" style="color:var(--fg)">' + esc(x.ip) + '</td>' +
+            '<td class="mono">' + esc(x.mac) + '</td>' +
+            '<td class="mono">' + t + '</td></tr>';
+        }).join('') + '</tbody></table>';
+      $('tabHint').textContent = '共 ' + ls.length + ' 条 DHCP 租约';
+    } else {
+      const as = (d.arp || []).slice().sort((a,b) => a.ip.localeCompare(b.ip, undefined, {numeric:true}));
+      box.innerHTML = '<table><thead><tr>' +
+        '<th style="width:14px"></th><th>IP 地址</th><th>MAC</th><th>接口</th>' +
+        '</tr></thead><tbody>' + as.map(function(x){
+          return '<tr>' +
+            '<td><span class="on-dot"></span></td>' +
+            '<td class="mono" style="color:var(--fg)">' + esc(x.ip) + '</td>' +
+            '<td class="mono">' + esc(x.mac) + '</td>' +
+            '<td class="mono">' + esc(x.dev) + '</td></tr>';
+        }).join('') + '</tbody></table>';
+      $('tabHint').textContent = '共 ' + as.length + ' 台在线设备（ARP 表）';
+    }
+  } catch (e) {
+    box.innerHTML = '<div class="hint" style="color:var(--bad)">读取失败: ' + esc(e.message) + '</div>';
+  }
+}
+
+function esc(s){
+  return String(s == null ? '' : s)
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+/* ---------- 内存分析与清理 ---------- */
+function kb2mb(kb){ return (kb / 1024).toFixed(1) + ' MB'; }
+
+async function loadMem(){
+  try {
+    const r = await fetch('/cgi-bin/memctl?a=analyze', {cache:'no-store'});
+    const d = await r.json();
+    if (!d.ok) return;
+
+    const total = d.total || 1;
+    const slabU = (d.slab && d.slab.unreclaim) || 0;
+    const slabR = (d.slab && d.slab.reclaim) || 0;
+    const anon  = d.anon || 0;
+    const cache = d.cached || 0;
+    const buf   = d.buffers || 0;
+    const shm   = d.shmem || 0;
+    const free  = d.free || 0;
+
+    const cells = [
+      ['\u5185\u6838 Slab\uff08\u4e0d\u53ef\u56de\u6536\uff09', kb2mb(slabU), '#f85149',
+        '\u5360 ' + (slabU/total*100).toFixed(1) + '% \u00b7 \u9a71\u52a8/\u8fde\u63a5\u8ddf\u8e2a\u8868\u5360\u7528\uff0c\u65e0\u6cd5\u91ca\u653e'],
+      ['\u5e94\u7528\u533f\u540d\u9875', kb2mb(anon), '#58a6ff',
+        '\u6240\u6709\u8fdb\u7a0b\u5b9e\u9645\u5185\u5b58\u603b\u548c'],
+      ['\u7f13\u5b58 Cached', kb2mb(cache), '#3fb950', '\u53ef\u56de\u6536\uff0c\u6e05\u7406\u540e\u91ca\u653e'],
+      ['\u7f13\u51b2 Buffers', kb2mb(buf), '#3fb950', '\u53ef\u56de\u6536'],
+      ['Slab\uff08\u53ef\u56de\u6536\uff09', kb2mb(slabR), '#d29922', '\u6e05\u7406\u540e\u90e8\u5206\u91ca\u653e'],
+      ['\u5171\u4eab\u5185\u5b58', kb2mb(shm), '#8b949e', 'tmpfs / \u5171\u4eab\u9875']
+    ];
+    let h = '';
+    for (let i = 0; i < cells.length; i++) {
+      const x = cells[i];
+      h += '<div class="g"><div class="k">' + x[0] + '</div>' +
+        '<div class="v" style="color:' + x[2] + '">' + x[1] + '</div>' +
+        '<div class="k" style="font-size:9.5px;opacity:.7;margin-top:3px;line-height:1.4">' +
+        x[3] + '</div></div>';
+    }
+    $('memGrid').innerHTML = h;
+
+    const usedPct = (1 - free / total) * 100;
+    $('memBar').style.width = usedPct + '%';
+    $('memBar').style.background = colorOf(usedPct, 80, 92);
+
+    const ct = d.conntrack || {};
+    $('memHint').innerHTML =
+      '\u603b\u8ba1 ' + kb2mb(total) + ' \u00b7 \u7a7a\u95f2 ' + kb2mb(free) +
+      ' \u00b7 \u8fdb\u7a0b ' + d.procs + ' \u4e2a<br>' +
+      'conntrack \u8fde\u63a5\u8868 ' + (ct.count||0) + ' / ' + (ct.max||0) +
+      '<br>\u5185\u6838 Slab \u662f\u56fa\u5b9a\u5360\u7528\u7684\u4e3b\u56e0\uff08' +
+      (slabU/total*100).toFixed(0) + '%\uff09\uff0c\u4e00\u952e\u6e05\u7406\u53ea\u80fd\u91ca\u653e\u7f13\u5b58\u90e8\u5206';
+
+    const tops = (d.top || []).slice(0, 12);
+    if (tops.length) {
+      let ph = '<table style="font-size:12px"><thead><tr>' +
+        '<th>\u8fdb\u7a0b</th><th>PID</th><th style="text-align:right">\u5360\u7528</th>' +
+        '</tr></thead><tbody>';
+      for (let i = 0; i < tops.length; i++) {
+        const t = tops[i];
+        ph += '<tr><td style="max-width:180px;overflow:hidden;text-overflow:ellipsis">' +
+          esc(t.name) + '</td><td class="mono">' + t.pid + '</td>' +
+          '<td class="mono" style="text-align:right;color:#58a6ff">' + kb2mb(t.kb) + '</td></tr>';
+      }
+      $('procBox').innerHTML = ph + '</tbody></table>';
+    }
+  } catch (e) {}
+}
+
+async function cleanMem(){
+  const btn = $('btnClean');
+  btn.disabled = true;
+  btn.textContent = '\u6e05\u7406\u4e2d\u2026';
+  try {
+    const r = await fetch('/cgi-bin/memctl?a=clean', {cache:'no-store'});
+    const d = await r.json();
+    if (d.ok) {
+      const gain = (d.gain / 1024).toFixed(1);
+      btn.textContent = '\u91ca\u653e ' + gain + ' MB';
+      setTimeout(function(){ btn.textContent = 'CLEAN \u4e00\u952e\u6e05\u7406'; btn.disabled = false; }, 3000);
+      await loadMem();
+      refresh(false);
+    } else {
+      btn.textContent = '\u6e05\u7406\u5931\u8d25';
+      setTimeout(function(){ btn.textContent = 'CLEAN \u4e00\u952e\u6e05\u7406'; btn.disabled = false; }, 2000);
+    }
+  } catch (e) {
+    btn.textContent = '\u6e05\u7406\u5931\u8d25';
+    setTimeout(function(){ btn.textContent = 'CLEAN \u4e00\u952e\u6e05\u7406'; btn.disabled = false; }, 2000);
+  }
+}
+
+/* ---------- 终端流量排行 ---------- */
+var DEV_SORT = 'total';
+var DEV_LAST = null;
+
+function switchDevSort(s, btn){
+  DEV_SORT = s;
+  document.querySelectorAll('#devBox').length;
+  var tabs = document.querySelectorAll('.card:last-child .tabs button');
+  tabs.forEach(function(b){ b.classList.remove('on'); });
+  if (btn) btn.classList.add('on');
+  if (DEV_LAST) renderDevices(DEV_LAST);
+}
+
+function renderDevices(list){
+  var box = $('devBox');
+  var arr = (list || []).slice();
+  arr.sort(function(a, b){
+    if (DEV_SORT === 'up') return (b.up||0) - (a.up||0);
+    if (DEV_SORT === 'down') return (b.down||0) - (a.down||0);
+    return ((b.up||0)+(b.down||0)) - ((a.up||0)+(a.down||0));
+  });
+  arr = arr.slice(0, 20);
+
+  if (!arr.length) {
+    box.innerHTML = '<div class="hint">暂无流量数据</div>';
+    return;
+  }
+
+  var maxTotal = 1;
+  arr.forEach(function(x){ maxTotal = Math.max(maxTotal, (x.up||0)+(x.down||0)); });
+
+  box.innerHTML = '<table style="font-size:12px"><thead><tr>' +
+    '<th style="width:12px"></th><th>设备</th><th>IP</th>' +
+    '<th style="text-align:right">↓下行</th><th style="text-align:right">↑上行</th>' +
+    '</tr></thead><tbody>' + arr.map(function(x){
+      var tot = (x.up||0) + (x.down||0);
+      var pct = Math.round(tot / maxTotal * 100);
+      var barCol = pct > 80 ? '#f85149' : (pct > 50 ? '#d29922' : '#58a6ff');
+      return '<tr>' +
+        '<td>' + (x.online ? '<span class="on-dot"></span>' : '<span class="on-dot" style="background:#484f58;box-shadow:none"></span>') + '</td>' +
+        '<td style="max-width:88px;overflow:hidden;text-overflow:ellipsis">' + esc(x.name) +
+          '<div class="bar" style="height:3px;margin-top:4px"><i style="width:' + pct + '%;background:' + barCol + '"></i></div></td>' +
+        '<td class="mono" style="color:var(--fg)">' + esc(x.ip) + '</td>' +
+        '<td class="mono" style="text-align:right;color:#58a6ff">' + fmtBytes(x.down||0) + '</td>' +
+        '<td class="mono" style="text-align:right;color:#3fb950">' + fmtBytes(x.up||0) + '</td>' +
+        '</tr>';
+    }).join('') + '</tbody></table>';
+
+  var online = arr.filter(function(x){ return x.online; }).length;
+  $('devHint').textContent = '在线 ' + online + ' 台 · 共 ' + arr.length +
+    ' 台有流量 · 按' + (DEV_SORT === 'up' ? '上行' : (DEV_SORT === 'down' ? '下行' : '总流量')) + '排序';
+}
+
+async function loadDevices(){
+  try {
+    var r = await fetch('/cgi-bin/netperip?a=devices', {cache:'no-store'});
+    var d = await r.json();
+    DEV_LAST = d.devices || [];
+    renderDevices(DEV_LAST);
+  } catch (e) {
+    $('devBox').innerHTML = '<div class="hint" style="color:var(--bad)">读取失败</div>';
+  }
+}
+
+/* ---------- 刷新 ---------- */
+async function refresh(manual){
+  try {
+    const r = await fetch('/cgi-bin/sysstat?a=stat', {cache:'no-store'});
+    const d = await r.json();
+    if (!d.ok) throw new Error('接口返回异常');
+    renderStat(d);
+    if (manual) await loadTab();
+  } catch (e) {
+    if (manual) alert('读取状态失败: ' + e.message);
+  }
+}
+
+refresh(true);
+loadTab();
+loadDevices();
+loadMem();
+setInterval(loadDevices, 5000);
+setInterval(loadMem, 5000);
+TIMER = setInterval(() => refresh(false), 3000);
+setInterval(() => { if (CUR_TAB === 'arp') loadTab(); }, 15000);
+</script>
+</body>
+</html>

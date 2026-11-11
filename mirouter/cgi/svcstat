@@ -1,0 +1,25 @@
+#!/bin/sh
+# 服务状态代理: 绕过浏览器跨域限制 (页面在 80 端口, 探测各后端端口)
+hdr() { printf 'Content-Type: application/json; charset=utf-8\r\nCache-Control: no-store\r\n\r\n'; }
+base=$(printf '%s' "$QUERY_STRING" | tr '&' '\n' | grep '^port=' | head -1 | cut -d= -f2-)
+case "$base" in
+  ''|*[!0-9]*) hdr; printf '{"ok":0,"msg":"bad port"}\n'; exit 0 ;;
+esac
+
+code=$(curl -s -o /dev/null -m 4 -w '%{http_code}' "http://127.0.0.1:$base/status" 2>/dev/null)
+body=$(curl -s -m 4 "http://127.0.0.1:$base/status" 2>/dev/null | head -c 200)
+
+# 判断服务类型
+if printf '%s' "$body" | grep -qi 'udpxy'; then
+  svc=udpxy
+elif printf '%s' "$body" | grep -qi 'rtp2httpd'; then
+  svc=rtp2httpd
+elif [ "$code" = "200" ]; then
+  svc=unknown
+else
+  svc=none
+fi
+
+hdr
+printf '{"ok":%s,"port":%s,"service":"%s","code":"%s"}\n' \
+  "$([ "$code" = "200" ] && echo 1 || echo 0)" "$base" "$svc" "$code"

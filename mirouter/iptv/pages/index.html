@@ -1,0 +1,376 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>路由控制台</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📺</text></svg>">
+<style>
+:root{
+  --bg:#0f1216; --bg2:#161b22; --bg3:#1c232c; --line:#283141;
+  --fg:#e6edf3; --fg2:#8b98a9; --accent:#3b82f6; --accent2:#2563eb;
+  --ok:#22c55e; --bad:#ef4444; --radius:14px;
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;padding:0;min-height:100%}
+body{
+  background:radial-gradient(1200px 600px at 50% -10%, #1b2430 0%, var(--bg) 60%);
+  color:var(--fg);min-height:100vh;
+  font:15px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+  display:flex;flex-direction:column;align-items:center;
+  padding:32px 18px 40px;
+}
+header{text-align:center;margin-bottom:26px}
+h1{margin:0 0 6px;font-size:24px;font-weight:600;letter-spacing:.5px}
+.sub{color:var(--fg2);font-size:13.5px}
+.badge{
+  display:inline-flex;align-items:center;gap:7px;margin-top:12px;
+  background:var(--bg3);border:1px solid var(--line);border-radius:999px;
+  padding:5px 14px;font-size:12.5px;color:var(--fg2);
+}
+.dot{width:7px;height:7px;border-radius:50%;background:var(--fg2)}
+.dot.on{background:var(--ok);box-shadow:0 0 8px var(--ok)}
+.dot.err{background:var(--bad)}
+.grid{
+  display:grid;gap:14px;width:100%;max-width:720px;
+  grid-template-columns:repeat(auto-fit,minmax(240px,1fr));
+}
+.card{
+  display:flex;align-items:center;gap:14px;text-decoration:none;color:inherit;
+  background:linear-gradient(160deg,var(--bg2),var(--bg3));
+  border:1px solid var(--line);border-radius:var(--radius);
+  padding:18px 18px;transition:.15s;position:relative;overflow:hidden;
+}
+.card:hover{border-color:var(--accent);transform:translateY(-2px);
+  box-shadow:0 10px 26px rgba(0,0,0,.45)}
+.card:active{transform:translateY(0)}
+.card .ico{
+  width:46px;height:46px;flex:0 0 46px;border-radius:12px;
+  display:flex;align-items:center;justify-content:center;font-size:23px;
+  background:var(--bg);border:1px solid var(--line);
+}
+.card .txt{min-width:0}
+.card b{display:block;font-size:15.5px;font-weight:600;margin-bottom:2px}
+.card span{display:block;color:var(--fg2);font-size:12.5px;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.card .go{position:absolute;right:14px;color:var(--fg2);font-size:18px;opacity:.5}
+.card:hover .go{color:var(--accent);opacity:1}
+.card.off{opacity:.45;pointer-events:none}
+
+section{width:100%;max-width:720px;margin-top:30px}
+h2{font-size:13px;font-weight:600;color:var(--fg2);letter-spacing:1px;
+  margin:0 0 10px;text-transform:uppercase}
+.links{display:flex;flex-direction:column;gap:8px}
+.link{
+  display:flex;align-items:center;gap:10px;justify-content:space-between;
+  background:var(--bg2);border:1px solid var(--line);border-radius:10px;
+  padding:11px 14px;font-size:13px;
+}
+.link .u{font-family:ui-monospace,Menlo,Consolas,monospace;color:var(--fg2);
+  font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+.link a{color:var(--accent);text-decoration:none;white-space:nowrap;font-size:12.5px}
+.link a:hover{text-decoration:underline}
+.link button{
+  background:var(--bg3);border:1px solid var(--line);color:var(--fg2);
+  border-radius:7px;padding:4px 10px;font-size:12px;cursor:pointer;white-space:nowrap;
+}
+.link button:hover{color:var(--fg);border-color:var(--accent)}
+footer{margin-top:34px;color:var(--fg2);font-size:12px;text-align:center;line-height:1.9}
+footer code{background:var(--bg3);border:1px solid var(--line);border-radius:5px;
+  padding:1px 6px;font-size:11.5px}
+footer .copyright{margin-top:12px;padding-top:12px;border-top:1px solid var(--line);
+  font-size:11.5px;letter-spacing:.2px}
+footer .copyright a{color:var(--acc);text-decoration:none}
+footer .copyright a:hover{text-decoration:underline}
+
+/* 服务状态 */
+.status{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px}
+.st{display:flex;align-items:center;gap:7px;background:var(--bg3);border:1px solid var(--line);
+  border-radius:10px;padding:9px 11px;font-size:12.5px}
+.st b{font-weight:600;color:var(--fg)}
+.st i{font-style:normal;color:var(--fg2);font-size:11.5px}
+.st em{margin-left:auto;font-style:normal;font-size:11.5px;color:var(--fg2)}
+.st-dot{width:8px;height:8px;border-radius:50%;background:var(--fg2);flex:0 0 auto}
+.st.ok .st-dot{background:#3fb950;box-shadow:0 0 0 3px rgba(63,185,80,.18)}
+.st.ok em{color:#3fb950}
+.st.err .st-dot{background:#f85149;box-shadow:0 0 0 3px rgba(248,81,73,.18)}
+.st.err em{color:#f85149}
+.toast{position:fixed;left:50%;bottom:30px;transform:translateX(-50%) translateY(16px);
+  background:#1f2937;border:1px solid var(--line);padding:9px 18px;border-radius:9px;
+  opacity:0;transition:.25s;pointer-events:none;font-size:13px}
+.toast.on{opacity:1;transform:translateX(-50%) translateY(0)}
+@media(max-width:520px){
+  body{padding:22px 14px 30px}
+  h1{font-size:20px}
+  .grid{grid-template-columns:1fr}
+}
+</style>
+</head>
+<body>
+
+<header>
+  <h1>🛠 路由控制台</h1>
+  <div class="sub">Redmi AX3000 · <span id="host">10.0.0.1</span></div>
+  <div class="badge"><span class="dot" id="dot"></span><span id="stat">正在读取状态…</span></div>
+</header>
+
+<div class="grid">
+  <a class="card" href="/manage/status/">
+    <div class="ico">📈</div>
+    <div class="txt"><b>路由器状态</b><span id="sysCard">CPU / 内存 / 温度 · IP 分配</span></div>
+    <div class="go">›</div>
+  </a>
+
+  <a class="card" href="/manage/channel/">
+    <div class="ico">🎛️</div>
+    <div class="txt"><b>频道管理</b><span>浏览 / 排序 / 导入导出 m3u</span></div>
+    <div class="go">›</div>
+  </a>
+
+  <a class="card" id="lnkPlayer" href="#" target="_blank" rel="noopener">
+    <div class="ico">▶️</div>
+    <div class="txt"><b>在线播放</b><span>网页里直接看电视（rtp2httpd 5140）</span></div>
+    <div class="go">›</div>
+  </a>
+
+  <a class="card" id="lnkStatus" href="#" target="_blank" rel="noopener">
+    <div class="ico">📊</div>
+    <div class="txt"><b>转发状态</b><span>rtp2httpd 实时客户端 / 带宽 / 日志</span></div>
+    <div class="go">›</div>
+  </a>
+
+  <a class="card" id="lnkWeather" href="#" target="_blank" rel="noopener">
+    <div class="ico">🌤</div>
+    <div class="txt"><b>天气</b><span id="weatherCard">合肥市包河区 · 加载中…</span></div>
+    <div class="go">›</div>
+  </a>
+
+  <a class="card" id="lnkTime" href="#" target="_blank" rel="noopener">
+    <div class="ico">🕒</div>
+    <div class="txt"><b>时间服务</b><span id="timeCard">NTP 服务器 10.0.0.1:123</span></div>
+    <div class="go">›</div>
+  </a>
+
+  <a class="card" id="lnkLuci" href="#" target="_blank" rel="noopener">
+    <div class="ico">⚙️</div>
+    <div class="txt"><b>路由器后台</b><span>原厂管理界面（80）</span></div>
+    <div class="go">›</div>
+  </a>
+</div>
+
+<section>
+  <h2>订阅地址</h2>
+  <div class="links">
+    <div class="link"><span class="u" id="u1"></span>
+      <span><button onclick="cp('u1')">复制</button> <a id="a1" href="#" target="_blank">打开</a></span></div>
+    <div class="link"><span class="u" id="u2"></span>
+      <span><button onclick="cp('u2')">复制</button> <a id="a2" href="#" target="_blank">打开</a></span></div>
+    <div class="link"><span class="u" id="u3"></span>
+      <span><button onclick="cp('u3')">复制</button> <a id="a3" href="#" target="_blank">打开</a></span></div>
+    <div class="link"><span class="u" id="u4"></span>
+      <span><button onclick="cp('u4')">复制</button> <a id="a4" href="#" target="_blank">打开</a></span></div>
+  </div>
+</section>
+
+<section>
+  <h2>服务状态</h2>
+  <div class="status" id="statusBox">
+    <div class="st" data-k="udpxy"><span class="st-dot"></span><b>udpxy</b><i>:12123</i><em>检测中…</em></div>
+    <div class="st" data-k="r2h"><span class="st-dot"></span><b>rtp2httpd</b><i>:5140</i><em>检测中…</em></div>
+    <div class="st" data-k="ntp"><span class="st-dot"></span><b>NTP</b><i>:123</i><em>检测中…</em></div>
+    <div class="st" data-k="web"><span class="st-dot"></span><b>Web</b><i>:80/8088</i><em>检测中…</em></div>
+    <div class="st" data-k="channel"><span class="st-dot"></span><b>频道库</b><i>187 条</i><em>检测中…</em></div>
+    <div class="st" data-k="weather"><span class="st-dot"></span><b>天气</b><i>包河区</i><em>检测中…</em></div>
+  </div>
+</section>
+
+<footer>
+  管理界面 <code>/manage/channel/</code> · 播放器/状态 <code>:5140</code> · udpxy <code>:12123</code> · NTP <code>10.0.0.1:123</code> · 后台 <code>/</code>
+  <div class="copyright">
+    Copyright © 2026 <a href="https://www.isunding.com/" target="_blank" rel="noopener">Jimmy Xie</a>. All Rights Reserved.
+  </div>
+</footer>
+
+<div class="toast" id="toast"></div>
+
+<script>
+'use strict';
+var H = location.hostname || '10.0.0.1';
+var ORIGIN = location.protocol + '//' + location.host;
+document.getElementById('host').textContent = H;
+
+// X4C 双引擎: rtp2httpd(5140, 网页播放器/EPG/状态) + udpxy(12123, 转单播)
+var R2H   = location.protocol + '//' + H + ':5140';
+var UDPXY = location.protocol + '//' + H + ':12123';
+
+document.getElementById('lnkPlayer').href = R2H + '/player';
+document.getElementById('lnkStatus').href = R2H + '/status';
+document.getElementById('lnkLuci').href   = location.protocol + '//' + H + '/';
+
+// 天气卡片: 读取缓存里的实时天气做摘要
+document.getElementById('lnkWeather').href = ORIGIN + '/manage/weather/';
+(function () {
+  fetch('/cgi-bin/weather?a=data', {cache:'no-store'})
+    .then(function (r) { return r.json(); })
+    .then(function (d) {
+      if (!d.ok || !d.now || !d.now.now) return;
+      var n = d.now.now;
+      document.getElementById('weatherCard').textContent =
+        (d.name || '') + ' · ' + n.temp + '° ' + n.text +
+        ' · 湿度 ' + n.humidity + '%';
+    }).catch(function () {});
+})();
+
+// 时间服务卡片: 显示路由器当前时间和 NTP 地址, 点击进入 NTP 设置页
+document.getElementById('lnkTime').href = ORIGIN + '/manage/ntp/';
+(function () {
+  var el = document.getElementById('timeCard');
+  function pad(n) { return (n < 10 ? '0' : '') + n; }
+  function tick() {
+    var d = new Date();
+    el.textContent = 'NTP 10.0.0.1:123 · 当前 ' +
+      pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds());
+  }
+  tick(); setInterval(tick, 1000);
+})();
+
+// 路由器状态卡片: 显示实时 CPU/内存 摘要
+(function () {
+  var el = document.getElementById('sysCard');
+  function load() {
+    fetch('/cgi-bin/sysstat?a=stat', {cache:'no-store'})
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        if (!d || !d.ok) return;
+        var cpu = (d.cpu && d.cpu.pct) || 0;
+        var mem = (d.mem && d.mem.pct) || 0;
+        var t = d.temp || 0;
+        el.textContent = 'CPU ' + cpu.toFixed(0) + '% · 内存 ' + mem.toFixed(0) +
+          '% · ' + t + '°C';
+      })
+      .catch(function () {});
+  }
+  load(); setInterval(load, 10000);
+})();
+
+// 订阅地址
+var subs = [
+  ['u1','a1', ORIGIN + '/iptv/iptv-r2h.m3u'],
+  ['u2','a2', ORIGIN + '/iptv/iptv.m3u'],
+  ['u3','a3', ORIGIN + '/iptv/iptv-rtp.m3u'],
+  ['u4','a4', ORIGIN + '/iptv/iptv.txt']
+];
+subs.forEach(function (s) {
+  document.getElementById(s[0]).textContent = s[2];
+  document.getElementById(s[1]).href = s[2];
+});
+
+function toast(msg) {
+  var t = document.getElementById('toast');
+  t.textContent = msg; t.classList.add('on');
+  clearTimeout(t._h); t._h = setTimeout(function () { t.classList.remove('on'); }, 2600);
+}
+function cp(id) {
+  var txt = document.getElementById(id).textContent;
+  var done = function () { toast('已复制'); };
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(txt).then(done, function () { fallback(txt, done); });
+  } else { fallback(txt, done); }
+}
+function fallback(txt, done) {
+  var ta = document.createElement('textarea');
+  ta.value = txt; ta.style.position = 'fixed'; ta.style.opacity = '0';
+  document.body.appendChild(ta); ta.select();
+  try { document.execCommand('copy'); done(); } catch (e) { toast('复制失败'); }
+  document.body.removeChild(ta);
+}
+
+// 读取频道状态
+(function () {
+  var dot = document.getElementById('dot'), st = document.getElementById('stat');
+  fetch('/cgi-bin/iptv?a=state', { cache: 'no-store' })
+    .then(function (r) { return r.json(); })
+    .then(function (s) {
+      var c = s.counts || {};
+      dot.className = 'dot on';
+      st.textContent = '频道 ' + (c.all || 0) + ' 个 · 在线 ' + (c.live || 0) +
+                       ' · 未检测 ' + (c.unknown || 0) +
+                       (s.running ? ' · 正在检测…' : '');
+    })
+    .catch(function () {
+      dot.className = 'dot err';
+      st.textContent = '状态读取失败（后台服务可能未启动）';
+    });
+})();
+
+/* ================= 服务状态检查 ================= */
+function setSt(k, ok, txt) {
+  var el = document.querySelector('.st[data-k="' + k + '"]');
+  if (!el) return;
+  el.className = 'st ' + (ok ? 'ok' : 'err');
+  var em = el.getElementsByTagName('em')[0];
+  if (em) em.textContent = txt;
+}
+
+function probe(url, ms) {
+  return new Promise(function (resolve) {
+    var ctl = new AbortController();
+    var t = setTimeout(function () { ctl.abort(); }, ms || 4000);
+    fetch(url, {cache: 'no-store', signal: ctl.signal})
+      .then(function (r) { clearTimeout(t); resolve(r.ok); })
+      .catch(function () { clearTimeout(t); resolve(false); });
+  });
+}
+
+function checkStatus() {
+  // udpxy / rtp2httpd: 经后端代理探测, 避免浏览器跨域拦截
+  fetch('/cgi-bin/svcstat?port=12123', {cache: 'no-store'})
+    .then(function (r) { return r.json(); })
+    .then(function (d) { setSt('udpxy', d.ok === 1, d.ok === 1 ? '正常' : '不可达'); })
+    .catch(function () { setSt('udpxy', false, '不可达'); });
+
+  fetch('/cgi-bin/svcstat?port=5140', {cache: 'no-store'})
+    .then(function (r) { return r.json(); })
+    .then(function (d) { setSt('r2h', d.ok === 1, d.ok === 1 ? '正常' : '不可达'); })
+    .catch(function () { setSt('r2h', false, '不可达'); });
+
+  // NTP: 通过 ntpctl 接口
+  fetch('/cgi-bin/ntpctl?a=status', {cache: 'no-store'})
+    .then(function (r) { return r.json(); })
+    .then(function (d) {
+      var on = d.running === 1 || d.running === '1';
+      setSt('ntp', on, on ? '运行中' : '未运行');
+    })
+    .catch(function () { setSt('ntp', false, '不可达'); });
+
+  // Web (自身页面即可证明)
+  setSt('web', true, '正常');
+
+  // 频道库
+  fetch('/cgi-bin/iptv?a=state', {cache: 'no-store'})
+    .then(function (r) { return r.json(); })
+    .then(function (s) {
+      var c = s.counts || {};
+      var n = c.all || 0;
+      var el = document.querySelector('.st[data-k="channel"] i');
+      if (el) el.textContent = n + ' 条';
+      setSt('channel', n > 0, '在线 ' + (c.live || 0));
+    })
+    .catch(function () { setSt('channel', false, '不可达'); });
+
+  // 天气
+  fetch('/cgi-bin/weather?a=config', {cache: 'no-store'})
+    .then(function (r) { return r.json(); })
+    .then(function (d) {
+      var el = document.querySelector('.st[data-k="weather"] i');
+      if (el && d.name) el.textContent = d.name.replace(/^(.*?)市?/, '');
+      setSt('weather', d.ok && d.has_key, d.has_key ? '已配置' : '未配置');
+    })
+    .catch(function () { setSt('weather', false, '不可达'); });
+}
+checkStatus();
+setInterval(checkStatus, 60000);
+
+</script>
+</body>
+</html>

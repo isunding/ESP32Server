@@ -1,0 +1,139 @@
+#!/bin/sh
+
+CONF=/data/iptv/etc/ntp.conf
+NTP_INTERVAL=900
+if [ -f "$CONF" ]; then
+  . "$CONF" 2>/dev/null
+fi
+case "$NTP_INTERVAL" in
+  ''|*[!0-9]*) NTP_INTERVAL=900 ;;
+esac
+
+hdr() {
+  printf 'Content-Type: application/json; charset=utf-8\r\n'
+  printf 'Cache-Control: no-store\r\n\r\n'
+}
+gp() {
+  printf '%s' "$QUERY_STRING" | tr '&' '\n' | grep "^$1=" | head -1 | cut -d= -f2- \
+    | sed 's/+/ /g; s/%2C/,/g; s/%3A/:/g; s/%2E/./g; s/%2D/-/g; s/%5F/_/g'
+}
+ug() { uci -q get "$1" 2>/dev/null; }
+
+to_cron() {
+  iv="$1"
+  if [ "$iv" -lt 3600 ]; then
+    m=$((iv / 60))
+    [ "$m" -lt 1 ] && m=1
+    [ "$m" -gt 59 ] && m=59
+    echo "*/$m * * * *"
+  else
+    h=$((iv / 3600))
+    [ "$h" -lt 1 ] && h=1
+    [ "$h" -gt 23 ] && h=23
+    echo "0 */$h * * *"
+  fi
+}
+
+apply_cron() {
+  iv="$1"
+  CRON=/etc/crontabs/root
+  grep -v 'ntpsetclock' "$CRON" > /tmp/.cr 2>/dev/null || true
+  if [ "$iv" -gt 0 ]; then
+    expr=$(to_cron "$iv")
+    echo "$expr /usr/sbin/ntpsetclock 60 log >/dev/null 2>&1" >> /tmp/.cr
+  fi
+  mv -f /tmp/.cr "$CRON"
+  chmod 644 "$CRON"
+  /etc/init.d/cron restart >/dev/null 2>&1
+}
+
+case "$(gp a)" in
+status)
+  up=$(ug system.ntp.enable_server); [ -n "$up" ] || up=0
+  ifc=$(ug system.ntp.interface); [ -n "$ifc" ] || ifc=lan
+  tz=$(ug 'system.@system[0].timezone'); [ -n "$tz" ] || tz=CST-8
+  ups=$(ug system.ntp.server)
+  [ -z "$ups" ] && ups=$(ug system.ntp.peers)
+  ups_json=$(printf '%s' "$ups" | tr ' ' '\n' | sed '/^$/d' | sed 's/.*/"&"/' | tr '\n' ',' | sed 's/,$//')
+  pid=$(pidof ntpd)
+  listen=0
+  netstat -lnu 2>/dev/null | grep -q ':123 ' && listen=1
+  run=0
+  [ -n "$pid" ] && [ "$listen" = "1" ] && run=1
+  syncing=0
+  grep -q 'ntpsetclock' /etc/crontabs/root 2>/dev/null && syncing=1
+  now=$(date '+%Y-%m-%d %H:%M:%S')
+  hdr
+  printf '{"ok":1,"server":"%s","running":%s,"interface":"%s","timezone":"%s","upstream":[%s],"interval":%s,"syncing":%s,"now":"%s"}\n' \
+    "$up" "$run" "$ifc" "$tz" "$ups_json" "$NTP_INTERVAL" "$syncing" "$now"
+  ;;
+
+on|off)
+  v=0
+  [ "$(gp a)" = "on" ] && v=1
+  uci set system.ntp.enable_server="$v"
+  uci commit system
+  /etc/init.d/sysntpd restart >/dev/null 2>&1
+  sleep 1
+  l=0
+  netstat -lnu 2>/dev/null | grep -q ':123 ' && l=1
+  hdr; printf '{"ok":1,"server":"%s","running":%s}\n' "$v" "$l"
+  ;;
+
+set)
+  up=$(gp up | tr ',' ' ')
+  [ -z "$up" ] && { hdr; printf '{"ok":0,"msg":"upstream required"}\n'; exit 0; }
+  ok=""
+  for h in $up; do
+    case "$h" in
+      *[!a-zA-Z0-9.:_-]*) continue ;;
+    esac
+    ok="$ok $h"
+  done
+  [ -z "$ok" ] && { hdr; printf '{"ok":0,"msg":"invalid address"}\n'; exit 0; }
+  uci -q delete system.ntp.server
+  for h in $ok; do uci add_list system.ntp.server="$h"; done
+  uci -q delete system.ntp.peers
+  uci commit system
+  /etc/init.d/sysntpd restart >/dev/null 2>&1
+  sleep 1
+  res=$(ug system.ntp.server)
+  hdr; printf '{"ok":1,"upstream":"%s"}\n' "$res"
+  ;;
+
+iface)
+  v=$(gp lan); [ "$v" = "all" ] || v=lan
+  uci set system.ntp.interface="$v"
+  uci commit system
+  /etc/init.d/sysntpd restart >/dev/null 2>&1
+  sleep 1
+  hdr; printf '{"ok":1,"interface":"%s"}\n' "$v"
+  ;;
+
+tz)
+  tz=$(gp CST-8); [ -z "$tz" ] && tz=CST-8
+  case "$tz" in *[!A-Za-z0-9+_-]*) hdr; printf '{"ok":0,"msg":"invalid tz"}\n'; exit 0 ;; esac
+  uci set "system.@system[0].timezone=$tz"
+  uci commit system
+  hdr; printf '{"ok":1,"timezone":"%s"}\n' "$tz"
+  ;;
+
+interval)
+  v=$(gp v)
+  case "$v" in
+    ''|*[!0-9]*) hdr; printf '{"ok":0,"msg":"interval must be seconds"}\n'; exit 0 ;;
+  esac
+  if [ "$v" -lt 60 ]; then
+    hdr; printf '{"ok":0,"msg":"min 60 seconds"}\n'; exit 0
+  fi
+  mkdir -p /data/iptv/etc
+  printf 'NTP_INTERVAL=%s\n' "$v" > "$CONF"
+  apply_cron "$v"
+  expr=$(to_cron "$v")
+  hdr; printf '{"ok":1,"interval":%s,"cron":"%s"}\n' "$v" "$expr"
+  ;;
+
+*)
+  hdr; printf '{"ok":0,"msg":"unknown action"}\n'
+  ;;
+esac

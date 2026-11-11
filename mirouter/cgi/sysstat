@@ -1,0 +1,141 @@
+#!/bin/sh
+# 路由器状态 CGI（纯 shell，读 /proc）
+#   ?a=stat    CPU/内存/负载/温度/运行时长/网口流量
+#   ?a=dhcp    DHCP 租约（IP 分配情况）
+#   ?a=arp     ARP 表（当前在线设备）
+hdr() {
+  printf 'Content-Type: application/json; charset=utf-8\r\n'
+  printf 'Cache-Control: no-store\r\n\r\n'
+}
+
+cpu_stat() {
+  # 杈撳嚭: total idle (jiffies)
+  awk '/^cpu /{
+    total=$2+$3+$4+$5+$6+$7+$8+$9+$10+$11
+    idle=$5+$6
+    printf "%s %s", total, idle
+  }' /proc/stat
+}
+
+mem_stat() {
+  awk '
+    /^MemTotal:/     {t=$2}
+    /^MemFree:/      {f=$2}
+    /^MemAvailable:/ {a=$2}
+    /^Buffers:/      {b=$2}
+    /^Cached:/       {c=$2}
+    END {
+      if (a == "") a = f + b + c
+      used = t - a
+      if (used < 0) used = 0
+      pct = (t > 0) ? (used * 100 / t) : 0
+      printf "%d %d %d %d %d %.1f", t, used, f, a, b + c, pct
+    }' /proc/meminfo
+}
+
+net_stat() {
+  # 鍙 LAN/WAN 鍏抽敭缃戝彛
+  awk -F'[: ]+' '
+    $2 ~ /^(br-lan|eth0|eth1|eth1\.43|wl0|wl1|br-miot)$/ {
+      printf "\"%s\":{\"rx\":%s,\"tx\":%s},", $2, $3, $11
+    }' /proc/net/dev | sed 's/,$//'
+}
+
+case "$(printf '%s' "$QUERY_STRING" | tr '&' '\n' | grep '^a=' | head -1 | cut -d= -f2-)" in
+dhcp)
+  hdr
+  printf '{"ok":1,"leases":['
+  first=1
+  if [ -f /tmp/dhcp.leases ]; then
+    while read -r exp mac ip name clientid; do
+      [ -z "$ip" ] && continue
+      now=$(date +%s)
+      case "$exp" in ''|*[!0-9]*) exp=0 ;; esac
+      left=$((exp - now))
+      [ "$left" -lt 0 ] && left=0
+      [ $first -eq 1 ] && first=0 || printf ','
+      printf '{"mac":"%s","ip":"%s","name":"%s","expire":%s,"left":%s}' \
+        "$mac" "$ip" "${name:-*}" "$exp" "$left"
+    done < /tmp/dhcp.leases
+  fi
+  printf ']}\n'
+  ;;
+
+arp)
+  hdr
+  printf '{"ok":1,"arp":['
+  first=1
+  if [ -f /proc/net/arp ]; then
+    tail -n +2 /proc/net/arp | while read -r ip hwtype flags mac mask dev; do
+      [ "$flags" = "0x0" ] && continue
+      case "$mac" in 00:00:00:00:00:00) continue ;; esac
+      # 鍙繚鐣欐湰灞€鍩熺綉鍦板潃
+      case "$ip" in 10.0.0.*) : ;; *) continue ;; esac
+      [ $first -eq 1 ] && first=0 || printf ','
+      printf '{"ip":"%s","mac":"%s","dev":"%s"}' "$ip" "$mac" "$dev"
+    done
+  fi
+  printf ']}\n'
+  ;;
+
+*)
+  hdr
+  # ---- CPU ----
+  set -- $(cpu_stat)
+  ct=$1; ci=$2
+  # 鐢?1 绉掗棿闅斿啀鍙栦竴娆＄畻瀹炴椂鍗犵敤
+  sleep 1
+  set -- $(cpu_stat) $(cpu_stat)
+  n=$(($#))
+  ct2=$(echo "$*" | awk '{print $1}')
+  ci2=$(echo "$*" | awk '{print $2}')
+  dt=$((ct2 - ct))
+  di=$((ci2 - ci))
+  if [ "$dt" -gt 0 ]; then
+    cpu_pct=$(awk "BEGIN{printf \"%.1f\", (1 - $di/$dt) * 100}")
+  else
+    cpu_pct=0
+  fi
+  ncore=$(grep -c '^cpu[0-9]' /proc/stat 2>/dev/null)
+  [ -z "$ncore" ] && ncore=1
+
+  # ---- 璐熻浇 ----
+  set -- $(cat /proc/loadavg)
+  l1=$1; l5=$2; l15=$3
+
+  # ---- 内存 ----
+  set -- $(mem_stat)
+  mt=$1; mu=$2; mf=$3; ma=$4; mc=$5; mp=$6
+
+  # ---- 娓╁害锛堣鍥轰欢鍘熷€煎氨鏄憚姘忓害锛屼笉闇€闄や互 1000锛?---
+  temp=0
+  for f in /sys/class/thermal/thermal_zone*/temp; do
+    [ -r "$f" ] || continue
+    t=$(cat "$f" 2>/dev/null)
+    case "$t" in ''|*[!0-9]*) continue ;; esac
+    # 鑻ュ€煎緢澶э紙>200锛夎鏄庢槸姣害锛岄渶闄?1000
+    if [ "$t" -gt 200 ]; then t=$((t / 1000)); fi
+    [ "$t" -gt "$temp" ] && temp=$t
+  done
+
+  # ---- 杩愯鏃堕暱 ----
+  up=$(cut -d. -f1 /proc/uptime)
+  upd=$((up / 86400))
+  uph=$(((up % 86400) / 3600))
+  upm=$(((up % 3600) / 60))
+
+  # ---- 纾佺洏 ----
+  set -- $(df -k /data 2>/dev/null | tail -1)
+  dsize=$2; dused=$3; davail=$4
+
+  printf '{"ok":1,"cpu":{"pct":%s,"cores":%s},"load":[%s,%s,%s],' \
+    "$cpu_pct" "$ncore" "$l1" "$l5" "$l15"
+  printf '"mem":{"total":%s,"used":%s,"free":%s,"avail":%s,"cache":%s,"pct":%s},' \
+    "$mt" "$mu" "$mf" "$ma" "$mc" "$mp"
+  printf '"temp":%s,"uptime":{"sec":%s,"d":%s,"h":%s,"m":%s},' \
+    "$temp" "$up" "$upd" "$uph" "$upm"
+  printf '"disk":{"total":%s,"used":%s,"avail":%s},' \
+    "${dsize:-0}" "${dused:-0}" "${davail:-0}"
+  printf '"net":{%s}}\n' "$(net_stat)"
+  ;;
+esac

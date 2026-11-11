@@ -1,0 +1,3 @@
+#!/bin/sh
+# uhttpd CGI 入口
+exec /data/iptv/iptv cgi
