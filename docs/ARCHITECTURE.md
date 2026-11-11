@@ -21,6 +21,12 @@ S3 版 Python 堆位于 8MB PSRAM，内部 SRAM 供 WiFi 与 lwIP 使用。
 | `ntpsync.py` | NTP 客户端，同步后写入 RTC |
 | `cncal.py` | 农历 / 节气 / 节日，本地查表 |
 
+设备不直接访问公网，所有外部数据由路由器上的 shell CGI 转发。路由器端组件在
+`mirouter/`：13 个 CGI（天气、行情、油价、万年历、频道、系统状态、新闻、地震）、
+udpxy 与 rtp2httpd、原厂管理页的入口注入，清单与部署方式见
+[mirouter/README.md](../mirouter/README.md)。设备经 uhttpd 的 8088 端口直连，
+不经过 nginx。
+
 ---
 
 ## 二、启动流程
@@ -62,21 +68,27 @@ WiFi 初始化置于 `boot.py`：驱动需申请约 12KB 静态缓冲区，
 
 ```
 loop:
-    web.poll()              HTTP 处理
-    idle_power()            空闲降频：有请求回满频，久无访问降频（仅 S3 版）
-    led_heartbeat()         LED 心跳（非阻塞）
-    ntpsrv.serve() × 3      板载 NTP 服务端
-    news_tick → news_due    新闻定时补采标记（仅 S3 版）
-    channels_due → refresh  缓存到期补刷
-    svc_due → poll          服务状态补刷
+    web.poll()                     HTTP 处理
+    idle_power(now)                空闲降频：有请求回满频，久无访问降频（仅 S3）
+    led_heartbeat()                LED 心跳（非阻塞）
+    ntpsrv.serve() × 3             板载 NTP 服务端
+    wx_force → poll_weather()      手动刷新天气，20 秒读超时
+    channels_due → refresh_channels()
+    hist_due → refresh_weather_history()
+    clients_due → poll_clients()
+    svc_due → poll_services()
+    news_tick → news_due           每小时置补刷标记（仅 S3）
+    news_due → refresh_news()      逐页向前追平（仅 S3）
+    quake_due / quakeg_due / usgs_due → refresh_*（仅 S3）
     每 30s 检查 WiFi 状态
     NTP 同步（到点触发，内部调用 web.poll(1) 让出）
-    农历年度表预热（到点触发）
+    农历年度表预热（到点触发一次）
+    配置保存后 800ms 重启（reboot_at 到点 → machine.reset()）
     sleep_ms(30)
 ```
 
-除新闻按 `poll.news_tick_ms` 定时置补刷标记外，主循环内无周期性取数。
-数据在请求到达且缓存过期时才拉取。
+补刷标记由请求侧在发现缓存过期时置位，主循环下一轮消费。除新闻的每小时定时补采外，
+主循环不主动取数；数据只在请求到达且缓存过期时拉取。
 
 ### 空闲降频
 
@@ -279,6 +291,14 @@ flowchart TD
 3. `setup_routes()` 添加 `w.serve_file("/xxx.html", "www/xxx.html")`
 4. `web/ui.js` 的 `PAGES` 数组添加页签
 5. `web/index.html` 的 `TILES` 添加入口
+
+### 新增路由器 CGI
+
+1. 在 `mirouter/cgi/` 下新增 shell 脚本：LF 换行、缓存写 `/tmp`、单飞用 `mkdir` 原子锁、
+   上游签名用 `openssl dgst`（路由器无 `sha1sum`）
+2. `python mirouter/tools/deploy.py cgi` 上传；凭据由部署参数注入，不写入仓库
+3. `main.py` 添加取数路径常量（`P_XXX`）、`refresh_xxx()` 与到期标记，主循环消费该标记
+4. `mirouter/README.md` 的 CGI 表与 `README.md` 的 API 表补充条目
 
 ### 新增配置项
 
