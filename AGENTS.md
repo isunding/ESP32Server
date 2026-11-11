@@ -7,7 +7,7 @@
 ESP32 + MicroPython 的无头终端服务器：单线程 HTTP 服务，向局域网提供 7 个页面与一组 API，
 数据来自路由器的 CGI 接口。固件源码有两份板级副本——`esp32/`（ESP32-D0WD-V3）与
 `esp32-s3/`（ESP32-S3 N16R8），逻辑一致，差异只在 LED 驱动、WiFi 省电、内存布局与频率管理。
-文档在 `docs/`。
+文档在 `docs/`，路由器端组件在 `mirouter/`。
 
 运行环境约束：单线程、可用 TCP PCB 约 10 个；ESP32 版堆约 70KB，
 S3 版 Python 堆在 8MB PSRAM、内部 SRAM 留给 WiFi 与 lwIP。
@@ -18,8 +18,9 @@ S3 版 Python 堆在 8MB PSRAM、内部 SRAM 留给 WiFi 与 lwIP。
 
 ## 路由器端 CGI
 
-新闻与地震的数据由路由器上的两个 shell CGI 转发（`/data/iptv/www/cgi-bin/news|quake`）。
+新闻与地震的数据由路由器上的 shell CGI 转发（`/data/iptv/www/cgi-bin/`），源码在 `mirouter/cgi/`。
 设备经 uhttpd 的 8088 端口直连；nginx 仅代理白名单内的 `/cgi-bin/xxx`，无需修改其配置。
+组件的完整清单、端口与部署方式见 `mirouter/README.md`。
 
 - 路由器**没有 `sha1sum`**（busybox 只编了 `md5sum`），哈希要退回 `openssl dgst`；
   直接写 `sha1sum` 会得到空签名，上游回 `errno 10012`
@@ -63,6 +64,8 @@ S3 版 Python 堆在 8MB PSRAM、内部 SRAM 留给 WiFi 与 lwIP。
 1. **不要直接修改 `esp32/www/` 或 `esp32-s3/www/`**。它们由各自的 `web/` 经 `scripts/build.py` 生成，下次构建会被覆盖。
 2. **不要提交** `esp32/config.json`、`esp32-s3/config.json`、`*.pem`、`*.bin`、`firmware/`、`legacy/`、
    `esp32/tests/`、`esp32-s3/factory/`、`*/build_mpy/`。前两项含真实 WiFi 凭据，`firmware/` 与 `legacy/` 含设备数据。
+   `mirouter/cgi/` 中的 `Q_ID` / `Q_KEY` 与 `W_HOST` 保持空值或占位符，凭据在部署时注入。
+   `mirouter/bin/` 的 udpxy、rtp2httpd 为 GPL-2.0 二进制，是唯一允许入库的可执行文件。
 3. **不要引入** `asyncio`、`thread`、`_thread`、第三方库。运行环境不支持且有额外内存开销。
 4. **不要在请求处理中做超过 1 秒的阻塞操作**（除非配合 TTL 缓存）。
 5. **不要在页面中引用 CDN**（外部 CSS/JS/字体/图片）。
@@ -91,6 +94,18 @@ python esp32-s3/scripts/build.py       # 生成 esp32-s3/www/
 
 直接改 `esp32/*.py`（或 `esp32-s3/*.py`）。部署时若板上有 `.mpy`，需重新执行对应的
 `scripts/mpy.py`，否则 `.py` 不生效（MicroPython 优先加载 `.py`，但板上若只剩 `.mpy` 则不会更新）。
+
+### 改路由器端组件
+
+直接改 `mirouter/cgi/*` 与 `mirouter/iptv/*`，用 `mirouter/tools/deploy.py` 上传，
+不手工编辑路由器上的文件（`start.sh` 会在启动时重写 nginx 规则与播放列表）。
+
+```bash
+for f in mirouter/cgi/* mirouter/iptv/*.sh; do sh -n "$f"; done   # 语法检查
+python mirouter/tools/deploy.py all
+```
+
+CGI 与脚本必须是 LF 换行；凭据不写入仓库。
 
 ### 改配置项
 

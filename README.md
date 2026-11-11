@@ -183,6 +183,12 @@ python esp32-s3/scripts/flash.py esp32-s3/main.py esp32-s3/www/index.html ...
 │   ├── www/               构建产物（部署此目录）
 │   └── scripts/           构建、上传、刷机、预编译
 ├── esp32-s3/              ESP32-S3 N16R8 版（目录结构与 esp32/ 相同，另有新闻、地震页面）
+├── mirouter/              路由器端组件（数据 CGI、IPTV、页面注入、二进制）
+│   ├── cgi/               shell CGI，部署到 /data/iptv/www/cgi-bin/
+│   ├── iptv/              启停脚本、播放列表生成器、控制台页面
+│   ├── inject/            原厂管理页的入口注入片段
+│   ├── bin/               udpxy、rtp2httpd
+│   └── tools/             部署脚本
 └── docs/
     ├── ARCHITECTURE.md
     ├── CONFIG.md
@@ -190,6 +196,7 @@ python esp32-s3/scripts/flash.py esp32-s3/main.py esp32-s3/www/index.html ...
 ```
 
 `www/` 由 `web/` 经 `scripts/build.py` 生成；页面修改应在 `web/` 下进行。
+路由器端组件的部署方式与运行约束见 [mirouter/README.md](mirouter/README.md)。
 
 ---
 

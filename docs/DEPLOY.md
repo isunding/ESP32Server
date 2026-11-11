@@ -223,7 +223,9 @@ Windows 下可使用 `mpremote connect COM3` 或串口工具。
 
 ## 九、路由器端 CGI（新闻 / 地震，仅 S3）
 
-数据由路由器转发，设备不直接访问公网。脚本位于 `router/cgi/`：
+数据由路由器转发，设备不直接访问公网。脚本位于 `mirouter/cgi/`，
+完整组件清单与运行约束见 [mirouter/README.md](../mirouter/README.md)。
+设备侧直接使用的条目如下：
 
 | 文件 | 部署到 | 说明 |
 |---|---|---|
@@ -235,7 +237,8 @@ Windows 下可使用 `mpremote connect COM3` 或串口工具。
 
 ```bash
 # 必须是 LF 换行，否则 #!/bin/sh^M 报 not found
-scp router/cgi/news router/cgi/quake root@<路由器>:/data/iptv/www/cgi-bin/
+scp mirouter/cgi/news mirouter/cgi/quake mirouter/cgi/usgs mirouter/cgi/oil mirouter/cgi/almanac \
+  root@<路由器>:/data/iptv/www/cgi-bin/
 ssh root@<路由器> 'chmod 755 /data/iptv/www/cgi-bin/news /data/iptv/www/cgi-bin/quake /data/iptv/www/cgi-bin/usgs /data/iptv/www/cgi-bin/oil /data/iptv/www/cgi-bin/almanac'
 
 # 地震接口凭据（600 权限）
