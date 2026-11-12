@@ -1204,10 +1204,21 @@ class App:
 
         u = os.uname()
         ver = sys.implementation.version
+        # 代码版本：升级流程写在 ota.json（串口首次烧写时为空）
+        _app = {}
+        try:
+            _om = load_ota()
+            if _om.get("ver"):
+                _app = {"ver": str(_om.get("ver")),
+                        "at": int(_om.get("at") or 0),
+                        "pending": 1 if _om.get("pending") else 0}
+        except Exception:
+            _app = {}
         return httpsrv.json_resp({
             "ok": 1,
             "fw": {"ver": "%d.%d.%d" % (ver[0], ver[1], ver[2]),
                    "build": u.version, "board": u.machine,
+                   "app": _app,
                    "freq": machine.freq(), "freq_max": self.freq_max,
                    "pm_on": self.pm_on, "pm_downs": self.pm_downs,
                    "pm_mhz": (self.pm_hz // 1000000) if self.pm_on else 0,
