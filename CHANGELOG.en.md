@@ -34,6 +34,8 @@ This project follows [Keep a Changelog](https://keepachangelog.com/); entries ar
   the page never paints dark before switching to light
 - Back-to-top button in the bottom-right corner of the news and quake pages; it appears once
   you scroll past one screen and smooth-scrolls back to the top
+- Topic tags on the news page now sit after the time and importance badge instead of on
+  their own row; the header shows at most three, the rest collapse into `+N`
 - Code version in the firmware card of the device-info page: taken from the upgrade record,
   with its timestamp and a pending-reboot marker
 - Used percentage next to each resource meter (heap / internal RAM / flash), turning amber
