@@ -310,6 +310,25 @@ leaves a complete boot chain. When every file is in place it calls
 `POST /api/ota?a=done`, which records the version and reboots, then polls `/api/health` until
 the device is back (60 seconds at most).
 
+### Desktop tool (`ota/OTA升级.exe`)
+
+Double-click it for a menu-driven workflow; it shares the code of `ota.py` (packaged from
+`scripts/ota_menu.py`) and also accepts the same command-line flags, e.g.
+`OTA升级.exe --only www/ui.js`.
+
+Packages and the tool live in `ota/` at the repository root. Every commit triggers
+`.githooks/post-commit`, which writes `ota/ota-<version>-<YYYYMMDD-HHMM>.mrp` and refreshes
+`ota/latest.mrp`; the newest 20 packages are kept (`pack_ota.py --keep N` changes that).
+Enable the hook once:
+
+```bash
+git config core.hooksPath .githooks
+```
+
+`ota/*.mrp`, `ota/*.exe` and `ota/latest.json` stay out of git; rebuild the exe from
+`ota/README.md` on another machine. Day-to-day steps are in [memory.md](../memory.md)
+(Chinese).
+
 ### Option 2: upload from the browser
 
 Open `/ota.html` (the "系统升级" link at the bottom of the home page), pick a package and

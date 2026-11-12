@@ -21,6 +21,9 @@ This project follows [Keep a Changelog](https://keepachangelog.com/); entries ar
 - Wireless update (OTA, S3 only): `/ota.html` page, `GET|PUT|POST /api/ota` endpoints and
   `scripts/ota.py` (per-file push plus `--pack` to build a package). Writes go to `.new` and
   are swapped in only after a CRC32 check; a failed run never reboots
+- Upgrade tooling: `scripts/ota_menu.py` provides a menu-driven console, packaged as
+  `ota/OTA升级.exe`; `scripts/pack_ota.py` writes packages into `ota/` and runs automatically
+  from `.githooks/post-commit` after every commit
 - Upgrade record: `ota.json` keeps the version string, time, file count, a pending-reboot flag
   and the last 5 entries; the version travels inside the package and the flag clears on boot.
   Writing `x.html` also deletes the sibling `x.html.gz` so browsers cannot keep getting the old page

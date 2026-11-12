@@ -3,6 +3,8 @@
 # 启用：git config core.hooksPath .githooks
 root=$(git rev-parse --show-toplevel 2>/dev/null) || exit 0
 cd "$root" || exit 0
+# 只改了文档就不必重新打包：包内容与上一份完全相同
+git diff-tree --no-commit-id --name-only -r HEAD 2>/dev/null | grep -q '^esp32-s3/' || exit 0
 py=$(command -v python3 || command -v python || command -v py) || exit 0
 name=$("$py" "$root/esp32-s3/scripts/pack_ota.py" --brief 2>/dev/null) || exit 0
 [ -n "$name" ] && echo "[ota] 升级包已更新：ota/$name（latest.mrp 同步）"

@@ -238,6 +238,8 @@ python esp32-s3/scripts/flash.py esp32-s3/main.py esp32-s3/www/index.html ...
 
 ## 脚本
 
+日常升级的操作步骤（exe、升级包、网页上传）见 [memory.md](memory.md)。
+
 | 脚本 | 用途 |
 |---|---|
 | `scripts/build.py` | 页面构建：内联 CSS/JS、生成 gzip（单页：`build.py weather`） |
@@ -245,9 +247,11 @@ python esp32-s3/scripts/flash.py esp32-s3/main.py esp32-s3/www/index.html ...
 | `scripts/flash.py` | 上传 + 复位设备、捕获启动日志、请求 `/api/health` 自检 |
 | `scripts/mpy.py` | 模块预编译为 `.mpy`（`--revert` 回退 .py） |
 | `scripts/ota.py` | 无线升级：按 HTTP 逐个推送 `.py` 与 `www/`，或用 `--pack` 生成升级包（仅 S3） |
+| `scripts/pack_ota.py` | 生成升级包到 `ota/`，提交后由 `.githooks/post-commit` 自动调用（仅 S3） |
+| `scripts/ota_menu.py` | 菜单式升级工具，`ota/OTA升级.exe` 由它打包，双击即可推送（仅 S3） |
 | `scripts/gen_calendar_data.py` | 重建农历年度数据表 |
 
-两个板级目录各有一份，用法相同（`ota.py` 仅 S3 版提供）。串口与设备地址通过环境变量指定：
+两个板级目录各有一份，用法相同（`ota*` 与 `pack_ota.py` 仅 S3 版提供）。串口与设备地址通过环境变量指定：
 
 ```bash
 export ESP32_PORT=COM3

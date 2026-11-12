@@ -251,6 +251,9 @@ Files under `mirouter/` are written in Chinese.
 
 ## Scripts
 
+Day-to-day upgrade steps (exe, package, browser upload) are documented in
+[memory.md](memory.md) (Chinese).
+
 | Script | Purpose |
 |---|---|
 | `scripts/build.py` | Page build: inline CSS/JS, emit gzip (single page: `build.py weather`) |
@@ -258,6 +261,8 @@ Files under `mirouter/` are written in Chinese.
 | `scripts/flash.py` | Upload, reset the device, capture the boot log, run the `/api/health` self-check |
 | `scripts/mpy.py` | Precompile modules to `.mpy` (`--revert` restores `.py`) |
 | `scripts/ota.py` | Over-the-air update: push `.py` and `www/` over HTTP, or build a package with `--pack` (S3 only) |
+| `scripts/pack_ota.py` | Build a package into `ota/`; run automatically by `.githooks/post-commit` (S3 only) |
+| `scripts/ota_menu.py` | Menu-driven updater; `ota/OTA升级.exe` is built from it for double-click use (S3 only) |
 | `scripts/gen_calendar_data.py` | Rebuild the annual lunar data table |
 
 Each board directory carries its own copy with identical usage (`ota.py` ships with the S3

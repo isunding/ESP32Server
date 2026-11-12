@@ -20,6 +20,8 @@
 - 无线升级（OTA，仅 S3）：`/ota.html` 页面、`GET|PUT|POST /api/ota` 接口、
   `scripts/ota.py`（逐个推送与 `--pack` 生成升级包）；写入采用「先写 `.new` 再 rename」，
   逐文件校验 CRC32，失败不重启
+- 升级工具：`scripts/ota_menu.py` 菜单式操作，`ota/OTA升级.exe` 双击即可推送；
+  `scripts/pack_ota.py` 生成升级包到 `ota/`，由 `.githooks/post-commit` 在每次提交后自动执行
 - 升级版本记录：`ota.json` 保存版本串、时间、文件数、待重启标记与最近 5 次历史，
   版本串随升级包进入设备，重启后才清除待重启标记；写入 `x.html` 时一并删除同名 `x.html.gz`，
   避免浏览器继续收到旧页面

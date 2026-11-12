@@ -302,6 +302,22 @@ python esp32-s3/scripts/ota.py --no-reboot     # 传完不重启
 全部成功后调用 `POST /api/ota?a=done` 记录版本并重启，随后轮询
 `/api/health` 等待恢复（上限 60 秒）。
 
+### PC 端工具（ota/OTA升级.exe）
+
+双击运行，菜单式操作，与 `ota.py` 同源（由 `scripts/ota_menu.py` 打包）。它也能直接
+吃命令行参数，例如 `OTA升级.exe --only www/ui.js`。
+
+升级包与工具都在仓库根目录的 `ota/`：每次提交后 `.githooks/post-commit` 自动生成
+`ota/ota-<版本>-<YYYYMMDD-HHMM>.mrp` 并更新 `ota/latest.mrp`，默认保留最近 20 个
+（`pack_ota.py --keep N` 可调）。钩子需启用一次：
+
+```bash
+git config core.hooksPath .githooks
+```
+
+`ota/*.mrp`、`ota/*.exe`、`ota/latest.json` 不入库；exe 换机器需按 `ota/README.md`
+重新生成。日常操作步骤见 [memory.md](../memory.md)。
+
 ### 方式二：网页上传
 
 `/ota.html`（首页底部「系统升级」链接）选择升级包上传，进度条走完后

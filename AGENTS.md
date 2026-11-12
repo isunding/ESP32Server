@@ -154,6 +154,9 @@ python esp32-s3/scripts/ota.py --dry-run
 
 ## 提交
 
+- 提交后 `.githooks/post-commit` 会自动执行 `pack_ota.py --brief`，把当前板级文件打成
+  `ota/ota-<版本>-<时间>.mrp` 并更新 `ota/latest.mrp`。钩子需 `git config core.hooksPath .githooks` 启用。
+- `ota/*.mrp`、`ota/*.exe`、`ota/latest.json`、`build/pyi/` 不入库。
 - 一个提交只做一类改动：页面、固件、文档分开。
 - 改页面时 `web/` 与 `www/` 放在同一提交。
 - 提交信息格式：`类型: 简述`，类型取 `feat` / `fix` / `docs` / `chore`。
