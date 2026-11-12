@@ -339,6 +339,7 @@ which would double the flash needed.
 |---|---|
 | Write then swap | Data goes to `<target>.new` and is renamed into place only when the byte count and CRC32 both match; an interrupted transfer leaves a `.new` file while the old file keeps serving |
 | Space check | Rejected with HTTP 507 before the transfer starts when free space is below "file size + 64KB" |
+| Stale `.gz` removed | Writing `www/x.html` deletes `www/x.html.gz`, because static files prefer the `.gz` copy: updating only the `.html` would keep serving the old page. A full sync re-uploads the matching `.gz` right after |
 | Path allowlist | Only the 8 root modules and one level of files under `www/`; `..`, backslashes, absolute paths and other extensions get 400 |
 | No authentication | Same as `/api/config`; intended for a local network only |
 | No reboot on failure | Any failed file aborts the run without recording a version or rebooting; the device keeps running the previous build |

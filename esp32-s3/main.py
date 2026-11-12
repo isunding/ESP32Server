@@ -492,6 +492,17 @@ def _ota_drop(fn):
         pass
 
 
+def _ota_drop_gz(rel):
+    """换掉 .html 时删掉同名 .gz。
+
+    静态文件优先发 .gz（见 httpsrv._send_static），只更新 .html 而不更新 .gz
+    会让浏览器一直收到旧页面——外部表现就是「升级了但页面没变」。删除是安全的：
+    没有 .gz 就退回发原文件，内容一定正确；批量升级随后会补上新的 .gz。
+    """
+    if rel.endswith(".html"):
+        _ota_drop(rel + ".gz")
+
+
 def _ota_free():
     """剩余可写字节。失败返回 0，调用方按「不检查」处理。"""
     try:
@@ -1620,6 +1631,7 @@ class App:
             if want >= 0 and crc != want:
                 raise OSError("CRC 不符 %d != %d" % (crc, want))
             _ota_swap(tmp, rel)
+            _ota_drop_gz(rel)
         except Exception as e:
             _ota_drop(tmp)
             print("[ota]", rel, e)
@@ -1687,6 +1699,7 @@ class App:
                 err = "%s CRC 不符" % rel
                 break
             _ota_swap(tmp, rel)
+            _ota_drop_gz(rel)
             nf += 1
             nbytes += n
 

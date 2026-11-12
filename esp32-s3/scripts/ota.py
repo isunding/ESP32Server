@@ -63,7 +63,13 @@ def collect(board_dir, only=None):
         items.append((name, os.path.join(board_dir, name)))
 
     if only:
-        keep = set(x.strip("/") for x in only)
+        # 只点名 .html 时自动带上同名 .gz：板子优先发 .gz，漏掉它等于没升级
+        keep = set()
+        for x in only:
+            x = x.strip("/")
+            keep.add(x)
+            if x.endswith(".html") and os.path.isfile(os.path.join(board_dir, x + ".gz")):
+                keep.add(x + ".gz")
         missing = keep - set(rel for rel, _ in items)
         if missing:
             raise SystemExit("--only 里有不存在的文件: %s" % ", ".join(sorted(missing)))

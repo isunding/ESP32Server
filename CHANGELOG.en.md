@@ -22,7 +22,8 @@ This project follows [Keep a Changelog](https://keepachangelog.com/); entries ar
   `scripts/ota.py` (per-file push plus `--pack` to build a package). Writes go to `.new` and
   are swapped in only after a CRC32 check; a failed run never reboots
 - Upgrade record: `ota.json` keeps the version string, time, file count, a pending-reboot flag
-  and the last 5 entries; the version travels inside the package and the flag clears on boot
+  and the last 5 entries; the version travels inside the package and the flag clears on boot.
+  Writing `x.html` also deletes the sibling `x.html.gz` so browsers cannot keep getting the old page
 - Streaming request body in `httpsrv` (`route_stream()`), so uploads no longer load a whole
   file into memory
 - Light/dark toggle in the top bar: follows the system until tapped, then locks the choice in
