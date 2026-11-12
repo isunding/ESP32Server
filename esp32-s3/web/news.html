@@ -138,23 +138,23 @@ function render() {
           esc(name || raw) + " " + esc(raw) + "</button>";
       }).join("");
     }
-    /* 主题标签跟在时间与重要性后面，与正文分行；股票按钮仍独立一行。
-       标题行只放 3 个，多出来的收成 +N，避免把这一行挤成两行。 */
-    var subs = x.subjects || [];
-    var tags = subs.slice(0, 3).map(function (s) {
+    /* 主题标签与股票按钮都跟在时间、重要性后面，同一行排布。
+       有股票按钮时标签只放 2 个，否则放 3 个，多出来的收成 +N，
+       尽量让这一行不折行；真的放不下才换行，不会溢出。 */
+    var subs = x.subjects || [], cap = stk ? 2 : 3;
+    var tags = subs.slice(0, cap).map(function (s) {
       return '<span class="ftag">' + esc(s) + "</span>";
     }).join("");
-    if (subs.length > 3) {
+    if (subs.length > cap) {
       tags += '<span class="ftag" title="' + esc(subs.join(" ")) + '">+' +
-        (subs.length - 3) + "</span>";
+        (subs.length - cap) + "</span>";
     }
     return '<div class="frow" data-k="' + esc(x.key) + '">' +
       '<div class="fh"><span class="ft">' + hhmm(x.ctime) + "</span>" +
       '<span class="flv ' + esc(x.lv || "C") + '">' + esc(x.lv || "C") + "</span>" +
-      tags + "</div>" +
+      tags + stk + "</div>" +
       '<div class="fitem"><div class="fb">' +
-      boldBracket(x.text || x.title || "") + "</div></div>" +
-      (stk ? '<div class="ff">' + stk + "</div>" : "") + "</div>";
+      boldBracket(x.text || x.title || "") + "</div></div></div>";
   }).join("");
 }
 
