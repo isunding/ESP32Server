@@ -33,7 +33,7 @@ CTYPES = {
 
 
 class Req:
-    __slots__ = ("method", "path", "query", "headers", "body")
+    __slots__ = ("method", "path", "query", "headers", "body", "stream")
 
     def __init__(self, method, path, query, headers, body):
         self.method = method
@@ -41,6 +41,7 @@ class Req:
         self.query = query
         self.headers = headers
         self.body = body
+        self.stream = None      # 流式路由才有：见 Body
 
     def arg(self, key, default=""):
         for kv in self.query.split("&"):
@@ -99,10 +100,77 @@ def _has(seq, obj):
     return False
 
 
+class Body:
+    """请求体流：边收边处理，不把整个文件读进内存。
+
+    普通路由是把 body 攒成 bytes 再交给处理函数。这个做法对 JSON 没问题，
+    对 OTA 上传就是灾难：www 单个文件最大 289KB，整包 1.1MB，攒进堆里
+    必然 MemoryError。流式路由改用这里，随时只有一块 recv 缓冲在手上。
+
+    left 是「还在网线上、没收到」的字节数，buf 是「收到了、还没被取走」的；
+    两者都按 content-length 结算，短读直接返回 b""，由调用方判为传输中断。
+    """
+
+    __slots__ = ("conn", "buf", "left", "total")
+
+    def __init__(self, conn, buf, left, total):
+        self.conn = conn
+        self.buf = buf
+        self.left = left
+        self.total = total
+
+    def read(self, size=1024):
+        if not self.buf:
+            if self.left <= 0:
+                return b""
+            try:
+                chunk = self.conn.recv(min(size, self.left))
+            except OSError:
+                self.left = 0
+                return b""
+            if not chunk:
+                self.left = 0      # 对端提前断开
+                return b""
+            self.buf = chunk
+            self.left -= len(chunk)
+        take = self.buf[:size]
+        self.buf = self.buf[len(take):]
+        return take
+
+    def read_exact(self, size):
+        """凑满 size 字节；不够说明连接断了，返回短的数据由调用方判断。"""
+        if size <= len(self.buf):
+            out = self.buf[:size]
+            self.buf = self.buf[size:]
+            return out
+        out = self.buf
+        self.buf = b""
+        while len(out) < size:
+            b = self.read(size - len(out))
+            if not b:
+                break
+            out += b
+        return out
+
+    def drain(self, limit=262144):
+        """丢掉没人读的剩余请求体。
+
+        客户端还在发数据时服务端就 close，lwIP 会直接回 RST，浏览器侧看到
+        的是「上传失败」而不是我们刚发回去的那个 JSON。所以宁可多读几轮。
+        """
+        n = 0
+        while n < limit:
+            b = self.read(1024)
+            if not b:
+                break
+            n += len(b)
+
+
 class HttpSrv:
     def __init__(self, port=80):
         self.port = port
         self.routes = {}
+        self.stream_routes = {}   # 上传类路由：请求体不缓存，交给处理函数边收边写
         self.files = {}
         self.sock = None
         self.accepted = 0
@@ -115,6 +183,14 @@ class HttpSrv:
     # ---------- 注册 ----------
     def route(self, method, path, fn):
         self.routes[(method, path)] = fn
+
+    def route_stream(self, method, path, fn):
+        """注册上传类路由：req.body 恒为空，改用 req.stream 逐块读。
+
+        处理函数必须自己处理「没读完」的情况；返回响应后剩余的请求体会被
+        丢弃（见 Body.drain），这样客户端不会因为 RST 看到假的失败。
+        """
+        self.stream_routes[(method, path)] = fn
 
     def serve_file(self, path, filename, mtime_cache=None):
         """path 是 URL，filename 是 flash 上的文件。自动探测同名 .gz。"""
@@ -348,12 +424,42 @@ class HttpSrv:
                 pass
 
         body = b""
+        need = 0
         n = headers.get("content-length")
         if n:
             try:
                 need = int(n)
             except Exception:
                 need = 0
+
+        req = Req(method, path, query, headers, b"")
+
+        # 上传类路由：请求体不进内存，直接交给处理函数
+        sfn = self.stream_routes.get((method, path))
+        if sfn:
+            if need <= 0:
+                self._send(conn, req, text(411, "need content-length"))
+                return True
+            # 传几百 KB 期间任何一次 1 秒的空档都不该算超时：
+            # 默认 1.0s 是给「建了连接不发请求」的预连接用的，这里必须放宽
+            try:
+                conn.settimeout(20.0)
+            except Exception:
+                pass
+            if len(rest) > need:
+                rest = rest[:need]
+            req.stream = Body(conn, rest, need - len(rest), need)
+            try:
+                r = sfn(req)
+            finally:
+                req.stream.drain()
+            if r is None:
+                r = Resp(b"")
+            self._send(conn, req, r)
+            del req
+            return True
+
+        if need:
             body = rest
             while len(body) < need:
                 chunk = conn.recv(min(512, need - len(body)))
@@ -362,7 +468,7 @@ class HttpSrv:
                 body += chunk
             body = body[:need]
 
-        req = Req(method, path, query, headers, body)
+        req.body = body
 
         fn = self.routes.get((method, path))
         if fn:
@@ -384,7 +490,9 @@ class HttpSrv:
             self._send_from_file(conn, req, resp)
             return
         reason = {200: "OK", 202: "Accepted", 302: "Found", 400: "Bad Request", 404: "Not Found",
-                  405: "Method Not Allowed", 500: "Internal Server Error"}.get(resp.code, "OK")
+                  405: "Method Not Allowed", 411: "Length Required",
+                  413: "Payload Too Large", 500: "Internal Server Error",
+                  507: "Insufficient Storage"}.get(resp.code, "OK")
         head = "HTTP/1.1 %d %s\r\n" % (resp.code, reason)
         head += "Content-Type: " + resp.ctype + "\r\n"
         head += "Content-Length: %d\r\n" % len(resp.body)

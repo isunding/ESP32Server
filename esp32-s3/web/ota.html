@@ -1,0 +1,215 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>系统升级 · ESP32 终端服务器</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="/theme.css?v=20261112">
+<style>
+  .kv{display:grid;grid-template-columns:auto 1fr;gap:8px 14px;font-size:13.5px}
+  .kv dt{color:var(--fg2)}
+  .kv dd{margin:0;text-align:right;font-family:ui-monospace,Menlo,Consolas,monospace;
+    font-size:12.5px;word-break:break-all}
+  .tagw{font-family:inherit;font-size:11px;color:var(--warm);border:1px solid var(--warm);
+    border-radius:999px;padding:0 7px;margin-left:6px;white-space:nowrap}
+  .pick{display:block;width:100%;padding:14px;border:1px dashed var(--line);
+    border-radius:12px;background:var(--bg3);color:var(--fg2);font:inherit;
+    font-size:13px;cursor:pointer;text-align:center}
+  .pick:hover{border-color:var(--acc);color:var(--acc)}
+  .pick input{display:none}
+  .pick b{color:var(--fg);font-weight:600}
+  .bar{height:8px;border-radius:99px;background:var(--bg3);overflow:hidden;margin:14px 0 8px;display:none}
+  .bar i{display:block;height:100%;width:0;background:var(--acc);transition:width .15s}
+  .bar.done i{background:var(--ok)}
+  .bar.bad i{background:var(--err)}
+  .act{display:flex;gap:10px;align-items:center;margin-top:12px;flex-wrap:wrap}
+  .act .btn{flex:0 0 auto}
+  .act .btn:disabled{opacity:.45;cursor:default}
+  .act .btn:disabled:hover{border-color:var(--line);color:var(--fg)}
+  .hint{font-size:12px;color:var(--fg2);line-height:1.8}
+  .hint code{background:var(--bg3);border:1px solid var(--line);border-radius:5px;
+    padding:1px 6px;font-size:11.5px}
+  .st{font-size:13px;min-height:20px}
+  .st.ok{color:var(--ok)}
+  .st.bad{color:var(--err)}
+</style>
+</head>
+<body>
+
+<div id="topbar"></div>
+
+<div class="wrap">
+  <div class="card">
+    <h2>当前版本</h2>
+    <dl class="kv">
+      <dt>版本</dt><dd id="ver">—</dd>
+      <dt>上次写入</dt><dd id="last">—</dd>
+      <dt>文件数</dt><dd id="nfile">—</dd>
+      <dt>剩余空间</dt><dd id="free">—</dd>
+    </dl>
+  </div>
+
+  <div class="card">
+    <h2>上传升级包</h2>
+    <label class="pick" id="pick">
+      <input type="file" id="file" accept=".mrp,application/octet-stream">
+      <span id="pickText">选择升级包 <b>.mrp</b></span>
+    </label>
+    <div class="bar" id="bar"><i id="barIn"></i></div>
+    <div class="st" id="st"></div>
+    <div class="act">
+      <button class="btn primary" id="go" disabled>开始升级</button>
+      <button class="btn" id="reboot" style="display:none">重启生效</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>说明</h2>
+    <p class="hint">
+      升级只覆盖页面与程序文件，<code>config.json</code>、新闻与地震的历史 CSV、
+      自选股不会被改动。<br>
+      升级包由 <code>scripts/ota.py --pack ota.mrp</code> 生成，整包约 1.2 MB，
+      包内带有生成时的版本串。上传完成后点「重启生效」，设备重启期间页面会短暂
+      无响应；版本在重启后才算真正生效，重启前显示为「待重启」。
+    </p>
+  </div>
+</div>
+
+<script src="/ui.js?v=20261112"></script>
+<script>
+var $ = MR.$;
+var busy = false;
+
+function loadInfo() {
+  return MR.api("/api/ota").then(function (d) {
+    $("ver").innerHTML = d.ver
+      ? (MR.esc(d.ver) + (d.pending
+          ? ' <span class="tagw">待重启</span>' : ""))
+      : "未记录";
+    $("nfile").textContent = d.files + " 个";
+    $("free").textContent = d.total
+      ? (MR.fmtBytes(d.free) + " / " + MR.fmtBytes(d.total)) : "—";
+    var l = d.last;
+    $("last").textContent = l
+      ? (l.path + " · " + MR.fmtBytes(l.size) +
+         (l.at ? " · " + new Date(l.at * 1000).toLocaleString() : ""))
+      : "—";
+  }).catch(function () {
+    $("ver").textContent = "读取失败";
+  });
+}
+
+function setBar(pct, cls) {
+  var bar = $("bar"), fill = $("barIn");
+  bar.style.display = "block";
+  bar.className = "bar" + (cls ? " " + cls : "");
+  fill.style.width = Math.max(0, Math.min(100, pct)) + "%";
+}
+
+/* 没选文件时不占地方：一条空进度条容易被当成「已经失败」 */
+function resetBar() {
+  var bar = $("bar"), fill = $("barIn");
+  bar.style.display = "none";
+  bar.className = "bar";
+  fill.style.width = "0%";
+}
+
+function say(msg, cls) {
+  var el = $("st");
+  el.textContent = msg || "";
+  el.className = "st" + (cls ? " " + cls : "");
+}
+
+var chosen = null;
+
+$("file").onchange = function () {
+  chosen = this.files && this.files[0] ? this.files[0] : null;
+  if (!chosen) {
+    $("pickText").innerHTML = '选择升级包 <b>.mrp</b>';
+    $("go").disabled = true;
+    resetBar();
+    return;
+  }
+  $("pickText").innerHTML = "<b>" + MR.esc(chosen.name) + "</b> · " +
+    MR.fmtBytes(chosen.size);
+  $("go").disabled = false;
+  $("reboot").style.display = "none";
+  resetBar();
+  say("");
+};
+
+$("go").onclick = function () {
+  if (!chosen || busy) return;
+  // 整包要逐项写 flash，1.2MB 在板上约 10 秒，这里不设超时，
+  // 只在进度长时间不动时给提示（见下面的 tick）
+  busy = true;
+  $("go").disabled = true;
+  $("file").disabled = true;
+  say("上传中…");
+  setBar(0);
+
+  var t0 = Date.now();
+  var xhr = new XMLHttpRequest();
+  xhr.open("PUT", "/api/ota/pack");
+  xhr.setRequestHeader("Content-Type", "application/octet-stream");
+  xhr.upload.onprogress = function (e) {
+    if (!e.lengthComputable) return;
+    var pct = e.loaded / e.total * 90;       // 上传占九成，解包占一成
+    setBar(pct);
+    say("上传 " + Math.floor(e.loaded / e.total * 100) + "% · " +
+        MR.fmtBytes(e.loaded) + " / " + MR.fmtBytes(e.total));
+  };
+  xhr.onload = function () {
+    busy = false;
+    $("file").disabled = false;
+    var d = {};
+    try { d = JSON.parse(xhr.responseText || "{}"); } catch (err) {}
+    if (xhr.status === 200 && d.ok) {
+      setBar(100, "done");
+      say("写入 " + d.files + " 个文件（" + MR.fmtBytes(d.bytes) + "），" +
+          ((Date.now() - t0) / 1000).toFixed(1) + " 秒；重启后生效，" +
+          "其他已打开的标签页需刷新", "ok");
+      $("reboot").style.display = "";
+      $("go").disabled = true;
+      loadInfo();
+    } else {
+      setBar(100, "bad");
+      say(d.msg || ("失败：HTTP " + xhr.status), "bad");
+      $("go").disabled = false;
+    }
+  };
+  xhr.onerror = function () {
+    busy = false;
+    $("file").disabled = false;
+    $("go").disabled = false;
+    setBar(100, "bad");
+    say("连接中断，升级包未写入完整，设备仍在跑旧版本", "bad");
+  };
+  xhr.send(chosen);
+};
+
+$("reboot").onclick = function () {
+  $("reboot").disabled = true;
+  say("设备重启中，约 15 秒后本页会自动重试…");
+  MR.post("/api/ota?a=reboot").catch(function () {});   // 重启会掐断这条响应，忽略错误
+  var tries = 0;
+  var timer = setInterval(function () {
+    tries++;
+    MR.api("/api/health").then(function () {
+      clearInterval(timer);
+      location.reload();
+    }).catch(function () {
+      if (tries > 30) {
+        clearInterval(timer);
+        say("设备没有回应，请刷新页面重试", "bad");
+      }
+    });
+  }, 3000);
+};
+
+MR.mountTop("系统升级");
+loadInfo();
+</script>
+</body>
+</html>

@@ -1,0 +1,803 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<script>try{var t=localStorage.getItem("mr.theme");if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>系统升级 · ESP32 终端服务器</title>
+<link rel="icon" href="data:,">
+<style>
+/* ESP32 终端服务器 · 设计系统
+ * 视觉语言照搬原路由器页面：深色底 + 分层卡片 + 细描边 + 等宽数字
+ */
+:root{
+  color-scheme:dark;
+  --bg:#0f1216; --bg2:#161b22; --bg3:#1c232c; --line:#283141;
+  --fg:#e6edf3; --fg2:#8b98a9; --acc:#ff6a00; --acc2:#3b82f6;
+  --ok:#3fb950; --err:#f85149; --warm:#ffb454; --cold:#58a6ff;
+  --radius:16px;
+}
+/* 亮色有两处来源：跟随系统（media），或被顶栏按钮手动锁定为 light。
+   两处配色相同，改配色时一起改。手动锁定 dark 时 media 段被 :not 排除，
+   回落到上面的 :root 深色值。 */
+@media (prefers-color-scheme:light){
+  :root:not([data-theme="dark"]){
+    color-scheme:light;
+    --bg:#f2f5f9; --bg2:#ffffff; --bg3:#e9eef4; --line:#d8dee4;
+    --fg:#1f2328; --fg2:#59636e;
+  }
+}
+:root[data-theme="light"]{
+  color-scheme:light;
+  --bg:#f2f5f9; --bg2:#ffffff; --bg3:#e9eef4; --line:#d8dee4;
+  --fg:#1f2328; --fg2:#59636e;
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;padding:0;min-height:100%}
+body{
+  background:radial-gradient(1200px 600px at 50% -10%, #1b2430 0%, var(--bg) 60%);
+  background-attachment:fixed;
+  color:var(--fg);
+  font:15px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+}
+@media (prefers-color-scheme:light){
+  :root:not([data-theme="dark"]) body{
+    background:radial-gradient(1200px 600px at 50% -10%, #ffffff 0%, var(--bg) 55%);
+  }
+}
+:root[data-theme="light"] body{
+  background:radial-gradient(1200px 600px at 50% -10%, #ffffff 0%, var(--bg) 55%);
+}
+a{color:var(--acc);text-decoration:none}
+
+/* ---------- 顶栏 ---------- */
+.top{
+  position:sticky;top:0;z-index:20;display:flex;align-items:center;gap:10px;
+  padding:12px 16px;background:color-mix(in srgb, var(--bg) 86%, transparent);
+  backdrop-filter:blur(10px);border-bottom:1px solid var(--line);
+}
+.top .back{
+  width:32px;height:32px;flex:0 0 32px;border-radius:9px;border:1px solid var(--line);
+  background:var(--bg2);color:var(--fg2);display:flex;align-items:center;justify-content:center;
+  font-size:16px;line-height:1;
+}
+.top .back:hover{color:var(--fg);border-color:var(--acc)}
+.top h1{font-size:16px;margin:0;font-weight:600;flex:1;letter-spacing:.3px;
+  min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.top .st{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--fg2);flex:0 0 auto}
+.dot{width:7px;height:7px;border-radius:50%;background:var(--fg2);flex:0 0 auto}
+.dot.on{background:var(--ok);box-shadow:0 0 8px var(--ok)}
+.dot.err{background:var(--err)}
+/* 心跳：每 15 秒刷一次 /api/health，点跟着呼吸一下，表示还在轮询 */
+.dot.beat{animation:beat 2s ease-in-out infinite}
+@keyframes beat{0%,100%{opacity:1}50%{opacity:.3}}
+@media (prefers-reduced-motion: reduce){.dot.beat{animation:none}}
+
+/* 板载指示灯心跳开关：波形图标，开时着色呼吸，关时灰暗 */
+.hbtn{
+  width:22px;height:22px;flex:0 0 auto;display:flex;align-items:center;justify-content:center;
+  padding:0;margin-left:2px;border:0;border-radius:6px;background:none;
+  color:var(--fg2);opacity:.5;cursor:pointer;transition:color .2s,opacity .2s,background .2s;
+  -webkit-tap-highlight-color:transparent;
+}
+.hbtn:hover{opacity:1;background:var(--bg2)}
+.hbtn:focus-visible{outline:1px solid var(--acc);outline-offset:1px}
+.hbtn svg{display:block}
+.hbtn.on{color:var(--ok);opacity:1;filter:drop-shadow(0 0 3px var(--ok))}
+.hbtn.on svg{animation:beat 2s ease-in-out infinite}
+@media (prefers-reduced-motion: reduce){.hbtn.on svg{animation:none}}
+
+/* ---------- 页签 ---------- */
+.nav{
+  display:flex;gap:6px;overflow-x:auto;padding:10px 16px;
+  border-bottom:1px solid var(--line);background:color-mix(in srgb, var(--bg) 86%, transparent);
+  backdrop-filter:blur(10px);position:sticky;top:57px;z-index:19;
+}
+.nav a{
+  flex:0 0 auto;font-size:13px;color:var(--fg2);border:1px solid var(--line);
+  background:var(--bg2);border-radius:999px;padding:5px 13px;white-space:nowrap;
+}
+.nav a.on{background:var(--acc);border-color:var(--acc);color:#fff}
+.nav a:hover{color:var(--fg)}
+
+/* ---------- 容器 ---------- */
+.wrap{max-width:760px;margin:0 auto;padding:16px 14px 40px}
+.card{
+  background:var(--bg2);border:1px solid var(--line);border-radius:var(--radius);
+  padding:16px 18px;margin-bottom:12px;
+}
+.card>h2{margin:0 0 12px;font-size:13px;font-weight:600;color:var(--fg2);letter-spacing:.5px}
+.card.flush{padding:6px 18px}
+.muted{color:var(--fg2)}
+.small{font-size:12px}
+.right{margin-left:auto}
+.btn{
+  background:var(--bg3);border:1px solid var(--line);color:var(--fg);
+  border-radius:9px;padding:7px 13px;font:inherit;font-size:13px;cursor:pointer;
+}
+.btn:hover{border-color:var(--acc);color:var(--acc)}
+.btn.primary{background:var(--acc);border-color:var(--acc);color:#fff}
+.btn.primary:hover{color:#fff;filter:brightness(1.08)}
+.btn.mini{padding:4px 10px;font-size:12px;border-radius:7px;text-decoration:none}
+.card>h2.hd{display:flex;align-items:center;gap:8px}
+.card>h2.hd .sp{flex:1}
+
+/* ---------- 页内工具条（更新时间 + 刷新按钮） ---------- */
+/* 原先只写在 weather.html 的内联样式里，行情页用了同一个 class
+   却拿不到样式，按钮就跑到左边去了。 */
+.pgtop{display:flex;align-items:center;gap:10px;margin:0 0 10px}
+.pgtop .upd{margin-left:auto;font-size:11.5px;color:var(--fg2);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pgtop .btn{flex:0 0 auto;display:inline-flex;align-items:center;gap:6px}
+.pgtop .btn .ic{display:inline-block;font-size:14px;line-height:1}
+
+/* ---------- 门户 ---------- */
+.hero{text-align:center;margin:10px 0 26px}
+.hero h1{margin:0 0 6px;font-size:24px;font-weight:600;letter-spacing:.5px}
+.hero .sub{color:var(--fg2);font-size:13.5px}
+.hero .badge{
+  display:inline-flex;align-items:center;gap:7px;margin-top:12px;
+  background:var(--bg3);border:1px solid var(--line);border-radius:999px;
+  padding:5px 14px;font-size:12.5px;color:var(--fg2);
+}
+.grid{display:grid;gap:14px;grid-template-columns:repeat(auto-fit,minmax(240px,1fr))}
+.tile{
+  display:flex;align-items:center;gap:14px;color:inherit;
+  background:linear-gradient(160deg,var(--bg2),var(--bg3));
+  border:1px solid var(--line);border-radius:var(--radius);
+  padding:18px;transition:.15s;position:relative;overflow:hidden;
+}
+.tile:hover{border-color:var(--acc);transform:translateY(-2px);box-shadow:0 10px 26px rgba(0,0,0,.45)}
+.tile:active{transform:translateY(0)}
+.tile .ico{
+  width:46px;height:46px;flex:0 0 46px;border-radius:12px;display:flex;
+  align-items:center;justify-content:center;background:var(--bg);border:1px solid var(--line);
+}
+.tile .ico svg{width:22px;height:22px;stroke:var(--acc);fill:none;stroke-width:1.7;
+  stroke-linecap:round;stroke-linejoin:round}
+.tile b{display:block;font-size:15.5px;font-weight:600;margin-bottom:2px}
+.tile span{display:block;color:var(--fg2);font-size:12.5px;white-space:nowrap;
+  overflow:hidden;text-overflow:ellipsis}
+.tile .go{position:absolute;right:14px;color:var(--fg2);font-size:18px;opacity:.5}
+.tile:hover .go{color:var(--acc);opacity:1}
+
+/* ---------- 服务状态小格 ---------- */
+.sts{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+@media (min-width:560px){.sts{grid-template-columns:repeat(4,minmax(0,1fr))}}
+.st1{display:grid;grid-template-columns:auto minmax(0,1fr);column-gap:7px;row-gap:1px;
+  align-items:center;background:var(--bg3);border:1px solid var(--line);
+  border-radius:10px;padding:9px 11px;font-size:12.5px}
+.st1 .dot{grid-column:1;grid-row:1;width:8px;height:8px}
+.st1 b{grid-column:2;grid-row:1;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.st1 small{grid-column:2;grid-row:2;font-size:11.5px;color:var(--fg2);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+/* ---------- 天气 ---------- */
+.now{text-align:center;padding:8px 0 4px}
+.now .loc{color:var(--fg2);font-size:14px;margin-bottom:4px}
+.now .big{display:flex;align-items:flex-end;justify-content:center;gap:14px;margin:6px 0}
+.now .temp{font:600 72px/1 ui-monospace,Menlo,Consolas,monospace;letter-spacing:-2px}
+.now .temp .deg{font-size:.38em;font-style:normal;vertical-align:.72em;
+  margin-left:2px;letter-spacing:0;color:var(--fg2)}
+.now .txt{font-size:17px;color:var(--fg2);padding-bottom:9px}
+.now .feels{color:var(--fg2);font-size:13.5px;margin-top:2px}
+.metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:16px}
+.metric{background:var(--bg3);border-radius:11px;padding:9px 4px;text-align:center}
+.metric .k{font-size:11px;color:var(--fg2)}
+.metric .v{font-size:15px;font-weight:600;margin-top:2px}
+
+.aq{display:flex;align-items:center;gap:14px}
+.aq .tile-aqi{
+  min-width:64px;height:64px;border-radius:16px;display:flex;flex-direction:column;
+  align-items:center;justify-content:center;color:#fff;font-weight:700;line-height:1;
+  flex:0 0 64px;
+}
+.aq .tile-aqi b{font-size:24px;letter-spacing:-.5px}
+.aq .tile-aqi small{font-size:10px;font-weight:500;opacity:.92;margin-top:3px;letter-spacing:1px}
+.aq .info{flex:1;min-width:0}
+.aq .cat{font-size:15px;font-weight:600;margin-bottom:3px}
+.aq .adv{font-size:12px;color:var(--fg2);line-height:1.55}
+.poll{display:grid;grid-template-columns:repeat(auto-fit,minmax(78px,1fr));gap:7px;margin-top:12px}
+.poll .p{background:var(--bg3);border-radius:9px;padding:8px 6px;text-align:center}
+.poll .p .n{font-size:10.5px;color:var(--fg2)}
+.poll .p .v{font-size:14.5px;font-weight:600;margin:2px 0 1px}
+.poll .p .u{font-size:9.5px;color:var(--fg2)}
+
+.warn-bar{display:flex;align-items:center;gap:9px;font-size:13px;color:var(--fg2)}
+.warn-bar .ok-dot{width:9px;height:9px;border-radius:50%;background:var(--ok);
+  box-shadow:0 0 0 3px rgba(63,185,80,.16);flex:0 0 9px}
+.warn-item{background:var(--bg3);border-left:3px solid var(--err);border-radius:9px;
+  padding:10px 12px;margin-bottom:9px}
+.warn-item:last-child{margin-bottom:0}
+.warn-item .hd{display:flex;align-items:center;gap:8px;margin-bottom:5px;flex-wrap:wrap}
+.warn-item .lv{font-size:11px;font-weight:600;padding:1px 7px;border-radius:5px;color:#fff}
+.warn-item .ti{font-size:13.5px;font-weight:600}
+.warn-item .bd{font-size:12.5px;line-height:1.6;color:var(--fg)}
+.warn-item .mt{font-size:11px;color:var(--fg2);margin-top:6px}
+
+.hours{display:flex;gap:8px;overflow-x:auto;padding-bottom:6px}
+.hour{flex:0 0 auto;width:58px;text-align:center;background:var(--bg3);
+  border-radius:11px;padding:9px 4px}
+.hour .h{font-size:11.5px;color:var(--fg2)}
+.hour .t{font-size:14px;font-weight:600;margin-top:4px}
+.hour .s{font-size:10.5px;color:var(--fg2);margin-top:2px;white-space:nowrap;
+  overflow:hidden;text-overflow:ellipsis}
+
+.day{display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid var(--line)}
+.day:last-child{border-bottom:0}
+.day .d{width:56px;font-size:13.5px}
+.day .s{flex:1;font-size:13px;color:var(--fg2);min-width:0;overflow:hidden;
+  text-overflow:ellipsis;white-space:nowrap}
+.day .r{font-size:13.5px;font-variant-numeric:tabular-nums;white-space:nowrap}
+.day .r b{color:var(--warm);font-weight:600}
+.day .r i{color:var(--cold);font-style:normal}
+
+.idx{display:grid;grid-template-columns:repeat(auto-fill,minmax(132px,1fr));gap:8px}
+.idx .it{background:var(--bg3);border-radius:10px;padding:9px 11px;font-size:12px}
+.idx .it b{display:block;font-size:13px;margin-bottom:2px}
+.idx .it span{color:var(--fg2)}
+
+/* ---------- 状态 ---------- */
+.meters{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.meter .k{font-size:11px;color:var(--fg2)}
+.meter .v{font-size:19px;font-weight:600;font-variant-numeric:tabular-nums}
+.bar{height:5px;background:var(--line);border-radius:3px;margin-top:6px;overflow:hidden}
+.bar i{display:block;height:100%;width:0;background:var(--acc2);border-radius:3px;transition:width .35s}
+.bar i.warn{background:var(--warm)}
+.bar i.crit{background:var(--err)}
+
+table.kv{width:100%;border-collapse:collapse;font-size:13px}
+table.kv td{padding:8px 0;border-bottom:1px solid var(--line);vertical-align:top}
+table.kv td:first-child{color:var(--fg2);width:42%}
+table.kv tr:last-child td{border-bottom:0}
+table.kv .mono{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12.5px}
+
+/* ---------- 流量 ---------- */
+.dev{display:flex;align-items:center;justify-content:space-between;
+  padding:10px 0;border-bottom:1px solid var(--line)}
+.dev:last-child{border-bottom:0}
+.dev .nm{font-size:13.5px;font-weight:500}
+.dev .ip{color:var(--fg2);font-size:11.5px}
+.dev .vals{text-align:right;white-space:nowrap;
+  font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12.5px}
+.dev .dn{color:var(--ok)}
+.dev .up{color:var(--cold)}
+.rank{display:inline-block;width:20px;color:var(--fg2);font-size:12px}
+
+/* ---------- IPTV ---------- */
+.player{position:relative;background:#0b0e12;border-radius:12px;overflow:hidden;
+  aspect-ratio:16/9;border:1px solid var(--line)}
+video{width:100%;height:100%;display:block;background:#0b0e12}
+.ptip{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+  color:#8b98a9;font-size:13px;text-align:center;padding:0 24px;pointer-events:none}
+.ph{display:flex;align-items:center;gap:10px;margin-bottom:10px}
+.ph b{font-size:14px}
+.search{background:var(--bg3);border:1px solid var(--line);color:var(--fg);
+  border-radius:9px;padding:7px 11px;font:inherit;font-size:13px;width:46%}
+.search:focus{outline:none;border-color:var(--acc)}
+.grp{margin-top:14px}
+.grp h3{margin:0 0 4px;font-size:12px;color:var(--fg2);font-weight:600;letter-spacing:.5px}
+.ch{display:flex;align-items:center;justify-content:space-between;gap:10px;
+  padding:10px 10px;border-radius:9px;font-size:14px;cursor:pointer}
+.ch:hover{background:var(--bg3)}
+.ch.playing{background:var(--bg3);box-shadow:inset 2px 0 0 var(--acc)}
+.ch .tag{font-size:11px;color:var(--fg2);white-space:nowrap}
+.ch .tag.live{color:var(--ok)}
+.ch .tag.live::before{content:"● ";font-size:9px;vertical-align:1px}
+.ch .tag.dead{color:var(--fg2)}
+
+/* ---------- 提示 ---------- */
+.toast{position:fixed;left:50%;bottom:28px;transform:translateX(-50%) translateY(14px);
+  background:#1f2937;border:1px solid var(--line);color:#e6edf3;padding:9px 18px;
+  border-radius:9px;font-size:13px;opacity:0;transition:.25s;pointer-events:none;z-index:60}
+.toast.on{opacity:1;transform:translateX(-50%) translateY(0)}
+.foot{color:var(--fg2);font-size:12px;text-align:center;margin:18px 0 0;line-height:1.9}
+.foot code{background:var(--bg3);border:1px solid var(--line);border-radius:5px;padding:1px 6px;font-size:11.5px}
+.foot a{color:var(--fg2);text-decoration:none;border-bottom:1px dashed var(--line)}
+.foot a:hover{color:var(--acc);border-bottom-color:var(--acc)}
+
+@media (max-width:520px){
+  .wrap{padding:12px 12px 32px}
+  .nav{gap:4px;padding:9px 10px}
+  .nav a{padding:4px 9px;font-size:12px}
+  .now .temp{font-size:58px}
+  .meters{grid-template-columns:1fr 1fr;gap:10px}
+  .grid{grid-template-columns:1fr}
+}
+
+/* ---------- 信息流模块（新闻；视觉与首页 .tile 一致） ---------- */
+.feed{display:grid;gap:12px}
+.feed>.empty{grid-column:1/-1}
+.frow{min-width:0}
+.frow .fh{display:flex;align-items:center;gap:8px;margin-bottom:6px;
+  font-size:12.5px;color:var(--fg);font-variant-numeric:tabular-nums}
+.frow .fh .ft{font-weight:600}
+.frow .fh .sp{flex:1}
+.chips{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px}
+.chips button{font-size:12px;padding:4px 10px;border-radius:999px;cursor:pointer;
+  border:1px solid var(--line);background:var(--bg3);color:var(--fg2);font-family:inherit}
+.chips button.on{border-color:var(--acc);color:var(--acc);background:rgba(255,106,0,.12)}
+.chips .lbl{font-size:11.5px;color:var(--fg2);align-self:center;margin-right:2px}
+.empty{padding:20px 0;text-align:center}
+.fitem{min-width:0;background:linear-gradient(160deg,var(--bg2),var(--bg3));
+  border:1px solid var(--line);border-radius:var(--radius);padding:12px 14px}
+.fitem .fb{font-size:13.5px;line-height:1.6;white-space:pre-wrap;word-break:break-word}
+.fitem .fb b{font-weight:600;color:var(--fg)}
+.frow .ff{display:flex;gap:6px;flex-wrap:wrap;margin-top:7px;align-items:center}
+.flv{font-size:10.5px;border-radius:5px;padding:1px 6px;flex:0 0 auto}
+.flv.A{background:rgba(230,60,60,.16);color:#e23c3c}
+.flv.B{background:rgba(240,160,40,.16);color:#d98a1a}
+.flv.C{background:var(--bg3);color:var(--fg2)}
+.ftag{font-size:11px;color:var(--fg2);border:1px solid var(--line);
+  border-radius:999px;padding:1px 7px}
+.fbtn{font-size:11px;border:1px solid var(--line);border-radius:999px;
+  padding:1px 7px;cursor:pointer;background:var(--bg2);color:var(--fg2);font-family:inherit}
+.fbtn.added{border-color:var(--ok);color:var(--ok)}
+
+</style>
+<style>
+  .kv{display:grid;grid-template-columns:auto 1fr;gap:8px 14px;font-size:13.5px}
+  .kv dt{color:var(--fg2)}
+  .kv dd{margin:0;text-align:right;font-family:ui-monospace,Menlo,Consolas,monospace;
+    font-size:12.5px;word-break:break-all}
+  .tagw{font-family:inherit;font-size:11px;color:var(--warm);border:1px solid var(--warm);
+    border-radius:999px;padding:0 7px;margin-left:6px;white-space:nowrap}
+  .pick{display:block;width:100%;padding:14px;border:1px dashed var(--line);
+    border-radius:12px;background:var(--bg3);color:var(--fg2);font:inherit;
+    font-size:13px;cursor:pointer;text-align:center}
+  .pick:hover{border-color:var(--acc);color:var(--acc)}
+  .pick input{display:none}
+  .pick b{color:var(--fg);font-weight:600}
+  .bar{height:8px;border-radius:99px;background:var(--bg3);overflow:hidden;margin:14px 0 8px;display:none}
+  .bar i{display:block;height:100%;width:0;background:var(--acc);transition:width .15s}
+  .bar.done i{background:var(--ok)}
+  .bar.bad i{background:var(--err)}
+  .act{display:flex;gap:10px;align-items:center;margin-top:12px;flex-wrap:wrap}
+  .act .btn{flex:0 0 auto}
+  .act .btn:disabled{opacity:.45;cursor:default}
+  .act .btn:disabled:hover{border-color:var(--line);color:var(--fg)}
+  .hint{font-size:12px;color:var(--fg2);line-height:1.8}
+  .hint code{background:var(--bg3);border:1px solid var(--line);border-radius:5px;
+    padding:1px 6px;font-size:11.5px}
+  .st{font-size:13px;min-height:20px}
+  .st.ok{color:var(--ok)}
+  .st.bad{color:var(--err)}
+</style>
+</head>
+<body>
+
+<div id="topbar"></div>
+
+<div class="wrap">
+  <div class="card">
+    <h2>当前版本</h2>
+    <dl class="kv">
+      <dt>版本</dt><dd id="ver">—</dd>
+      <dt>上次写入</dt><dd id="last">—</dd>
+      <dt>文件数</dt><dd id="nfile">—</dd>
+      <dt>剩余空间</dt><dd id="free">—</dd>
+    </dl>
+  </div>
+
+  <div class="card">
+    <h2>上传升级包</h2>
+    <label class="pick" id="pick">
+      <input type="file" id="file" accept=".mrp,application/octet-stream">
+      <span id="pickText">选择升级包 <b>.mrp</b></span>
+    </label>
+    <div class="bar" id="bar"><i id="barIn"></i></div>
+    <div class="st" id="st"></div>
+    <div class="act">
+      <button class="btn primary" id="go" disabled>开始升级</button>
+      <button class="btn" id="reboot" style="display:none">重启生效</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>说明</h2>
+    <p class="hint">
+      升级只覆盖页面与程序文件，<code>config.json</code>、新闻与地震的历史 CSV、
+      自选股不会被改动。<br>
+      升级包由 <code>scripts/ota.py --pack ota.mrp</code> 生成，整包约 1.2 MB，
+      包内带有生成时的版本串。上传完成后点「重启生效」，设备重启期间页面会短暂
+      无响应；版本在重启后才算真正生效，重启前显示为「待重启」。
+    </p>
+  </div>
+</div>
+
+<script>
+/* ESP32 终端服务器 · 公共前端
+ * 各页面共用：取数、格式化、顶栏与页签、提示条
+ */
+"use strict";
+
+var MR = (function () {
+
+  var PAGES = [
+    { href: "/", title: "首页" },
+    { href: "/weather.html", title: "天气" },
+    { href: "/quake.html", title: "地震" },
+    { href: "/news.html", title: "新闻" },
+    { href: "/market.html", title: "行情" },
+    { href: "/iptv.html", title: "直播" },
+    { href: "/radio.html", title: "电台" },
+    { href: "/info.html", title: "本机" },
+    { href: "/ntp.html", title: "校时" }
+  ];
+
+  function $(id) { return document.getElementById(id); }
+
+  function esc(s) {
+    return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+    });
+  }
+
+  function api(path) {
+    return fetch(path, { cache: "no-store" }).then(function (r) {
+      if (!r.ok) throw new Error("HTTP " + r.status);
+      return r.json();
+    });
+  }
+
+  /* 写接口：统一按 {"ok":0,"msg":...} 判失败，异常信息直接给用户看 */
+  function post(path, body) {
+    return fetch(path, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body || {})
+    }).then(function (r) {
+      return r.json().catch(function () { return {}; }).then(function (d) {
+        if (!r.ok || !d.ok) throw new Error(d.msg || ("HTTP " + r.status));
+        return d;
+      });
+    });
+  }
+
+  function fmtBytes(n) {
+    n = Number(n) || 0;
+    if (n < 1024) return n + " B";
+    if (n < 1048576) return (n / 1024).toFixed(1) + " KB";
+    if (n < 1073741824) return (n / 1048576).toFixed(1) + " MB";
+    return (n / 1073741824).toFixed(2) + " GB";
+  }
+
+  function fmtDur(sec) {
+    sec = Number(sec) || 0;
+    var d = Math.floor(sec / 86400), h = Math.floor(sec % 86400 / 3600), m = Math.floor(sec % 3600 / 60);
+    if (d) return d + " 天 " + h + " 小时";
+    if (h) return h + " 小时 " + m + " 分";
+    return m + " 分钟";
+  }
+
+  function pad(n) { return n < 10 ? "0" + n : "" + n; }
+  function hhmm(d) { return pad(d.getHours()) + ":" + pad(d.getMinutes()); }
+  function mmdd(s) { return s ? s.substr(5, 5) : "--"; }
+
+  function currentPage() {
+    var p = location.pathname;
+    if (p === "" || p === "/" || p === "/index.html") return "/";
+    return p.replace(/^\/+/, "/");
+  }
+
+  /* 板载指示灯心跳开关。图标画在 IP 右侧，点一下切一次，状态存板上配置。
+     显示与否取决于 /api/health 的 led_hw：没有可控指示灯的设备不出现按钮。 */
+  var LED_SVG = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" ' +
+    'stroke="currentColor" stroke-width="2" stroke-linecap="round" ' +
+    'stroke-linejoin="round" aria-hidden="true"><path d="M2 12h4l2.5-7 5 14 2.5-7h8"/></svg>';
+
+  function setLedBtn(on, hw) {
+    var b = $("hLed");
+    if (!b) return;
+    b.style.display = hw ? "" : "none";
+    b.className = "hbtn" + (on ? " on" : "");
+    b.setAttribute("data-on", on ? "1" : "0");
+    b.setAttribute("aria-pressed", on ? "true" : "false");
+    b.title = on ? "板载心跳：开（点击关闭）" : "板载心跳：关（点击开启）";
+  }
+
+  function toggleLed() {
+    var b = $("hLed");
+    if (!b || b.getAttribute("data-busy") === "1") return;
+    var want = b.getAttribute("data-on") === "1" ? 0 : 1;
+    b.setAttribute("data-busy", "1");
+    post("/api/led", { on: want }).then(function (r) {
+      b.removeAttribute("data-busy");
+      setLedBtn(r.on ? 1 : 0, 1);
+      toast(r.on ? "板载心跳已开启" : "板载心跳已关闭", 1600);
+    }).catch(function (e) {
+      b.removeAttribute("data-busy");
+      toast(e && e.message ? e.message : "切换失败");
+    });
+  }
+
+  /* 深浅色切换。空值表示跟随系统，选中后写入 localStorage 锁定。
+     图标画的是“点一下会切到的模式”：现在亮色给月亮，现在暗色给太阳。 */
+  var THEME_KEY = "mr.theme";
+  var SUN_SVG = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" ' +
+    'stroke="currentColor" stroke-width="2" stroke-linecap="round" ' +
+    'stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/>' +
+    '<path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2"/>' +
+    '<path d="M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>';
+  var MOON_SVG = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" ' +
+    'stroke="currentColor" stroke-width="2" stroke-linecap="round" ' +
+    'stroke-linejoin="round" aria-hidden="true">' +
+    '<path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>';
+
+  function themePref() {
+    try { return localStorage.getItem(THEME_KEY) || ""; } catch (e) { return ""; }
+  }
+
+  /* 判定顺序：DOM 上的 data-theme（构建时注入的引导脚本已按 localStorage 打过）
+     → localStorage → 系统配色。少了第一项，手动锁定后图标会画错方向。 */
+  function themeNow() {
+    var d = document.documentElement.getAttribute("data-theme");
+    if (d === "light" || d === "dark") return d;
+    var t = themePref();
+    if (t === "light" || t === "dark") return t;
+    return (window.matchMedia &&
+      window.matchMedia("(prefers-color-scheme: light)").matches) ? "light" : "dark";
+  }
+
+  function paintThemeBtn() {
+    var b = $("hTheme");
+    if (!b) return;
+    var light = themeNow() === "light";
+    b.innerHTML = light ? MOON_SVG : SUN_SVG;
+    b.title = light ? "切换到深色" : "切换到浅色";
+    b.setAttribute("aria-label", b.title);
+  }
+
+  function toggleTheme() {
+    var next = themeNow() === "light" ? "dark" : "light";
+    document.documentElement.setAttribute("data-theme", next);
+    try { localStorage.setItem(THEME_KEY, next); } catch (e) {}
+    paintThemeBtn();
+  }
+
+  /* 跟随系统时，系统配色变了要把图标跟着换掉 */
+  if (window.matchMedia) {
+    var mq = window.matchMedia("(prefers-color-scheme: light)");
+    var onScheme = function () { if (!themePref()) paintThemeBtn(); };
+    if (mq.addEventListener) mq.addEventListener("change", onScheme);
+    else if (mq.addListener) mq.addListener(onScheme);
+  }
+
+  /* 顶栏 + 页签。title 为空时不显示返回键。
+     挂载完就自动开始心跳：以前要求每页自己调 healthTick()，漏掉一页
+     右上角就永远停在初始文案「连接中…」。 */
+  function mountTop(title) {
+    var cur = currentPage();
+    var nav = PAGES.map(function (p) {
+      var on = p.href === cur ? " on" : "";
+      return '<a class="' + on.trim() + '" href="' + p.href + '">' + p.title + "</a>";
+    }).join("");
+
+    var back = cur === "/" ? "" :
+      '<a class="back" href="/" title="返回首页">‹</a>';
+
+    var html =
+      '<div class="top">' + back +
+      "<h1>" + esc(title) + "</h1>" +
+      '<div class="st"><span class="dot" id="hDot"></span><span id="hIp">连接中…</span>' +
+      '<button class="hbtn" id="hLed" type="button" data-on="0" ' +
+      'aria-pressed="false" title="板载心跳">' + LED_SVG + "</button>" +
+      '<button class="hbtn" id="hTheme" type="button" title="切换深浅色"></button></div>' +
+      "</div>" +
+      '<div class="nav">' + nav + "</div>";
+
+    var host = document.getElementById("topbar");
+    if (host) {
+      host.innerHTML = html;
+      var lb = $("hLed");
+      if (lb) lb.onclick = toggleLed;
+      var tb = $("hTheme");
+      if (tb) tb.onclick = toggleTheme;
+      paintThemeBtn();
+      startBeat();
+    }
+  }
+
+  var tickBusy = null, tickAt = 0, tickTimer = 0;
+
+  /* 心跳：取一次 /api/health，把 IP 与状态点刷到顶栏。
+     重复调用复用同一次请求，多页共用一个 15 秒定时器。 */
+  function healthTick() {
+    if (tickBusy) return tickBusy;
+    if (MR.device && Date.now() - tickAt < 800) return Promise.resolve(MR.device);
+    tickBusy = api("/api/health").then(function (h) {
+      var dot = $("hDot"), ip = $("hIp");
+      if (dot) dot.className = "dot beat " + (h.router_ok ? "on" : "err");
+      if (ip) {
+        ip.textContent = h.ip;
+        ip.title = (h.router_ok ? "路由器可达" : "路由器不可达") + " · RSSI " + h.rssi +
+          " · 运行 " + fmtDur(h.up) + " · 空闲内存 " + fmtBytes(h.mem_free);
+      }
+      setLedBtn(h.led_on ? 1 : 0, h.led_hw ? 1 : 0);
+      MR.device = h;
+      return h;
+    }).catch(function () {
+      var dot = $("hDot"), ip = $("hIp");
+      if (dot) dot.className = "dot beat err";
+      // 掉了也别把 IP 抹成占位文案，留着最后已知的地址更有用
+      if (ip) {
+        ip.textContent = MR.device ? MR.device.ip : "离线";
+        ip.title = "设备无响应";
+      }
+      return null;
+    }).then(function (r) {
+      tickBusy = null;
+      tickAt = Date.now();
+      return r;
+    });
+    return tickBusy;
+  }
+
+  function startBeat() {
+    if (tickTimer) return;
+    healthTick();
+    tickTimer = setInterval(healthTick, 15000);
+  }
+
+  var toastTimer = 0;
+  function toast(msg, ms) {
+    var el = document.getElementById("toast");
+    if (!el) {
+      el = document.createElement("div");
+      el.id = "toast";
+      el.className = "toast";
+      document.body.appendChild(el);
+    }
+    el.textContent = msg;
+    el.className = "toast on";
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(function () { el.className = "toast"; }, ms || 2600);
+  }
+
+  function empty(msg) { return '<span class="muted small">' + esc(msg) + "</span>"; }
+
+  return {
+    $: $, esc: esc, api: api, post: post, fmtBytes: fmtBytes, fmtDur: fmtDur,
+    hhmm: hhmm, mmdd: mmdd, mountTop: mountTop, healthTick: healthTick,
+    startBeat: startBeat,
+    toast: toast, empty: empty, PAGES: PAGES, device: null
+  };
+})();
+
+</script>
+<script>
+var $ = MR.$;
+var busy = false;
+
+function loadInfo() {
+  return MR.api("/api/ota").then(function (d) {
+    $("ver").innerHTML = d.ver
+      ? (MR.esc(d.ver) + (d.pending
+          ? ' <span class="tagw">待重启</span>' : ""))
+      : "未记录";
+    $("nfile").textContent = d.files + " 个";
+    $("free").textContent = d.total
+      ? (MR.fmtBytes(d.free) + " / " + MR.fmtBytes(d.total)) : "—";
+    var l = d.last;
+    $("last").textContent = l
+      ? (l.path + " · " + MR.fmtBytes(l.size) +
+         (l.at ? " · " + new Date(l.at * 1000).toLocaleString() : ""))
+      : "—";
+  }).catch(function () {
+    $("ver").textContent = "读取失败";
+  });
+}
+
+function setBar(pct, cls) {
+  var bar = $("bar"), fill = $("barIn");
+  bar.style.display = "block";
+  bar.className = "bar" + (cls ? " " + cls : "");
+  fill.style.width = Math.max(0, Math.min(100, pct)) + "%";
+}
+
+/* 没选文件时不占地方：一条空进度条容易被当成「已经失败」 */
+function resetBar() {
+  var bar = $("bar"), fill = $("barIn");
+  bar.style.display = "none";
+  bar.className = "bar";
+  fill.style.width = "0%";
+}
+
+function say(msg, cls) {
+  var el = $("st");
+  el.textContent = msg || "";
+  el.className = "st" + (cls ? " " + cls : "");
+}
+
+var chosen = null;
+
+$("file").onchange = function () {
+  chosen = this.files && this.files[0] ? this.files[0] : null;
+  if (!chosen) {
+    $("pickText").innerHTML = '选择升级包 <b>.mrp</b>';
+    $("go").disabled = true;
+    resetBar();
+    return;
+  }
+  $("pickText").innerHTML = "<b>" + MR.esc(chosen.name) + "</b> · " +
+    MR.fmtBytes(chosen.size);
+  $("go").disabled = false;
+  $("reboot").style.display = "none";
+  resetBar();
+  say("");
+};
+
+$("go").onclick = function () {
+  if (!chosen || busy) return;
+  // 整包要逐项写 flash，1.2MB 在板上约 10 秒，这里不设超时，
+  // 只在进度长时间不动时给提示（见下面的 tick）
+  busy = true;
+  $("go").disabled = true;
+  $("file").disabled = true;
+  say("上传中…");
+  setBar(0);
+
+  var t0 = Date.now();
+  var xhr = new XMLHttpRequest();
+  xhr.open("PUT", "/api/ota/pack");
+  xhr.setRequestHeader("Content-Type", "application/octet-stream");
+  xhr.upload.onprogress = function (e) {
+    if (!e.lengthComputable) return;
+    var pct = e.loaded / e.total * 90;       // 上传占九成，解包占一成
+    setBar(pct);
+    say("上传 " + Math.floor(e.loaded / e.total * 100) + "% · " +
+        MR.fmtBytes(e.loaded) + " / " + MR.fmtBytes(e.total));
+  };
+  xhr.onload = function () {
+    busy = false;
+    $("file").disabled = false;
+    var d = {};
+    try { d = JSON.parse(xhr.responseText || "{}"); } catch (err) {}
+    if (xhr.status === 200 && d.ok) {
+      setBar(100, "done");
+      say("写入 " + d.files + " 个文件（" + MR.fmtBytes(d.bytes) + "），" +
+          ((Date.now() - t0) / 1000).toFixed(1) + " 秒；重启后生效，" +
+          "其他已打开的标签页需刷新", "ok");
+      $("reboot").style.display = "";
+      $("go").disabled = true;
+      loadInfo();
+    } else {
+      setBar(100, "bad");
+      say(d.msg || ("失败：HTTP " + xhr.status), "bad");
+      $("go").disabled = false;
+    }
+  };
+  xhr.onerror = function () {
+    busy = false;
+    $("file").disabled = false;
+    $("go").disabled = false;
+    setBar(100, "bad");
+    say("连接中断，升级包未写入完整，设备仍在跑旧版本", "bad");
+  };
+  xhr.send(chosen);
+};
+
+$("reboot").onclick = function () {
+  $("reboot").disabled = true;
+  say("设备重启中，约 15 秒后本页会自动重试…");
+  MR.post("/api/ota?a=reboot").catch(function () {});   // 重启会掐断这条响应，忽略错误
+  var tries = 0;
+  var timer = setInterval(function () {
+    tries++;
+    MR.api("/api/health").then(function () {
+      clearInterval(timer);
+      location.reload();
+    }).catch(function () {
+      if (tries > 30) {
+        clearInterval(timer);
+        say("设备没有回应，请刷新页面重试", "bad");
+      }
+    });
+  }, 3000);
+};
+
+MR.mountTop("系统升级");
+loadInfo();
+</script>
+</body>
+</html>

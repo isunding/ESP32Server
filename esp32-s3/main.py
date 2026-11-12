@@ -7,6 +7,7 @@
 功能页：天气 / 行情 / 状态 / 流量 / NTP / IPTV（无告警）
 """
 
+import binascii
 import gc
 import json
 import os
@@ -447,6 +448,116 @@ def save_cfg(cfg):
         os.rename(tmp, CONFIG_PATH)
 
 
+# ---------------------------------------------------------------- OTA
+# 允许被覆盖的文件。用白名单而不是「只要在 / 下就允许」：路径校验一旦有漏洞，
+# 任何同网段设备都能把任意文件写成任意内容，而 main.py 被写坏就是变砖。
+OTA_MANIFEST = "ota.json"
+OTA_MODULES = ("boot.py", "main.py", "httpsrv.py", "netmgr.py",
+               "ntpsrv.py", "ntpsync.py", "rap.py", "cncal.py")
+OTA_WWW_EXT = (".html", ".css", ".js", ".json", ".ico", ".svg", ".gz")
+
+
+def _ota_rel(rel):
+    """规整 OTA 目标路径；不合规返回 None。
+
+    只接受两种形态：根目录下的运行模块，或 www/ 下的一层文件。
+    拒绝绝对路径、反斜杠与 ..，避免写到这两个位置之外。
+    """
+    if not rel or len(rel) > 64 or ".." in rel or "\\" in rel or rel[0] == "/":
+        return None
+    if "/" in rel:
+        d, _, name = rel.partition("/")
+        if d != "www" or not name or "/" in name or len(name) > 48:
+            return None
+        return rel if name.endswith(OTA_WWW_EXT) else None
+    return rel if rel in OTA_MODULES else None
+
+
+def _ota_swap(tmp, dst):
+    """用 tmp 顶替 dst。部分固件上 rename 不能覆盖已存在文件，故留回退。"""
+    try:
+        os.rename(tmp, dst)
+    except OSError:
+        try:
+            os.remove(dst)
+        except OSError:
+            pass
+        os.rename(tmp, dst)
+
+
+def _ota_drop(fn):
+    try:
+        os.remove(fn)
+    except OSError:
+        pass
+
+
+def _ota_free():
+    """剩余可写字节。失败返回 0，调用方按「不检查」处理。"""
+    try:
+        v = os.statvfs("/")
+        return v[0] * v[3]
+    except Exception:
+        return 0
+
+
+def _ota_recv(stream, tmp, size):
+    """把 stream 里的一段写进 tmp，返回 (实际字节数, crc32)。"""
+    n = 0
+    crc = 0
+    f = open(tmp, "wb")
+    try:
+        while n < size:
+            b = stream.read(min(1024, size - n))
+            if not b:
+                break
+            f.write(b)
+            crc = binascii.crc32(b, crc)
+            n += len(b)
+    finally:
+        f.close()
+    return n, crc & 0xffffffff
+
+
+def load_ota():
+    try:
+        with open(OTA_MANIFEST) as f:
+            d = json.load(f)
+        return d if isinstance(d, dict) else {}
+    except Exception:
+        return {}
+
+
+def save_ota(d):
+    tmp = OTA_MANIFEST + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(d, f)
+    _ota_swap(tmp, OTA_MANIFEST)
+
+
+def _ota_note(ver, files, src, last=None):
+    """记一条升级：版本、时间、文件数，并保留最近 5 条历史。
+
+    写入发生在重启之前，所以置 pending=1 表示「文件已换、进程还是旧的」；
+    重启后由 App.__init__ 清掉，版本才算真正生效。
+    """
+    m = load_ota()
+    at = int(time.time()) if _clock_ok() else 0
+    ver = ver or m.get("ver", "")
+    m["ver"] = ver
+    m["at"] = at
+    m["files"] = files
+    m["pending"] = 1
+    if last:
+        m["last"] = last
+    h = m.get("hist")
+    if not isinstance(h, list):
+        h = []
+    h.append({"ver": ver, "at": at, "files": files, "src": src})
+    m["hist"] = h[-5:]
+    save_ota(m)
+
+
 # ---------------------------------------------------------------- 工具
 def find_num(raw, key):
     """在原始 JSON 文本里抓第一个 "key":<数值> 的整数部分。
@@ -553,6 +664,14 @@ class App:
     def __init__(self):
         self.cfg = load_cfg()
         led_config(self.cfg)
+        # 上一次升级写入的文件此刻才真正生效（进程已经是新代码），清掉标记
+        try:
+            _m = load_ota()
+            if _m.get("pending"):
+                _m["pending"] = 0
+                save_ota(_m)
+        except Exception as e:
+            print("[ota] pending", e)
         w = self.cfg["wifi"]
         self.net = netmgr.Net(w["ssid"], w["password"], w["hostname"],
                               w["ap_ssid"], w["ap_pass"])
@@ -623,6 +742,9 @@ class App:
         self.alm = None
         self.alm_ts = 0
         self.alm_err = ""
+
+        # OTA：上一次成功写入的文件（只在内存里，重启后由 ota.json 接管）
+        self.ota_last = None
 
         self.t_wifi = 0
         self.reboot_at = 0
@@ -764,6 +886,7 @@ class App:
         w.serve_file("/iptv.html", "www/iptv.html")
         w.serve_file("/news.html", "www/news.html")
         w.serve_file("/quake.html", "www/quake.html")
+        w.serve_file("/ota.html", "www/ota.html")
         # 资源
         w.serve_file("/theme.css", "www/theme.css")
         w.serve_file("/ui.js", "www/ui.js")
@@ -790,6 +913,11 @@ class App:
         w.route("GET", "/api/almanac", self.h_almanac)
         w.route("POST", "/api/config", self.h_set_cfg)
         w.route("POST", "/api/led", self.h_led_action)
+        # OTA：GET 状态、PUT 单文件 / 整包（流式，请求体不进内存）、POST 收尾重启
+        w.route("GET", "/api/ota", self.h_ota_get)
+        w.route_stream("PUT", "/api/ota", self.h_ota_put)
+        w.route_stream("PUT", "/api/ota/pack", self.h_ota_pack)
+        w.route("POST", "/api/ota", self.h_ota_post)
 
     def poll_services(self):
         """探两个转发引擎：借路由器上的 svcstat 反代探测，绕开跨域。
@@ -1428,6 +1556,175 @@ class App:
         led_config(self.cfg)
         return httpsrv.json_resp({"ok": 1, "on": 1 if _hb_enable else 0,
                                   "msg": "心跳已开启" if v else "心跳已关闭"})
+
+    # ---------------- OTA 升级（应用文件，不含固件） ----------------
+    def h_ota_get(self, req):
+        """升级状态：版本、上次结果、可写空间。
+
+        只读文件系统，不碰网络。文件数现数一遍 /www：升级页打开时才调一次，
+        os.listdir 是毫秒级，不值得为它维护缓存。
+        """
+        m = load_ota()
+        try:
+            n_www = len(os.listdir("www"))     # 相对路径：板子上 cwd 就是 /
+        except OSError:
+            n_www = 0
+        try:
+            v = os.statvfs("/")
+            free, total = v[0] * v[3], v[0] * v[2]
+        except Exception:
+            free, total = 0, 0
+        return httpsrv.json_resp({
+            "ok": 1,
+            "ver": m.get("ver", ""),
+            "at": m.get("at", 0),
+            "up_files": m.get("files", 0),
+            "files": n_www + len(OTA_MODULES),
+            "free": free, "total": total,
+            "pending": m.get("pending", 0),     # 1 = 已写入、等重启生效
+            "hist": m.get("hist") or [],
+            # 重启后内存里的 last 没了，回退到 ota.json 里记的那一条
+            "last": self.ota_last or m.get("last"),
+        })
+
+    def h_ota_put(self, req):
+        """上传一个文件：PUT /api/ota?path=www/index.html&crc=123456
+
+        走流式路由，请求体不进内存。先写 path.new，字节数与 CRC32 都对得上
+        才顶替正式文件——传到一半掉线只会留下一个 .new，旧文件完好，页面
+        照常能开。
+        """
+        rel = _ota_rel(req.arg("path"))
+        if not rel:
+            return httpsrv.json_resp({"ok": 0, "msg": "路径不在允许范围"}, 400)
+        want = -1
+        c = req.arg("crc")
+        if c:
+            try:
+                want = int(c) & 0xffffffff
+            except ValueError:
+                return httpsrv.json_resp({"ok": 0, "msg": "crc 不是整数"}, 400)
+        need = req.stream.total
+        free = _ota_free()
+        # 留 64KB 余量：littlefs 写满时连 rename 的元数据都放不下
+        if free and free < need + 65536:
+            return httpsrv.json_resp(
+                {"ok": 0, "msg": "空间不足：需要 %dKB，剩余 %dKB"
+                 % ((need >> 10) + 64, free >> 10)}, 507)
+
+        tmp = rel + ".new"
+        try:
+            n, crc = _ota_recv(req.stream, tmp, need)
+            if n != need:
+                raise OSError("传输中断 %d/%d 字节" % (n, need))
+            if want >= 0 and crc != want:
+                raise OSError("CRC 不符 %d != %d" % (crc, want))
+            _ota_swap(tmp, rel)
+        except Exception as e:
+            _ota_drop(tmp)
+            print("[ota]", rel, e)
+            return httpsrv.json_resp({"ok": 0, "path": rel, "msg": str(e)}, 400)
+
+        self.ota_last = {"ok": 1, "path": rel, "size": n,
+                         "at": int(time.time()) if _clock_ok() else 0}
+        return httpsrv.json_resp({"ok": 1, "path": rel, "size": n, "crc": crc})
+
+    def h_ota_pack(self, req):
+        """上传升级包：PUT /api/ota/pack
+
+        包格式见 scripts/ota.py：
+            `MRP2` + 版本长度 u8 + 版本串 + 重复[名长 u8][名字][大小 u32][crc u32][内容]
+        版本串随包一起进来，网页上传也能知道「升到了哪一版」。
+        边收边解，不先落整包——整包 1.2MB，存下来再解等于多占一倍空间。
+        任何一项失败立即中止，已写入的文件保持新版、其余保持旧版，逐个文件
+        都有 CRC，坏掉的那一个不会被顶替。
+        """
+        s = req.stream
+        if s.read_exact(4) != b"MRP2":
+            return httpsrv.json_resp({"ok": 0, "msg": "不是升级包（缺少 MRP2 头）"}, 400)
+        vb = s.read_exact(1)
+        ver = s.read_exact(vb[0]).decode() if vb and vb[0] else ""
+        if vb and len(ver) != vb[0]:
+            return httpsrv.json_resp({"ok": 0, "msg": "包头不完整"}, 400)
+        nf = 0
+        nbytes = 0
+        err = ""
+        while True:
+            b = s.read_exact(1)
+            if not b:
+                break
+            ln = b[0]
+            head = s.read_exact(ln + 8)
+            if len(head) != ln + 8:
+                err = "包头不完整"
+                break
+            name = head[:ln].decode()
+            size = (head[ln] | (head[ln + 1] << 8)
+                    | (head[ln + 2] << 16) | (head[ln + 3] << 24))
+            want = (head[ln + 4] | (head[ln + 5] << 8)
+                    | (head[ln + 6] << 16) | (head[ln + 7] << 24))
+            rel = _ota_rel(name)
+            if not rel:
+                err = "包内含不允许的路径: " + name
+                break
+            free = _ota_free()
+            if free and free < size + 65536:
+                err = "空间不足，停在 " + rel
+                break
+            tmp = rel + ".new"
+            try:
+                n, crc = _ota_recv(s, tmp, size)
+            except OSError as e:
+                _ota_drop(tmp)
+                err = "写入 %s 失败: %s" % (rel, e)
+                break
+            if n != size:
+                _ota_drop(tmp)
+                err = "%s 数据不完整 %d/%d" % (rel, n, size)
+                break
+            if crc != want:
+                _ota_drop(tmp)
+                err = "%s CRC 不符" % rel
+                break
+            _ota_swap(tmp, rel)
+            nf += 1
+            nbytes += n
+
+        if err:
+            print("[ota] pack", err)
+            return httpsrv.json_resp({"ok": 0, "msg": err, "files": nf,
+                                      "bytes": nbytes}, 400)
+        self.ota_last = {"ok": 1, "path": "升级包", "size": nbytes,
+                         "at": int(time.time()) if _clock_ok() else 0}
+        try:
+            _ota_note(ver, nf, "pack", self.ota_last)
+        except Exception as e:
+            # 版本没记上不影响文件本身：文件已经逐项校验过
+            print("[ota] note", e)
+        return httpsrv.json_resp({"ok": 1, "files": nf, "bytes": nbytes,
+                                  "ver": ver})
+
+    def h_ota_post(self, req):
+        """升级收尾：?a=done 记版本并重启，?a=reboot 只重启。"""
+        d = req.json() or {}
+        a = req.arg("a") or d.get("action") or ""
+        if a not in ("done", "reboot"):
+            return httpsrv.json_resp({"ok": 0, "msg": "未知操作"}, 400)
+        if a == "done":
+            nf = 0
+            try:
+                nf = int(req.arg("files") or d.get("files") or 0)
+            except ValueError:
+                nf = 0
+            try:
+                _ota_note(str(req.arg("ver") or d.get("ver") or ""),
+                          nf, "push", self.ota_last)
+            except Exception as e:
+                return httpsrv.json_resp({"ok": 0, "msg": "写入清单失败: %s" % e}, 500)
+        self.reboot_at = time.ticks_ms()
+        return httpsrv.json_resp({"ok": 1, "reboot": 1,
+                                  "msg": "升级完成，设备重启中" if a == "done"
+                                         else "设备重启中"})
 
     # ---------------- 新闻 / 地震（CSV 日文件） ----------------
     def _daily_ids(self, prefix):
