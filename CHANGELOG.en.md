@@ -34,6 +34,19 @@ This project follows [Keep a Changelog](https://keepachangelog.com/); entries ar
   the page never paints dark before switching to light
 - Back-to-top button in the bottom-right corner of the news and quake pages; it appears once
   you scroll past one screen and smooth-scrolls back to the top
+- Code version in the firmware card of the device-info page: taken from the upgrade record,
+  with its timestamp and a pending-reboot marker
+- Used percentage next to each resource meter (heap / internal RAM / flash), turning amber
+  above 75% and red above 90%; the three meters stack in one column on narrow screens
+
+### Changed
+- The sleep timeline is drawn over a fixed calendar day, `00:00`–`24:00`, with tick lines
+  every six hours; it falls back to a "boot 0 → now" axis while the clock is unset
+- Durations under a minute are shown in seconds instead of "0 minutes"
+
+### Removed
+- The "sleeping now" state and legend entry: opening the page itself wakes the CPU, so the
+  device can never be observed in that state
 
 ### Fixed
 - The back-to-top button on the news and quake pages never appeared: the element was parsed
