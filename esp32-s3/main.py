@@ -282,6 +282,22 @@ def _ymd(back=0):
     return "%04d%02d%02d" % (t[0], t[1], t[2])
 
 
+def _unix_now(tz_off):
+    """Unix 时间戳（1970 起点）。
+
+    板子上 `time.time()` 是 MicroPython 的 2000 起点，而且 RTC 里存的是
+    本地时间（见 ntpsync._set_rtc），直接当 Unix 用会差 26 年再加 8 小时。
+    PC 上的单测跑在 CPython 里，时间本来就是 Unix，靠数量级区分。
+    """
+    try:
+        t = int(time.time())
+    except Exception:
+        return 0
+    if t < 1500000000:                 # 2000 起点（约 2017 年以前都落在这里）
+        t += ntpsync.MP_DELTA - tz_off
+    return t if _clock_ok() else 0
+
+
 def _clock_ok():
     """系统时间是否可信。
 
@@ -546,14 +562,14 @@ def save_ota(d):
     _ota_swap(tmp, OTA_MANIFEST)
 
 
-def _ota_note(ver, files, src, last=None):
+def _ota_note(ver, files, src, last=None, tz_off=8 * 3600):
     """记一条升级：版本、时间、文件数，并保留最近 5 条历史。
 
     写入发生在重启之前，所以置 pending=1 表示「文件已换、进程还是旧的」；
     重启后由 App.__init__ 清掉，版本才算真正生效。
     """
     m = load_ota()
-    at = int(time.time()) if _clock_ok() else 0
+    at = _unix_now(tz_off)
     ver = ver or m.get("ver", "")
     m["ver"] = ver
     m["at"] = at
@@ -1638,7 +1654,7 @@ class App:
             return httpsrv.json_resp({"ok": 0, "path": rel, "msg": str(e)}, 400)
 
         self.ota_last = {"ok": 1, "path": rel, "size": n,
-                         "at": int(time.time()) if _clock_ok() else 0}
+                         "at": _unix_now(self.tz_off)}
         return httpsrv.json_resp({"ok": 1, "path": rel, "size": n, "crc": crc})
 
     def h_ota_pack(self, req):
@@ -1708,9 +1724,9 @@ class App:
             return httpsrv.json_resp({"ok": 0, "msg": err, "files": nf,
                                       "bytes": nbytes}, 400)
         self.ota_last = {"ok": 1, "path": "升级包", "size": nbytes,
-                         "at": int(time.time()) if _clock_ok() else 0}
+                         "at": _unix_now(self.tz_off)}
         try:
-            _ota_note(ver, nf, "pack", self.ota_last)
+            _ota_note(ver, nf, "pack", self.ota_last, self.tz_off)
         except Exception as e:
             # 版本没记上不影响文件本身：文件已经逐项校验过
             print("[ota] note", e)
@@ -1731,7 +1747,7 @@ class App:
                 nf = 0
             try:
                 _ota_note(str(req.arg("ver") or d.get("ver") or ""),
-                          nf, "push", self.ota_last)
+                          nf, "push", self.ota_last, self.tz_off)
             except Exception as e:
                 return httpsrv.json_resp({"ok": 0, "msg": "写入清单失败: %s" % e}, 500)
         self.reboot_at = time.ticks_ms()
