@@ -159,10 +159,13 @@ def do_push_pack():
     show_header()
     packs = []
     if os.path.isdir(OTA_DIR):
-        for n in sorted(os.listdir(OTA_DIR), reverse=True):
+        raw = []
+        for n in os.listdir(OTA_DIR):
             if n.endswith(".mrp"):
                 p = os.path.join(OTA_DIR, n)
-                packs.append((n, p, os.path.getsize(p)))
+                raw.append((os.path.getmtime(p), n, p, os.path.getsize(p)))
+        raw.sort(reverse=True)                 # 最近的排前面
+        packs = [(n, p, sz) for _t, n, p, sz in raw]
     if not packs:
         print("ota/ 里还没有升级包，先做 3) 生成一个")
         return
