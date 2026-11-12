@@ -38,6 +38,7 @@ exist only in the S3 build.
 | Device | `/info.html` | Firmware, board, CPU, chip temperature, internal RAM blocks, MAC, heap, flash, sleep history and timeline |
 | NTP | `/ntp.html` | Almanac (lunar date, sexagenary cycle, dos and don'ts, solar terms, cached daily), on-board NTP server status, upstream sync, time zone |
 | IPTV | `/iptv.html` | Channel library browsing and in-browser playback |
+| Upgrade | `/ota.html` | Upload an upgrade package, show version and free space, reboot to apply (S3 only) |
 
 Pages share `web/theme.css` and `web/ui.js` and follow the system light/dark theme, with a
 manual toggle in the top bar (the choice is kept in the browser). After the build each page is
@@ -172,6 +173,10 @@ Both board directories use the same scripts. Full steps: [docs/DEPLOY.en.md](doc
 | POST | `/api/config` | Save configuration and restart |
 | POST | `/api/led` | `{"on":0/1}`, LED heartbeat toggle, writes `led.on` and takes effect immediately (S3 only) |
 | GET | `/api/news` | News feed (last 7 days, local CSV); `?limit=<n>` and `?before=<ctime>` page backwards, `?force=1` triggers an upstream refresh; hourly catch-up fetch pages back to the last collected item (S3 only) |
+| GET | `/api/ota` | Upgrade status: version (`ver`), pending-reboot flag (`pending`), last 5 records (`hist`), last write, file count, free space (S3 only) |
+| PUT | `/api/ota` | `?path=<relative path>&crc=<crc32>` uploads a single file; written to `.new`, replaced only when length and CRC match (S3 only) |
+| PUT | `/api/ota/pack` | Upload an upgrade package (`MRP1`), unpacked while receiving, verified per entry (S3 only) |
+| POST | `/api/ota` | `?a=done&ver=<version>` records the version and reboots; `?a=reboot` reboots only (S3 only) |
 | GET | `/api/quake` | Quake list (last 7 days, local CSV); `?a=global` for global events, `?a=usgs` for USGS M2.5+ in the last 24 hours, `?force=1` to refresh; the response carries `stat` (daily counts for 7 days plus M3 / M4 / M5 / M6 totals) (S3 only) |
 
 ---
@@ -239,6 +244,8 @@ Files under `mirouter/` are written in Chinese.
 - IPTV audio and video are pulled directly by the browser and do not pass through the ESP32
 - `.mpy` files are bound to the interpreter version (currently `.mpy v6.3`); recompile after
   a firmware upgrade
+- OTA covers application files (`.py` and `www/`) only, not the firmware image; the upgrade
+  endpoints have no authentication and are meant for a local network
 
 ---
 
@@ -250,9 +257,11 @@ Files under `mirouter/` are written in Chinese.
 | `scripts/up_batch.py` | Upload to the device in batches of 4 files |
 | `scripts/flash.py` | Upload, reset the device, capture the boot log, run the `/api/health` self-check |
 | `scripts/mpy.py` | Precompile modules to `.mpy` (`--revert` restores `.py`) |
+| `scripts/ota.py` | Over-the-air update: push `.py` and `www/` over HTTP, or build a package with `--pack` (S3 only) |
 | `scripts/gen_calendar_data.py` | Rebuild the annual lunar data table |
 
-Each board directory carries its own copy with identical usage. Serial port and device
+Each board directory carries its own copy with identical usage (`ota.py` ships with the S3
+version only). Serial port and device
 address come from environment variables:
 
 ```bash

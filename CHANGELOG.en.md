@@ -18,6 +18,13 @@ This project follows [Keep a Changelog](https://keepachangelog.com/); entries ar
 
 ### Added
 
+- Wireless update (OTA, S3 only): `/ota.html` page, `GET|PUT|POST /api/ota` endpoints and
+  `scripts/ota.py` (per-file push plus `--pack` to build a package). Writes go to `.new` and
+  are swapped in only after a CRC32 check; a failed run never reboots
+- Upgrade record: `ota.json` keeps the version string, time, file count, a pending-reboot flag
+  and the last 5 entries; the version travels inside the package and the flag clears on boot
+- Streaming request body in `httpsrv` (`route_stream()`), so uploads no longer load a whole
+  file into memory
 - Light/dark toggle in the top bar: follows the system until tapped, then locks the choice in
   the browser. An inline bootstrap script in `<head>` sets `data-theme` on `<html>` first, so
   the page never paints dark before switching to light

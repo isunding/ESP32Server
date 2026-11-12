@@ -36,6 +36,7 @@
 | 本机 | `/info.html` | 固件、板型、CPU、芯片温度、内部 RAM 分块、MAC、堆、Flash、休眠记录与时间轴 |
 | NTP | `/ntp.html` | 万年历（农历 / 干支 / 宜忌 / 节气，按天缓存）、板载 NTP 服务端状态、上游同步、时区设置 |
 | IPTV | `/iptv.html` | 频道库浏览与网页播放 |
+| 升级 | `/ota.html` | 上传升级包、显示版本与剩余空间、重启生效（仅 S3） |
 
 页面共用 `web/theme.css` 与 `web/ui.js`，跟随系统深浅色，也可在顶栏手动切换（选择存于浏览器）；构建后为单文件形式，CSS/JS 内联并生成 gzip 预压缩版本。顶栏统一显示设备 IP、状态点与指示灯心跳开关（仅 S3）。新闻与地震页滚过一屏后右下角出现回到顶部按钮。
 
@@ -163,6 +164,10 @@ python esp32-s3/scripts/flash.py esp32-s3/main.py esp32-s3/www/index.html ...
 | POST | `/api/config` | 保存配置并重启 |
 | POST | `/api/led` | `{"on":0/1}`，板载指示灯心跳开关，写入 `led.on` 并立即生效（仅 S3） |
 | GET | `/api/news` | 新闻电报（近 7 天，本地 CSV）；`?limit=<条数>` 与 `?before=<ctime>` 分段向前取，`?force=1` 触发上游刷新；每小时定时补采并翻页追平（仅 S3） |
+| GET | `/api/ota` | 升级状态：版本（`ver`）、待重启标记（`pending`）、最近 5 次记录（`hist`）、上次写入、文件数、可用空间（仅 S3） |
+| PUT | `/api/ota` | `?path=<相对路径>&crc=<crc32>`，上传单个文件；流式写入 `.new`，长度与 CRC 都对上才顶替（仅 S3） |
+| PUT | `/api/ota/pack` | 上传升级包（`MRP1` 格式），边收边解，逐项校验（仅 S3） |
+| POST | `/api/ota` | `?a=done&ver=<版本>` 记录版本并重启；`?a=reboot` 仅重启（仅 S3） |
 | GET | `/api/quake` | 地震列表（近 7 天，本地 CSV）；`?a=global` 全球震情，`?a=usgs` USGS M2.5+ 近 24 小时，`?force=1` 触发刷新；响应附带 `stat`（近 7 天逐日次数与 M3 / M4 / M5 / M6 累计）（仅 S3） |
 
 ---
@@ -227,6 +232,7 @@ python esp32-s3/scripts/flash.py esp32-s3/main.py esp32-s3/www/index.html ...
 - 电台直链由第三方提供
 - IPTV 音视频由浏览器直连，不经过 ESP32
 - `.mpy` 与解释器版本绑定（当前 `.mpy v6.3`），升级固件后需重新编译
+- OTA 只覆盖应用文件（`.py` 与 `www/`），不含固件镜像；升级接口无鉴权，仅限局域网使用
 
 ---
 
@@ -238,9 +244,10 @@ python esp32-s3/scripts/flash.py esp32-s3/main.py esp32-s3/www/index.html ...
 | `scripts/up_batch.py` | 分批上传到设备，每批 4 个文件 |
 | `scripts/flash.py` | 上传 + 复位设备、捕获启动日志、请求 `/api/health` 自检 |
 | `scripts/mpy.py` | 模块预编译为 `.mpy`（`--revert` 回退 .py） |
+| `scripts/ota.py` | 无线升级：按 HTTP 逐个推送 `.py` 与 `www/`，或用 `--pack` 生成升级包（仅 S3） |
 | `scripts/gen_calendar_data.py` | 重建农历年度数据表 |
 
-两个板级目录各有一份，用法相同。串口与设备地址通过环境变量指定：
+两个板级目录各有一份，用法相同（`ota.py` 仅 S3 版提供）。串口与设备地址通过环境变量指定：
 
 ```bash
 export ESP32_PORT=COM3

@@ -157,6 +157,10 @@ Field reference: [CONFIG.md](CONFIG.md).
 
 ## 6. Update workflow
 
+On the S3 build the same update can be done wirelessly, see
+[section 10](#10-wireless-update-ota-s3-only). The wired path below is still required for the
+first deployment, firmware changes and partition changes.
+
 ```bash
 # 1. page changes
 python esp32/scripts/build.py
@@ -274,3 +278,88 @@ curl --noproxy "*" "http://<router>:8088/cgi-bin/almanac?a=list"
 Both scripts accept `?a=flush`; `quake` clears the domestic and global caches together. Both
 upstream APIs share the ID/KEY in `/data/iptv/etc/quake.conf`. When the router has no
 `sha1sum`, the news script falls back to `openssl dgst`.
+
+---
+
+## 10. Wireless update (OTA, S3 only)
+
+The device exposes upgrade endpoints on `:80`. Files arrive while the firmware keeps running
+and the device reboots once at the end, so no serial port is needed and a phone or tablet can
+do the update. Only application files are in scope: the runtime modules in the root directory
+and the page assets under `www/`. Board data such as `config.json`, `watch.json`,
+`weather.json` and the daily news / quake CSVs is not on the allowlist and is never replaced.
+
+| Device path | Source | Notes |
+|---|---|---|
+| 8 modules such as `main.py`, `httpsrv.py` | `*.py` in the board directory | fixed allowlist; any other file name is rejected |
+| `www/*.html` `*.css` `*.js` `*.json` `*.ico` `*.svg` `*.gz` | `www/` in the board directory | includes the `.gz` pre-compressed variants produced by the build |
+
+### Option 1: push from a PC
+
+```bash
+python esp32-s3/scripts/ota.py                 # push everything, then reboot
+python esp32-s3/scripts/ota.py --dry-run       # list the plan only
+python esp32-s3/scripts/ota.py --only www/index.html www/index.html.gz
+python esp32-s3/scripts/ota.py --no-reboot     # upload without rebooting
+```
+
+The default target is `10.0.0.100`; override it with `--host` or `ESP32_HOST`. The script sends
+one file at a time with `PUT /api/ota?path=<path>&crc=<crc32>` and retries each file three
+times. The order is `www/` → modules → `boot.py` → `main.py`, so an interrupted run still
+leaves a complete boot chain. When every file is in place it calls
+`POST /api/ota?a=done`, which records the version and reboots, then polls `/api/health` until
+the device is back (60 seconds at most).
+
+### Option 2: upload from the browser
+
+Open `/ota.html` (the "系统升级" link at the bottom of the home page), pick a package and
+upload it; press "重启生效" when the progress bar completes. The package is built from the
+same file list:
+
+```bash
+python esp32-s3/scripts/ota.py --pack dist/ota.mrp
+```
+
+The format is `MRP2` and is not compressed:
+
+```
+"MRP2" + version length u8 | version | repeated[ name length u8 | name | size u32 | CRC32 u32 | content ]
+```
+
+The version string is the current short commit hash (with `-dirty` appended when the working
+tree has changes). It travels inside the package, so a browser upload records which build the
+device now holds.
+
+The device unpacks while receiving; it never stores the whole package (about 1.2MB) first,
+which would double the flash needed.
+
+### Write rules
+
+| Rule | Behaviour |
+|---|---|
+| Write then swap | Data goes to `<target>.new` and is renamed into place only when the byte count and CRC32 both match; an interrupted transfer leaves a `.new` file while the old file keeps serving |
+| Space check | Rejected with HTTP 507 before the transfer starts when free space is below "file size + 64KB" |
+| Path allowlist | Only the 8 root modules and one level of files under `www/`; `..`, backslashes, absolute paths and other extensions get 400 |
+| No authentication | Same as `/api/config`; intended for a local network only |
+| No reboot on failure | Any failed file aborts the run without recording a version or rebooting; the device keeps running the previous build |
+
+### Version tracking
+
+| Field | Meaning |
+|---|---|
+| `ver` | version of the most recent upgrade; empty when nothing was recorded |
+| `at` | write time of that upgrade (`time.time()`; 0 while the clock is unset) |
+| `files` | number of files written |
+| `pending` | `1` means files are replaced but the process still runs the old code; the boot path clears it |
+| `hist` | the last 5 upgrades (`ver` / `at` / `files` / `src`, where `src` is `push` or `pack`) |
+
+The version string is an identifier only, never a comparison: uploads do not skip files with a
+matching version, and both `--only` and a full package overwrite by content. `config.json` is
+outside the upgrade scope, and a missing or corrupt record is treated as "no record".
+
+### Self-check
+
+```bash
+curl --noproxy "*" http://<device-ip>/api/ota
+# {"ok":1,"ver":"6b0496e","at":1794482315,"files":32,"free":11915264,...}
+```

@@ -18,7 +18,7 @@ flow are identical; differences are confined to `boot.py` (WiFi power saving), `
 |---|---|
 | `boot.py` | Power-on init: join WiFi, wait for DHCP |
 | `main.py` | Routing, cache, state machine, all `/api/*` |
-| `httpsrv.py` | Single-threaded non-blocking HTTP server |
+| `httpsrv.py` | Single-threaded non-blocking HTTP server; static files in chunks, uploads use a streaming body |
 | `rap.py` | Router CGI client (chunked decoding, streaming to disk, TTL cache) |
 | `netmgr.py` | WiFi management (STA / AP switching, reconnect) |
 | `ntpsrv.py` | On-board NTP server (UDP 123) |
@@ -174,6 +174,22 @@ allocation fail.
 When a request has to wait for a router CGI, `rap` calls back into `poll()` to yield.
 `_in_poll` caps the nesting depth at 2. A connection is removed from `_pending` before it is
 served, so an inner `poll()` cannot close it early and break the outer write.
+
+### Streaming request body
+
+An ordinary route reads the whole body (the length given by `Content-Length`) into `bytes`
+before handing it to the handler, which is fine for JSON. Uploads reach 289KB per file and
+1.2MB per package, which would exhaust the heap, so those routes are registered with
+`route_stream()`: `req.body` stays empty and the handler reads from `req.stream` in chunks.
+
+| Aspect | Ordinary route | Streaming route |
+|---|---|---|
+| Body | `req.body` read up front | `req.stream.read(n)` on demand; only one recv buffer alive at a time |
+| Timeout | the 1.0s set on accept | relaxed to 20s while the handler runs, so a slow upload is not mistaken for a pre-connected socket |
+| Leftover body | none | discarded by `drain()` before the response, otherwise the client sees a RST |
+
+The handler owns short-read detection: an empty `read()` means the peer hung up, and any
+temporary file it wrote must be removed.
 
 ---
 

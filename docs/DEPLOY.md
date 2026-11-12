@@ -152,6 +152,9 @@ mpremote connect COM3 exec "import machine; machine.reset()"
 
 ## 六、更新流程
 
+S3 版可改用无线升级完成同样的更新，见[第十节](#十无线升级ota仅-s3)。以下为有线方式，
+首次部署、更换固件或调整分区时仍需使用。
+
 ```bash
 # 1. 页面改动
 python esp32/scripts/build.py
@@ -267,3 +270,84 @@ curl --noproxy "*" "http://<路由器>:8088/cgi-bin/almanac?a=list"
 两个脚本均支持 `?a=flush`；`quake` 同时清理国内与全球缓存。
 两个上游接口共用 `/data/iptv/etc/quake.conf` 中的 ID/KEY。
 路由器未提供 `sha1sum` 时，新闻脚本使用 `openssl dgst`。
+
+---
+
+## 十、无线升级（OTA，仅 S3）
+
+设备在 `:80` 上提供升级接口，板子在运行中接收文件，写完再重启一次，
+不需要串口，手机与平板也能操作。升级范围限于应用文件：根目录下的运行
+模块与 `www/` 下的页面资源。`config.json`、`watch.json`、`weather.json`、
+新闻与地震的日 CSV 等板端数据不在白名单内，不会被覆盖。
+
+对应关系：
+
+| 设备路径 | 来源 | 说明 |
+|---|---|---|
+| `main.py`、`httpsrv.py` 等 8 个模块 | 板级目录下的 `*.py` | 白名单固定，其他文件名一律拒绝 |
+| `www/*.html` `*.css` `*.js` `*.json` `*.ico` `*.svg` `*.gz` | 板级目录下的 `www/` | 含构建生成的 `.gz` 预压缩版本 |
+
+### 方式一：PC 推送
+
+```bash
+python esp32-s3/scripts/ota.py                 # 推送整套并重启
+python esp32-s3/scripts/ota.py --dry-run       # 只列清单
+python esp32-s3/scripts/ota.py --only www/index.html www/index.html.gz
+python esp32-s3/scripts/ota.py --no-reboot     # 传完不重启
+```
+
+默认目标为 `10.0.0.100`，可用 `--host` 或环境变量 `ESP32_HOST` 覆盖。
+脚本逐个文件 `PUT /api/ota?path=<路径>&crc=<crc32>`，每个文件重试 3 次；
+顺序为 `www/` → 模块 → `boot.py` → `main.py`，中途失败时启动链仍完整。
+全部成功后调用 `POST /api/ota?a=done` 记录版本并重启，随后轮询
+`/api/health` 等待恢复（上限 60 秒）。
+
+### 方式二：网页上传
+
+`/ota.html`（首页底部「系统升级」链接）选择升级包上传，进度条走完后
+点「重启生效」。升级包由同一份文件清单生成：
+
+```bash
+python esp32-s3/scripts/ota.py --pack dist/ota.mrp
+```
+
+包格式为 `MRP2`，不压缩：
+
+```
+"MRP2" + 版本长度 u8 | 版本串 | 重复[ 名字长度 u8 | 名字 | 大小 u32 | CRC32 u32 | 内容 ]
+```
+
+版本串由 `ota.py` 取当前提交的短哈希（工作区有改动时追加 `-dirty`），
+随包进入设备，网页上传也能记录「升到了哪一版」。
+
+设备边收边解，不先落整包（整包约 1.2MB，存下来再解会多占一倍空间）。
+
+### 写入规则
+
+| 规则 | 说明 |
+|---|---|
+| 先写后换 | 数据写入 `<目标>.new`，字节数与 CRC32 都对上才 `rename` 顶替；中断只留下 `.new`，旧文件照常服务 |
+| 空间预检 | 剩余空间不足「文件大小 + 64KB」时直接拒绝（HTTP 507），不开始传输 |
+| 路径白名单 | 只接受根目录 8 个运行模块与 `www/` 下一层文件；`..`、反斜杠、绝对路径与其他扩展名一律 400 |
+| 无鉴权 | 与 `/api/config` 一致，仅限局域网使用 |
+| 失败不重启 | 任一文件失败即中止，不写版本、不重启，设备继续运行旧版本 |
+
+### 版本管理
+
+| 字段 | 含义 |
+|---|---|
+| `ver` | 最近一次升级的版本串；无记录时为空 |
+| `at` | 该次升级的写入时间（`time.time()`，时钟未同步时为 0） |
+| `files` | 该次写入的文件数 |
+| `pending` | `1` 表示文件已替换、进程仍是旧的；重启后由启动流程清零 |
+| `hist` | 最近 5 次升级记录（`ver` / `at` / `files` / `src`，`src` 为 `push` 或 `pack`） |
+
+版本串只作标识，不做比对：升级不检查版本是否相同，`--only` 与整包上传都按实际内容覆盖。
+`config.json` 不在升级范围内，版本记录也不参与启动判断，写坏或缺失时按无记录处理。
+
+### 自检
+
+```bash
+curl --noproxy "*" http://<设备IP>/api/ota
+# {"ok":1,"ver":"6b0496e","at":1794482315,"files":32,"free":11915264,...}
+```

@@ -88,7 +88,13 @@ python esp32-s3/scripts/build.py       # 生成 esp32-s3/www/
 ```
 
 新增页面还需：`main.py` 的 `setup_routes()` 注册 `serve_file()`、`web/ui.js` 的 `PAGES` 加页签、
-`web/index.html` 的 `TILES` 加入口。
+`web/index.html` 的 `TILES` 加入口。`ota.html` 例外：只从首页页脚加入口，不进 `PAGES` / `TILES`。
+
+### 改升级范围
+
+OTA 接受的目标由 `esp32-s3/main.py` 的 `OTA_MODULES`（根目录模块）与 `OTA_WWW_EXT`
+（`www/` 下允许的扩展名）决定，`esp32-s3/scripts/ota.py` 的 `MODULES` 必须与前者一致。
+新增模块时两处同改，否则脚本会跳过该文件、板子也拒绝接收。
 
 ### 改固件模块
 
@@ -137,6 +143,9 @@ python -c "import json; json.load(open('esp32-s3/config.example.json', encoding=
 # 页面构建可重现（www/ 应与 web/ 同步）
 python esp32/scripts/build.py    && git diff --exit-code -- esp32/www
 python esp32-s3/scripts/build.py && git diff --exit-code -- esp32-s3/www
+
+# 升级清单（改过页面或 main.py 后核对：文件数、总大小、main.py 排在最后）
+python esp32-s3/scripts/ota.py --dry-run
 ```
 
 仓库不含测试代码。涉及运行时行为的改动无法在 CI 中验证，提交说明中须标注验证方式。

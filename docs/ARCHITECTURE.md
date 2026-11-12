@@ -16,7 +16,7 @@ S3 版 Python 堆位于 8MB PSRAM，内部 SRAM 供 WiFi 与 lwIP 使用。
 |---|---|
 | `boot.py` | 上电初始化：连接 WiFi、等待 DHCP |
 | `main.py` | 路由、缓存、状态机、全部 `/api/*` |
-| `httpsrv.py` | 单线程非阻塞 HTTP 服务 |
+| `httpsrv.py` | 单线程非阻塞 HTTP 服务；静态文件分块发送，上传走流式请求体 |
 | `rap.py` | 路由器 CGI 客户端（chunked 解码、流式落盘、TTL 缓存） |
 | `netmgr.py` | WiFi 管理（STA / AP 切换、断线重连） |
 | `ntpsrv.py` | 板载 NTP 服务端（UDP 123） |
@@ -165,6 +165,20 @@ MicroPython 无 `SO_LINGER`，主动 `close()` 会使 PCB 停留在 TIME_WAIT 60
 
 请求处理中若需等待路由器 CGI，`rap` 会回调 `poll()` 让出。`_in_poll` 计数限制重入深度为 2。
 处理连接前需将其从 `_pending` 移出，避免内层 `poll()` 提前关闭连接导致外层发送失败。
+
+### 流式请求体
+
+普通路由把 `Content-Length` 指定长度的请求体读成 `bytes` 再交给处理函数，适用于 JSON。
+升级接口的单个文件最大 289KB、整包 1.2MB，攒进堆里必然 `MemoryError`，因此这类路由用
+`route_stream()` 注册，`req.body` 恒为空，处理函数改为从 `req.stream` 逐块读取：
+
+| 项 | 普通路由 | 流式路由 |
+|---|---|---|
+| 请求体 | `req.body` 一次性读入 | `req.stream.read(n)` 按需取，任意时刻只有一块 recv 缓冲 |
+| 超时 | 接受的 1.0 秒 | 处理期间放宽到 20 秒，避免慢速上传被误判为预连接 |
+| 未读完的剩余 | 无 | 响应发出前 `drain()` 丢弃，否则客户端会收到 RST |
+
+处理函数自行负责「短读」判定：`read()` 返回空即表示对端提前断开，已写入的临时文件应删除。
 
 ---
 
