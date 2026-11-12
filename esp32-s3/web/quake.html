@@ -133,6 +133,14 @@
   </p>
 </div>
 
+<!-- 按钮必须写在脚本之前：脚本在解析时立即取 #toTop，写在后面会取到 null -->
+<button class="totop" id="toTop" type="button" aria-label="回到顶部" title="回到顶部">
+  <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor"
+       stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+    <path d="M12 19V5"/><path d="M5 12l7-7 7 7"/>
+  </svg>
+</button>
+
 <script src="/ui.js?v=20261108b"></script>
 <script>
 "use strict";
@@ -312,38 +320,42 @@ $("btnRefresh").addEventListener("click", function () {
 load(false);
 setInterval(function () { load(true); }, 10800000);   // 3 小时自动刷
 
-/* 回到顶部：超过一屏才出现，避免与首屏内容抢位置 */
+/* 回到顶部：超过一屏才出现，避免与首屏内容抢位置。
+   按钮写在脚本之前，正常路径直接取到；万一被挪到脚本之后，等 DOM 就绪再挂，
+   否则这里拿到 null，整段静默失效（手机上就是「按钮一直不出现」）。 */
 (function () {
-  var b = $("toTop"), shown = false;
-  function upd() {
-    var y = window.pageYOffset || document.documentElement.scrollTop || 0;
-    var need = y > (window.innerHeight || 600);
-    if (need === shown) return;
-    shown = need;
-    if (need) b.classList.add("show");
-    else b.classList.remove("show");
-  }
-  window.addEventListener("scroll", upd, { passive: true });
-  window.addEventListener("resize", upd, { passive: true });
-  b.addEventListener("click", function () {
-    try { window.scrollTo({ top: 0, behavior: "smooth" }); }
-    catch (e) { window.scrollTo(0, 0); }
-    // 个别环境忽略 behavior:smooth，1 秒后仍在下方就直接跳回，
-    // 并顺手复算一次，免得回到顶部后按钮还挂着
-    setTimeout(function () {
+  function setup(b) {
+    var shown = false;
+    function upd() {
       var y = window.pageYOffset || document.documentElement.scrollTop || 0;
-      if (y > 40) window.scrollTo(0, 0);
-      upd();
-    }, 900);
+      var need = y > (window.innerHeight || 600);
+      if (need === shown) return;
+      shown = need;
+      if (need) b.classList.add("show");
+      else b.classList.remove("show");
+    }
+    window.addEventListener("scroll", upd, { passive: true });
+    window.addEventListener("resize", upd, { passive: true });
+    b.addEventListener("click", function () {
+      try { window.scrollTo({ top: 0, behavior: "smooth" }); }
+      catch (e) { window.scrollTo(0, 0); }
+      // 个别环境忽略 behavior:smooth，1 秒后仍在下方就直接跳回，
+      // 并顺手复算一次，免得回到顶部后按钮还挂着
+      setTimeout(function () {
+        var y = window.pageYOffset || document.documentElement.scrollTop || 0;
+        if (y > 40) window.scrollTo(0, 0);
+        upd();
+      }, 900);
+    });
+    upd();
+  }
+  var b = $("toTop");
+  if (b) setup(b);
+  else document.addEventListener("DOMContentLoaded", function () {
+    var e = $("toTop");
+    if (e) setup(e);
   });
-  upd();
 })();
 </script>
-<button class="totop" id="toTop" type="button" aria-label="回到顶部" title="回到顶部">
-  <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor"
-       stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-    <path d="M12 19V5"/><path d="M5 12l7-7 7 7"/>
-  </svg>
-</button>
 </body>
 </html>
