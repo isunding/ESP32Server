@@ -19,6 +19,11 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SRC = os.path.join(ROOT, "web")
 OUT = os.path.join(ROOT, "www")
 
+# 主题引导：在 <head> 里同步读一次 localStorage，先给 <html> 打上 data-theme。
+# 没有它时 ui.js 要到 </body> 前才执行，慢设备上会先画一遍深色再跳成浅色。
+THEME_BOOT = ('<script>try{var t=localStorage.getItem("mr.theme");'
+              'if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>')
+
 
 def read(name):
     with open(os.path.join(SRC, name), encoding="utf-8") as f:
@@ -67,6 +72,9 @@ def main():
     for name in names:
         html = read(name)
         before = len(html)
+        if "<head>" not in html:
+            raise SystemExit("[build] %s 缺少 <head>，主题引导脚本无处插入" % name)
+        html = html.replace("<head>", "<head>\n" + THEME_BOOT, 1)
         html2 = re.sub(r'<link rel="stylesheet" href="/theme\.css[^"]*">',
                        "<style>\n" + css + "\n</style>", html, count=1)
         html2 = re.sub(r'<script src="/ui\.js[^"]*"></script>',

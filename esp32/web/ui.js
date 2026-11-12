@@ -101,6 +101,58 @@ var MR = (function () {
     });
   }
 
+  /* 深浅色切换。空值表示跟随系统，选中后写入 localStorage 锁定。
+     图标画的是“点一下会切到的模式”：现在亮色给月亮，现在暗色给太阳。 */
+  var THEME_KEY = "mr.theme";
+  var SUN_SVG = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" ' +
+    'stroke="currentColor" stroke-width="2" stroke-linecap="round" ' +
+    'stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/>' +
+    '<path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2"/>' +
+    '<path d="M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>';
+  var MOON_SVG = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" ' +
+    'stroke="currentColor" stroke-width="2" stroke-linecap="round" ' +
+    'stroke-linejoin="round" aria-hidden="true">' +
+    '<path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>';
+
+  function themePref() {
+    try { return localStorage.getItem(THEME_KEY) || ""; } catch (e) { return ""; }
+  }
+
+  /* 判定顺序：DOM 上的 data-theme（构建时注入的引导脚本已按 localStorage 打过）
+     → localStorage → 系统配色。少了第一项，手动锁定后图标会画错方向。 */
+  function themeNow() {
+    var d = document.documentElement.getAttribute("data-theme");
+    if (d === "light" || d === "dark") return d;
+    var t = themePref();
+    if (t === "light" || t === "dark") return t;
+    return (window.matchMedia &&
+      window.matchMedia("(prefers-color-scheme: light)").matches) ? "light" : "dark";
+  }
+
+  function paintThemeBtn() {
+    var b = $("hTheme");
+    if (!b) return;
+    var light = themeNow() === "light";
+    b.innerHTML = light ? MOON_SVG : SUN_SVG;
+    b.title = light ? "切换到深色" : "切换到浅色";
+    b.setAttribute("aria-label", b.title);
+  }
+
+  function toggleTheme() {
+    var next = themeNow() === "light" ? "dark" : "light";
+    document.documentElement.setAttribute("data-theme", next);
+    try { localStorage.setItem(THEME_KEY, next); } catch (e) {}
+    paintThemeBtn();
+  }
+
+  /* 跟随系统时，系统配色变了要把图标跟着换掉 */
+  if (window.matchMedia) {
+    var mq = window.matchMedia("(prefers-color-scheme: light)");
+    var onScheme = function () { if (!themePref()) paintThemeBtn(); };
+    if (mq.addEventListener) mq.addEventListener("change", onScheme);
+    else if (mq.addListener) mq.addListener(onScheme);
+  }
+
   /* 顶栏 + 页签。title 为空时不显示返回键。
      挂载完就自动开始心跳：以前要求每页自己调 healthTick()，漏掉一页
      右上角就永远停在初始文案「连接中…」。 */
@@ -119,7 +171,8 @@ var MR = (function () {
       "<h1>" + esc(title) + "</h1>" +
       '<div class="st"><span class="dot" id="hDot"></span><span id="hIp">连接中…</span>' +
       '<button class="hbtn" id="hLed" type="button" data-on="0" ' +
-      'aria-pressed="false" title="板载心跳">' + LED_SVG + "</button></div>" +
+      'aria-pressed="false" title="板载心跳">' + LED_SVG + "</button>" +
+      '<button class="hbtn" id="hTheme" type="button" title="切换深浅色"></button></div>' +
       "</div>" +
       '<div class="nav">' + nav + "</div>";
 
@@ -128,6 +181,9 @@ var MR = (function () {
       host.innerHTML = html;
       var lb = $("hLed");
       if (lb) lb.onclick = toggleLed;
+      var tb = $("hTheme");
+      if (tb) tb.onclick = toggleTheme;
+      paintThemeBtn();
       startBeat();
     }
   }

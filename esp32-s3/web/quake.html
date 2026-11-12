@@ -68,6 +68,17 @@
     .qmag{flex:0 0 48px;min-width:48px}
     .qmag b{font-size:18px}
   }
+  /* 回到顶部：滚过一屏后出现在右下角，避开 iOS 底部安全区 */
+  .totop{position:fixed;right:16px;bottom:calc(16px + env(safe-area-inset-bottom));
+    width:42px;height:42px;padding:0;border-radius:50%;display:flex;
+    align-items:center;justify-content:center;background:var(--bg2);
+    border:1px solid var(--line);color:var(--fg2);cursor:pointer;
+    box-shadow:0 4px 14px rgba(0,0,0,.18);z-index:40;
+    opacity:0;transform:translateY(10px);pointer-events:none;
+    transition:opacity .2s,transform .2s,color .2s,border-color .2s}
+  .totop.show{opacity:1;transform:none;pointer-events:auto}
+  .totop:hover{color:var(--acc);border-color:var(--acc)}
+  @media (prefers-reduced-motion: reduce){.totop{transition:none}}
 </style>
 </head>
 <body>
@@ -300,6 +311,39 @@ $("btnRefresh").addEventListener("click", function () {
 
 load(false);
 setInterval(function () { load(true); }, 10800000);   // 3 小时自动刷
+
+/* 回到顶部：超过一屏才出现，避免与首屏内容抢位置 */
+(function () {
+  var b = $("toTop"), shown = false;
+  function upd() {
+    var y = window.pageYOffset || document.documentElement.scrollTop || 0;
+    var need = y > (window.innerHeight || 600);
+    if (need === shown) return;
+    shown = need;
+    if (need) b.classList.add("show");
+    else b.classList.remove("show");
+  }
+  window.addEventListener("scroll", upd, { passive: true });
+  window.addEventListener("resize", upd, { passive: true });
+  b.addEventListener("click", function () {
+    try { window.scrollTo({ top: 0, behavior: "smooth" }); }
+    catch (e) { window.scrollTo(0, 0); }
+    // 个别环境忽略 behavior:smooth，1 秒后仍在下方就直接跳回，
+    // 并顺手复算一次，免得回到顶部后按钮还挂着
+    setTimeout(function () {
+      var y = window.pageYOffset || document.documentElement.scrollTop || 0;
+      if (y > 40) window.scrollTo(0, 0);
+      upd();
+    }, 900);
+  });
+  upd();
+})();
 </script>
+<button class="totop" id="toTop" type="button" aria-label="回到顶部" title="回到顶部">
+  <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor"
+       stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+    <path d="M12 19V5"/><path d="M5 12l7-7 7 7"/>
+  </svg>
+</button>
 </body>
 </html>
