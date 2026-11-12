@@ -35,6 +35,10 @@ This project follows [Keep a Changelog](https://keepachangelog.com/); entries ar
 - Back-to-top button in the bottom-right corner of the news and quake pages; it appears once
   you scroll past one screen and smooth-scrolls back to the top
 
+### Fixed
+- The back-to-top button on the news and quake pages never appeared: the element was parsed
+  after the script, which received `null` and dropped the whole wiring
+
 ---
 
 ## 2026-11-11
