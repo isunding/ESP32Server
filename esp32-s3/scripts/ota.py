@@ -27,6 +27,13 @@ import time
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))   # 板级目录
 REPO = os.path.dirname(ROOT)
 
+
+def set_root(board_dir, repo=None):
+    """打包成 exe 后 __file__ 指向临时解包目录，必须由调用方告出真实位置。"""
+    global ROOT, REPO
+    ROOT = os.path.abspath(board_dir)
+    REPO = os.path.abspath(repo or os.path.dirname(ROOT))
+
 # 与 main.py 的 OTA_MODULES 保持一致：板子只接受这些文件名
 MODULES = ("boot.py", "main.py", "httpsrv.py", "netmgr.py",
            "ntpsrv.py", "ntpsync.py", "rap.py", "cncal.py")
@@ -136,6 +143,45 @@ def put_one(host, port, rel, path, timeout=60):
         if d.get("size") != size:
             return False, "设备报告 %s 字节，本地 %d" % (d.get("size"), size)
         return True, text
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
+def api_put_file(host, port, url, path, on_progress=None, timeout=180):
+    """把本地文件 PUT 上去（整包上传用），返回 (status, json)。
+
+    与 put_one 的区别：不预设 CRC 参数、不校验回包里的 size，适合
+    `PUT /api/ota/pack` 这种由设备自己解包的场景。
+    """
+    size = os.path.getsize(path)
+    conn = http.client.HTTPConnection(host, port, timeout=timeout)
+    try:
+        conn.putrequest("PUT", url)
+        conn.putheader("Content-Length", str(size))
+        conn.putheader("Content-Type", "application/octet-stream")
+        conn.endheaders()
+        sent = 0
+        step = max(size // 20, 1)
+        mark = step
+        with open(path, "rb") as f:
+            while sent < size:
+                b = f.read(min(CHUNK, size - sent))
+                if not b:
+                    raise OSError("本地文件读短了")
+                conn.send(b)
+                sent += len(b)
+                if on_progress and sent >= mark:
+                    on_progress(int(sent * 100 / size))
+                    mark += step
+        r = conn.getresponse()
+        text = r.read().decode("utf-8", "replace")
+        try:
+            return r.status, json.loads(text)
+        except ValueError:
+            return r.status, {"raw": text}
     finally:
         try:
             conn.close()

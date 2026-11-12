@@ -1,0 +1,9 @@
+#!/bin/sh
+# 提交后自动把当前板级文件打成升级包，落在 ota/（包不进 git，见 .gitignore）。
+# 启用：git config core.hooksPath .githooks
+root=$(git rev-parse --show-toplevel 2>/dev/null) || exit 0
+cd "$root" || exit 0
+py=$(command -v python3 || command -v python || command -v py) || exit 0
+name=$("$py" "$root/esp32-s3/scripts/pack_ota.py" --brief 2>/dev/null) || exit 0
+[ -n "$name" ] && echo "[ota] 升级包已更新：ota/$name（latest.mrp 同步）"
+exit 0

@@ -83,5 +83,12 @@ Thumbs.db
 # ---- 发布产物 ----
 dist/
 
+# ---- 升级包与打包产物 ----
+# ota/ 是本地投放目录：包与 exe 都是生成物，仓库只保留说明
+ota/*.mrp
+ota/*.exe
+ota/latest.json
+build/pyi/
+
 # ---- 内联可视化生成的 SVG 副本（根目录，非交付物）----
 /*_*.html
