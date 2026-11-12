@@ -138,15 +138,23 @@ function render() {
           esc(name || raw) + " " + esc(raw) + "</button>";
       }).join("");
     }
+    /* 主题标签跟在时间与重要性后面，与正文分行；股票按钮仍独立一行。
+       标题行只放 3 个，多出来的收成 +N，避免把这一行挤成两行。 */
+    var subs = x.subjects || [];
+    var tags = subs.slice(0, 3).map(function (s) {
+      return '<span class="ftag">' + esc(s) + "</span>";
+    }).join("");
+    if (subs.length > 3) {
+      tags += '<span class="ftag" title="' + esc(subs.join(" ")) + '">+' +
+        (subs.length - 3) + "</span>";
+    }
     return '<div class="frow" data-k="' + esc(x.key) + '">' +
       '<div class="fh"><span class="ft">' + hhmm(x.ctime) + "</span>" +
       '<span class="flv ' + esc(x.lv || "C") + '">' + esc(x.lv || "C") + "</span>" +
-      '<span class="sp"></span></div>' +
+      tags + "</div>" +
       '<div class="fitem"><div class="fb">' +
       boldBracket(x.text || x.title || "") + "</div></div>" +
-      '<div class="ff">' + x.subjects.map(function (s) {
-        return '<span class="ftag">' + esc(s) + "</span>";
-      }).join("") + stk + "</div></div>";
+      (stk ? '<div class="ff">' + stk + "</div>" : "") + "</div>";
   }).join("");
 }
 

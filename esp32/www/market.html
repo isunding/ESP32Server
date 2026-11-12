@@ -309,10 +309,11 @@ video{width:100%;height:100%;display:block;background:#0b0e12}
 .feed{display:grid;gap:12px}
 .feed>.empty{grid-column:1/-1}
 .frow{min-width:0}
-.frow .fh{display:flex;align-items:center;gap:8px;margin-bottom:6px;
-  font-size:12.5px;color:var(--fg);font-variant-numeric:tabular-nums}
+.frow .fh{display:flex;align-items:center;gap:8px;flex-wrap:wrap;row-gap:4px;
+  margin-bottom:6px;font-size:12.5px;color:var(--fg);
+  font-variant-numeric:tabular-nums}
 .frow .fh .ft{font-weight:600}
-.frow .fh .sp{flex:1}
+.frow .fh .ftag{flex:0 0 auto}
 .chips{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px}
 .chips button{font-size:12px;padding:4px 10px;border-radius:999px;cursor:pointer;
   border:1px solid var(--line);background:var(--bg3);color:var(--fg2);font-family:inherit}
