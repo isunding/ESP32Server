@@ -14,6 +14,18 @@ This project follows [Keep a Changelog](https://keepachangelog.com/); entries ar
 
 ---
 
+## 2026-11-12
+
+### Added
+
+- Light/dark toggle in the top bar: follows the system until tapped, then locks the choice in
+  the browser. An inline bootstrap script in `<head>` sets `data-theme` on `<html>` first, so
+  the page never paints dark before switching to light
+- Back-to-top button in the bottom-right corner of the news and quake pages; it appears once
+  you scroll past one screen and smooth-scrolls back to the top
+
+---
+
 ## 2026-11-11
 
 ### Changed

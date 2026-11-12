@@ -39,9 +39,11 @@ exist only in the S3 build.
 | NTP | `/ntp.html` | Almanac (lunar date, sexagenary cycle, dos and don'ts, solar terms, cached daily), on-board NTP server status, upstream sync, time zone |
 | IPTV | `/iptv.html` | Channel library browsing and in-browser playback |
 
-Pages share `web/theme.css` and `web/ui.js` and follow the system light/dark theme. After
-the build each page is a single file with CSS/JS inlined plus a gzip-compressed variant. The
-top bar shows the device IP, a status dot and the LED heartbeat toggle (S3 only).
+Pages share `web/theme.css` and `web/ui.js` and follow the system light/dark theme, with a
+manual toggle in the top bar (the choice is kept in the browser). After the build each page is
+a single file with CSS/JS inlined plus a gzip-compressed variant. The top bar shows the device
+IP, a status dot and the LED heartbeat toggle (S3 only). The news and quake pages show a
+back-to-top button in the bottom-right corner once you scroll past one screen.
 
 ---
 
