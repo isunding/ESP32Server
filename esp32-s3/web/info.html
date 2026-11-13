@@ -29,6 +29,19 @@
   .pmtl-empty{display:flex;align-items:center;justify-content:center;height:100%}
   .pmaxis{display:flex;justify-content:space-between;font-size:11px;color:var(--fg2);margin-top:4px}
   .pmaxis .mid{margin:0 auto}
+  /* 7 天甘特：每天一条，默认只展开今天 */
+  .pmday{border-top:1px dashed var(--line);padding:7px 0}
+  .pmday:first-child{border-top:0}
+  .pmday summary{display:flex;gap:10px;align-items:baseline;flex-wrap:wrap;cursor:pointer;
+    font-size:12px;color:var(--fg2);list-style:none}
+  .pmday summary::-webkit-details-marker{display:none}
+  .pmday summary::before{content:"▸";font-size:10px;color:var(--fg2)}
+  .pmday[open] summary::before{content:"▾"}
+  .pmday[open] summary{color:var(--fg)}
+  .pmday summary .d{margin-left:auto;white-space:nowrap;font-size:11.5px}
+  .pmday .pmtl{margin-top:8px}
+  .pmday .pmaxis{margin-bottom:2px}
+  .pmday .pmlist{margin:8px 0 2px}
   .pmlegend{display:flex;gap:14px;flex-wrap:wrap;font-size:11.5px;color:var(--fg2);margin-top:8px}
   .pmlegend .sw{display:inline-block;width:10px;height:10px;border-radius:2px;
     margin-right:4px;vertical-align:middle}
@@ -99,13 +112,11 @@
       <div><div class="k">累计休眠</div><div class="v" id="pmTotal">—</div></div>
       <div><div class="k">休眠次数</div><div class="v" id="pmCnt">—</div></div>
     </div>
-    <div class="pmtl" id="pmTl"><div class="pmtl-empty muted small">读取中…</div></div>
-    <div class="pmaxis"><span id="pmAx0">—</span><span class="mid" id="pmMid">—</span><span id="pmAx1">—</span></div>
+    <div id="pmDays"><div class="pmtl"><div class="pmtl-empty muted small">读取中…</div></div></div>
     <div class="pmlegend">
       <span><i class="sw sleep"></i>休眠（已降频）</span>
       <span><i class="sw busy"></i>满频运行</span>
     </div>
-    <div class="pmlist" id="pmList"></div>
   </div>
 
   <div class="card">
@@ -250,8 +261,8 @@ function pmRender(d, sl) {
   var pm = d.pm;
   if (!pm) {                       // 老固件没有这个字段
     MR.$("pmSub").textContent = "当前固件未记录";
-    MR.$("pmTl").innerHTML =
-      '<div class="pmtl-empty muted small">固件不支持休眠记录</div>';
+    MR.$("pmDays").innerHTML = '<div class="pmtl"><div class="pmtl-empty muted small">' +
+      "固件不支持休眠记录</div></div>";
     return;
   }
 
@@ -282,14 +293,16 @@ function pmRender(d, sl) {
      若设备时钟还没同步（1970），退回「开机 N 分」的相对写法。 */
   var base = Date.now() - up * 1000;
   var clocked = base > 1577836800000;        // 2020-01-01 之后才算对过时
-  var today = new Date().toDateString();
   /* 日文件里存的是绝对秒，直接用；内存里的相对秒要先补上开机时刻 */
   var absSecs = !!(rowsCsv && rowsCsv.length);
+  /* 日期由每天的分组标题给出，明细与悬浮提示只留时间，窄屏不再重复长日期 */
   function stampMs(ms) {
     var t = new Date(ms);
-    return (t.toDateString() === today ? ""
-      : (t.getMonth() + 1) + "-" + t.getDate() + " ") +
-      pad2(t.getHours()) + ":" + pad2(t.getMinutes()) + ":" + pad2(t.getSeconds());
+    return pad2(t.getHours()) + ":" + pad2(t.getMinutes()) + ":" + pad2(t.getSeconds());
+  }
+  function fullDate(ms) {
+    var t = new Date(ms);
+    return t.getFullYear() + "/" + pad2(t.getMonth() + 1) + "/" + pad2(t.getDate());
   }
   function stamp(v) {
     if (absSecs) return stampMs(v * 1000);
@@ -304,57 +317,102 @@ function pmRender(d, sl) {
   segs.sort(function (a, b) { return a[0] - b[0]; });
 
   if (!segs.length) {
-    MR.$("pmTl").innerHTML = '<div class="pmtl-empty muted small">还没有休眠记录，' +
-      "连续 " + pm.idle_after + " 秒没人访问就会出现一段</div>";
-    MR.$("pmAx0").textContent = "";
-    MR.$("pmMid").textContent = "";
-    MR.$("pmAx1").textContent = "";
-    MR.$("pmList").innerHTML = "";
+    MR.$("pmDays").innerHTML = '<div class="pmtl"><div class="pmtl-empty muted small">' +
+      "还没有休眠记录，连续 " + pm.idle_after + " 秒没人访问就会出现一段</div></div>";
     return;
   }
 
-  /* 甘特图固定铺满自然日 0~24 时：同一个横坐标在任何时刻都表示同一个钟点，
-     跨小时、跨日可直接对照。设备时钟未同步时退回「开机 0 → 至今」的相对轴。 */
-  var DAY = 86400000;
+  /* 甘特图按自然日铺 0~24 时：同一个横坐标在任何时刻都表示同一个钟点。
+     有日文件时画 7 条（默认只展开今天），跨午夜的段按 0 点切到相邻两天；
+     只有本次开机的内存记录时画一条，设备时钟未同步则退回相对轴。 */
+  var DAY_MS = 86400000;
   var midnight = new Date();
   midnight.setHours(0, 0, 0, 0);
   var day0 = midnight.getTime();
-  var pct;
-  if (absSecs) {
-    pct = function (v) { return (v * 1000 - day0) / DAY * 100; };
-  } else if (clocked) {
-    pct = function (v) { return (base + v * 1000 - day0) / DAY * 100; };
-  } else {
-    var span = Math.max(up * 1000, 60000);
-    pct = function (v) { return v * 1000 / span * 100; };
+  var WEEK = ["日", "一", "二", "三", "四", "五", "六"];
+
+  function axis(a, b, c) {
+    return '<div class="pmaxis"><span>' + a + '</span><span class="mid">' + b +
+      "</span><span>" + c + "</span></div>";
+  }
+  function bar(a, b, tip) {
+    return '<div class="seg" style="left:' + a.toFixed(2) + "%;width:" +
+      (b - a).toFixed(2) + '%" title="' + tip + '"></div>';
+  }
+  function panel(label, meta, bars, labels, open, records) {
+    return '<details class="pmday"' + (open ? " open" : "") + ">" +
+      '<summary><span>' + label + '</span><span class="d">' + meta +
+      "</span></summary>" + '<div class="pmtl">' +
+      (bars || '<div class="pmtl-empty muted small">无休眠记录</div>') +
+      "</div>" + axis(labels[0], labels[1], labels[2]) +
+      (records ? '<div class="pmlist">' + records + "</div>" : "") + "</details>";
+  }
+  /* 记录明细随所属日期一起折叠：每天只列最近 6 段，更早的用一行计数收尾 */
+  function moreRow(n) {
+    return n > 6 ? '<div class="r"><span class="t muted small">…还有 ' +
+      (n - 6) + " 段更早记录</span></div>" : "";
+  }
+  function absRecords(list) {
+    return list.slice(-6).reverse().map(function (s) {
+      return '<div class="r"><span class="t">' + stampMs(s[0]) + " → " + stampMs(s[1]) +
+        '</span><span class="d">' + MR.fmtDur(Math.round((s[1] - s[0]) / 1000)) +
+        "</span></div>";
+    }).join("") + moreRow(list.length);
+  }
+  function relRecords(list) {
+    return list.slice(-6).reverse().map(function (s) {
+      return '<div class="r"><span class="t">' + stamp(s[0]) + " → " + stamp(s[1]) +
+        '</span><span class="d">' + MR.fmtDur(s[1] - s[0]) + "</span></div>";
+    }).join("") + moreRow(list.length);
   }
 
   var html = "";
-  segs.forEach(function (s) {
-    var a = Math.max(pct(s[0]), 0), b = Math.min(pct(s[1]), 100);
-    if (b <= a) return;                     // 整段落在当天之外
-    html += '<div class="seg" style="left:' + a.toFixed(2) + "%;width:" +
-      (b - a).toFixed(2) + '%" title="' + stamp(s[0]) + " → " + stamp(s[1]) +
-      "（" + MR.fmtDur(s[1] - s[0]) + '）"></div>';
-  });
-  MR.$("pmTl").innerHTML = html ||
-    '<div class="pmtl-empty muted small">当天还没有休眠记录</div>';
-
-  if (absSecs || clocked) {
-    MR.$("pmAx0").textContent = "00:00";
-    MR.$("pmMid").textContent = "12:00";
-    MR.$("pmAx1").textContent = "24:00";
+  if (absSecs) {
+    var days = [];
+    for (var i = 6; i >= 0; i--) {
+      var st = day0 - i * DAY_MS;
+      days.push({ st: st, en: st + DAY_MS, segs: [], total: 0 });
+    }
+    segs.forEach(function (s) {
+      var a = s[0] * 1000, b = s[1] * 1000;
+      days.forEach(function (d) {
+        var x = Math.max(a, d.st), y = Math.min(b, d.en);
+        if (y > x) { d.segs.push([x, y]); d.total += (y - x) / 1000; }
+      });
+    });
+    html = days.map(function (d, i) {
+      var dt = new Date(d.st);
+      var label = fullDate(d.st) + " 周" + WEEK[dt.getDay()] +
+        (i === 6 ? " · 今天" : "");
+      var meta = d.segs.length
+        ? d.segs.length + " 段 · " + MR.fmtDur(Math.round(d.total)) : "无记录";
+      var bars = d.segs.map(function (s) {
+        return bar((s[0] - d.st) / DAY_MS * 100, (s[1] - d.st) / DAY_MS * 100,
+          stampMs(s[0]) + " → " + stampMs(s[1]) +
+          "（" + MR.fmtDur(Math.round((s[1] - s[0]) / 1000)) + "）");
+      }).join("");
+      return panel(label, meta, bars, ["00:00", "12:00", "24:00"], i === 6,
+        absRecords(d.segs));
+    }).join("");
   } else {
-    MR.$("pmAx0").textContent = "开机 0";
-    MR.$("pmMid").textContent = MR.fmtDur(Math.round(up / 2));
-    MR.$("pmAx1").textContent = "至今 " + MR.fmtDur(up);
+    var span = Math.max(up * 1000, 60000);
+    var pct = clocked
+      ? function (v) { return (base + v * 1000 - day0) / DAY_MS * 100; }
+      : function (v) { return v * 1000 / span * 100; };
+    var bars = "";
+    segs.forEach(function (s) {
+      var a = Math.max(pct(s[0]), 0), b = Math.min(pct(s[1]), 100);
+      if (b <= a) return;                   // 整段落在轴之外
+      bars += bar(a, b, stamp(s[0]) + " → " + stamp(s[1]) +
+        "（" + MR.fmtDur(s[1] - s[0]) + "）");
+    });
+    html = panel("本次开机", segs.length + " 段", bars,
+      clocked ? ["00:00", "12:00", "24:00"]
+              : ["开机 0", MR.fmtDur(Math.round(up / 2)), "至今 " + MR.fmtDur(up)],
+      true, relRecords(segs));
   }
+  MR.$("pmDays").innerHTML = html;
 
-  var rows = segs.slice(-6).reverse().map(function (s) {
-    return '<div class="r"><span class="t">' + stamp(s[0]) + " → " + stamp(s[1]) +
-      '</span><span class="d">' + MR.fmtDur(s[1] - s[0]) + "</span></div>";
-  }).join("");
-  MR.$("pmList").innerHTML = rows;
 }
 
 function load() {
