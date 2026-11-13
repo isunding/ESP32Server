@@ -28,6 +28,9 @@ This project follows [Keep a Changelog](https://keepachangelog.com/); entries ar
 - The sleep timeline and interval list on the device-info page read the day files, so intervals
   recorded before a restart are shown; the accumulative sleep time and count now cover the last
   7 days, with the window stated in the card subtitle
+- The top-bar status heartbeat no longer calls `/api/health` while the page is hidden and fires
+  once on return; the previous 15-second poll was denser than the 20-second idle threshold, so
+  the device never dropped its clock while any page stayed open
 
 ---
 
