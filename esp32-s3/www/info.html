@@ -736,7 +736,7 @@ function bar(id, pct) {
   el.className = pct >= 90 ? "crit" : pct >= 75 ? "warn" : "";
 }
 
-function render(d) {
+function render(d, sl) {
   if (!d || !d.ok) return;
   var n = d.net || {}, m = d.mem || {}, f = d.flash || {}, fw = d.fw || {};
   var ch = d.chip || {}, hp = d.heap || {};
@@ -829,13 +829,13 @@ function render(d) {
   MR.$("files").innerHTML = rows || '<tr><td class="muted small">无文件</td><td></td></tr>';
   MR.$("fsum").textContent = fs.length + " 个 · 共 " + MR.fmtBytes(total);
 
-  pmRender(d);
+  pmRender(d, sl);
 }
 
 /* ---------------- 休眠记录 ---------------- */
 function pad2(n) { return n < 10 ? "0" + n : "" + n; }
 
-function pmRender(d) {
+function pmRender(d, sl) {
   var pm = d.pm;
   if (!pm) {                       // 老固件没有这个字段
     MR.$("pmSub").textContent = "当前固件未记录";
@@ -845,38 +845,52 @@ function pmRender(d) {
   }
 
   var up = d.up || 0;
+  var rowsCsv = (sl && sl.ok && sl.rows) ? sl.rows : null;
+  var useCsv = !!(rowsCsv && sl.sum);
 
   /* 打开这一页本身就会把 CPU 唤醒，所以设备不可能在「休眠中」被观察到。
      用最后一段区间的结束时刻反推：3 秒内结束的那段就是这次访问叫醒的。 */
   var prev = (pm.log || [])[(pm.log || []).length - 1];
   var justWoke = prev && (up - prev[1]) <= 3;
 
-  MR.$("pmSub").textContent = pm.on
+  MR.$("pmSub").textContent = (pm.on
     ? "空闲 " + pm.idle_after + " 秒降频到 " + pm.mhz + " MHz"
-    : "降频未启用";
+    : "降频未启用") +
+    (useCsv ? " · 统计近 " + sl.sum.days + " 天" : "");
   MR.$("pmCur").textContent = justWoke
     ? "刚从休眠唤醒 · " + pm.max + " MHz"
     : "满频 · " + pm.cur + " MHz";
   MR.$("pmCur").style.color = justWoke ? "var(--ok)" : "";
-  MR.$("pmTotal").textContent = pm.sleep_total > 0 ? MR.fmtDur(pm.sleep_total) : "—";
-  MR.$("pmCnt").textContent = (pm.downs || 0) + " 次";
+  /* 有日文件就用近 7 天的合计，否则退回本次开机的计数 */
+  var totalS = useCsv ? sl.sum.sleep : pm.sleep_total;
+  var cnt = useCsv ? sl.sum.n : (pm.downs || 0);
+  MR.$("pmTotal").textContent = totalS > 0 ? MR.fmtDur(totalS) : "—";
+  MR.$("pmCnt").textContent = cnt + " 次";
 
   /* 设备记录的是「相对开机的秒」。用页面时钟倒推开机时刻换算成本地时间；
      若设备时钟还没同步（1970），退回「开机 N 分」的相对写法。 */
   var base = Date.now() - up * 1000;
   var clocked = base > 1577836800000;        // 2020-01-01 之后才算对过时
   var today = new Date().toDateString();
-  function stamp(sec) {
-    if (clocked) {
-      var t = new Date(base + sec * 1000);
-      return (t.toDateString() === today ? ""
-        : (t.getMonth() + 1) + "-" + t.getDate() + " ") +
-        pad2(t.getHours()) + ":" + pad2(t.getMinutes()) + ":" + pad2(t.getSeconds());
-    }
-    return "开机 " + MR.fmtDur(sec);
+  /* 日文件里存的是绝对秒，直接用；内存里的相对秒要先补上开机时刻 */
+  var absSecs = !!(rowsCsv && rowsCsv.length);
+  function stampMs(ms) {
+    var t = new Date(ms);
+    return (t.toDateString() === today ? ""
+      : (t.getMonth() + 1) + "-" + t.getDate() + " ") +
+      pad2(t.getHours()) + ":" + pad2(t.getMinutes()) + ":" + pad2(t.getSeconds());
+  }
+  function stamp(v) {
+    if (absSecs) return stampMs(v * 1000);
+    if (clocked) return stampMs(base + v * 1000);
+    return "开机 " + MR.fmtDur(v);
   }
 
-  var segs = (pm.log || []).slice(-6).map(function (s) { return [s[0], s[1]]; });
+  var segs = absSecs
+    ? rowsCsv.map(function (r) { return [r.s, r.e]; })
+    : (pm.log || []).map(function (s) { return [s[0], s[1]]; });
+  /* 按起点排序：接口本来就是升序，但列顺序不该成为页面的隐含前提 */
+  segs.sort(function (a, b) { return a[0] - b[0]; });
 
   if (!segs.length) {
     MR.$("pmTl").innerHTML = '<div class="pmtl-empty muted small">还没有休眠记录，' +
@@ -894,9 +908,14 @@ function pmRender(d) {
   var midnight = new Date();
   midnight.setHours(0, 0, 0, 0);
   var day0 = midnight.getTime();
-  var span = clocked ? DAY : Math.max(up * 1000, 60000);
-  function pct(sec) {
-    return (clocked ? (base + sec * 1000 - day0) : sec * 1000) / span * 100;
+  var pct;
+  if (absSecs) {
+    pct = function (v) { return (v * 1000 - day0) / DAY * 100; };
+  } else if (clocked) {
+    pct = function (v) { return (base + v * 1000 - day0) / DAY * 100; };
+  } else {
+    var span = Math.max(up * 1000, 60000);
+    pct = function (v) { return v * 1000 / span * 100; };
   }
 
   var html = "";
@@ -910,7 +929,7 @@ function pmRender(d) {
   MR.$("pmTl").innerHTML = html ||
     '<div class="pmtl-empty muted small">当天还没有休眠记录</div>';
 
-  if (clocked) {
+  if (absSecs || clocked) {
     MR.$("pmAx0").textContent = "00:00";
     MR.$("pmMid").textContent = "12:00";
     MR.$("pmAx1").textContent = "24:00";
@@ -920,7 +939,7 @@ function pmRender(d) {
     MR.$("pmAx1").textContent = "至今 " + MR.fmtDur(up);
   }
 
-  var rows = segs.slice().reverse().map(function (s) {
+  var rows = segs.slice(-6).reverse().map(function (s) {
     return '<div class="r"><span class="t">' + stamp(s[0]) + " → " + stamp(s[1]) +
       '</span><span class="d">' + MR.fmtDur(s[1] - s[0]) + "</span></div>";
   }).join("");
@@ -930,7 +949,14 @@ function pmRender(d) {
 function load() {
   var b = MR.$("btnRefresh");
   b.disabled = true;
-  return MR.api("/api/info").then(render).catch(function () {
+  /* 休眠记录单独取：日文件在板上，重启不丢；取不到就退回 /api/info 里
+     本次开机的记录，页面不至于空着。 */
+  return Promise.all([
+    MR.api("/api/info"),
+    MR.api("/api/sleep").catch(function () { return null; })
+  ]).then(function (r) {
+    render(r[0], r[1]);
+  }).catch(function () {
     MR.$("files").innerHTML = '<tr><td class="muted small">读取失败，点「刷新」重试</td><td></td></tr>';
   }).then(function () { b.disabled = false; });
 }

@@ -221,6 +221,8 @@ PM_LOG_MAX = 24   # 休眠区间最多留 24 条（每次降频一条，占不�
 CSV_KEEP_DAYS = 7
 NEWS_ROWS_MAX = 120     # 一次最多吐多少条给页面（取最新的一段，约 60KB 响应）
 QUAKE_ROWS_MAX = 120
+SLEEP_PREFIX = "sleep"  # 休眠区间日文件：每结束一段追加一行，同样只留 7 天
+SLEEP_ROWS_MAX = 60     # 一次最多吐多少段给页面（一天几十段足够）
 
 
 def _csv_q(s):
@@ -813,6 +815,7 @@ class App:
         self.pm_log = []
         self.pm_down_at = 0          # 当前这次休眠的开始秒，0 = 当前满频
         self.pm_sleep_total = 0      # 累计休眠秒数
+        self.sleep_day = ""          # 上次清理日文件的日期，省得每段都扫目录
 
     # ---------------- 采集（只在有人请求时触发） ----------------
     def poll_status(self):
@@ -938,6 +941,7 @@ class App:
         w.route("GET", "/api/quake", self.h_quake)
         w.route("GET", "/api/oil", self.h_oil)
         w.route("GET", "/api/almanac", self.h_almanac)
+        w.route("GET", "/api/sleep", self.h_sleep)
         w.route("POST", "/api/config", self.h_set_cfg)
         w.route("POST", "/api/led", self.h_led_action)
         # OTA：GET 状态、PUT 单文件 / 整包（流式，请求体不进内存）、POST 收尾重启
@@ -2266,6 +2270,106 @@ class App:
         return True
 
     # ---------------- 空闲降频 ----------------
+    def _sleep_save(self, start_s, end_s, mhz):
+        """把一段已结束的休眠追加到当天的日文件。
+
+        内存里的区间是「相对开机的秒」，重启即失效，落盘前必须换成绝对
+        时间，否则跨重启无法比较。时钟没对上就直接跳过：按错误日期写盘
+        之后，7 天轮转又会把它当成有效历史留着。
+        """
+        if not _clock_ok():
+            return
+        now_s = time.ticks_diff(time.ticks_ms(), BOOT_MS) // 1000
+        end_unix = _unix_now(self.tz_off) - (now_s - end_s)
+        start_unix = end_unix - (end_s - start_s)
+        if end_unix <= 0 or start_unix <= 0:
+            return
+        day = _ymd()
+        try:
+            with open("%s-%s.csv" % (SLEEP_PREFIX, day), "a") as f:
+                # 第一列是去重键，第二列放结束时间：_csv_tail 的 before
+                # 游标按第二列做整数比较，翻页才能对上。
+                f.write("%d-%d,%d,%d,%d,%d\n"
+                        % (start_unix, end_unix, end_unix, start_unix,
+                           end_s - start_s, mhz))
+        except OSError as e:
+            print("[sleep] write", e)
+            return
+        # 一天清一次就够：休眠段来得比新闻勤，每段都扫目录不划算
+        if day != self.sleep_day:
+            self.sleep_day = day
+            _csv_prune(SLEEP_PREFIX)
+
+    def _sleep_stats(self):
+        """近 7 天的休眠合计：段数与总秒数，按第 4 列累加。"""
+        n = 0
+        total = 0
+        for back in range(CSV_KEEP_DAYS):
+            fn = "%s-%s.csv" % (SLEEP_PREFIX, _ymd(back))
+            if not self._file_ok(fn):
+                continue
+            try:
+                with open(fn) as f:
+                    for line in f:
+                        p = line.rstrip("\r\n").split(",")
+                        if len(p) < 5:
+                            continue
+                        try:
+                            v = int(p[3])
+                        except ValueError:
+                            continue
+                        total += v
+                        n += 1
+            except OSError:
+                pass
+        return n, total
+
+    def h_sleep(self, req):
+        """休眠记录：近 7 天每段一行，可按结束时间往更早翻页。
+
+        数据取自日文件而非内存 —— `pm.log` 只留本次开机的 24 段，
+        重启就没了，页面上的历史也就无从谈起。
+        """
+        try:
+            limit = int(req.arg("limit") or 0)
+        except ValueError:
+            limit = 0
+        if limit <= 0 or limit > SLEEP_ROWS_MAX:
+            limit = SLEEP_ROWS_MAX
+        try:
+            before = int(req.arg("before") or 0)
+        except ValueError:
+            before = 0
+        need = limit + 1          # 多要一条用来判断「还有更早的」
+        rows = []
+        for back in range(CSV_KEEP_DAYS):
+            fn = "%s-%s.csv" % (SLEEP_PREFIX, _ymd(back))
+            if not self._file_ok(fn):
+                continue
+            got = _csv_tail(fn, need - len(rows), before)
+            if got:
+                rows = got + rows
+            if len(rows) >= need:
+                break
+        more = 0
+        if len(rows) > limit:
+            more = 1
+            rows = rows[len(rows) - limit:]
+        out = []
+        for line in rows:
+            p = line.split(",")
+            if len(p) < 5:
+                continue
+            try:
+                out.append({"s": int(p[2]), "e": int(p[1]),
+                            "d": int(p[3]), "mhz": int(p[4])})
+            except ValueError:
+                continue
+        n, total = self._sleep_stats()
+        return httpsrv.json_resp({"ok": 1, "rows": out, "more": more,
+                                  "sum": {"n": n, "sleep": total,
+                                          "days": CSV_KEEP_DAYS}})
+
     def _set_freq(self, hz):
         """切换 CPU 频率。切不动就永久关掉这个功能，不要每轮刷日志。"""
         if hz == self.pm_cur:
@@ -2301,6 +2405,9 @@ class App:
                 self.pm_sleep_total += now_s - self.pm_down_at
                 if len(self.pm_log) > PM_LOG_MAX:
                     del self.pm_log[0]
+                # 同时落盘：内存只留本次开机，日文件才是跨重启的历史
+                self._sleep_save(self.pm_down_at, now_s,
+                                 self.pm_hz // 1000000)
                 self.pm_down_at = 0
             print("[pm] busy ->", hz // 1000000, "MHz")
 
