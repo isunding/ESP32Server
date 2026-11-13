@@ -184,13 +184,15 @@ a{color:var(--acc);text-decoration:none}
   flex:0 0 64px;
 }
 .aq .tile-aqi b{font-size:24px;letter-spacing:-.5px}
-.aq .tile-aqi small{font-size:10px;font-weight:500;opacity:.92;margin-top:3px;letter-spacing:1px}
+.aq .tile-aqi small{font-size:10px;font-weight:500;opacity:.9;margin-top:3px;letter-spacing:1px}
 .aq .info{flex:1;min-width:0}
 .aq .cat{font-size:15px;font-weight:600;margin-bottom:3px}
 .aq .adv{font-size:12px;color:var(--fg2);line-height:1.55}
-.poll{display:grid;grid-template-columns:repeat(auto-fit,minmax(78px,1fr));gap:7px;margin-top:12px}
-.poll .p{background:var(--bg3);border-radius:9px;padding:8px 6px;text-align:center}
-.poll .p .n{font-size:10.5px;color:var(--fg2)}
+.aq-sub{font-size:11px;color:var(--fg2);margin:11px 0 6px}
+.poll{display:grid;grid-template-columns:repeat(auto-fit,minmax(84px,1fr));gap:7px;margin-top:12px}
+.poll .p{background:var(--bg3);border-radius:9px;padding:8px 9px;text-align:center;
+  border-left:3px solid transparent}
+.poll .p .n{font-size:10.5px;color:var(--fg2);letter-spacing:.3px}
 .poll .p .v{font-size:14.5px;font-weight:600;margin:2px 0 1px}
 .poll .p .u{font-size:9.5px;color:var(--fg2)}
 
@@ -206,11 +208,14 @@ a{color:var(--acc);text-decoration:none}
 .warn-item .bd{font-size:12.5px;line-height:1.6;color:var(--fg)}
 .warn-item .mt{font-size:11px;color:var(--fg2);margin-top:6px}
 
-.hours{display:flex;gap:8px;overflow-x:auto;padding-bottom:6px}
+.hours{display:flex;gap:8px;overflow-x:auto;padding-bottom:6px;scrollbar-width:thin}
 .hour{flex:0 0 auto;width:58px;text-align:center;background:var(--bg3);
   border-radius:11px;padding:9px 4px}
 .hour .h{font-size:11.5px;color:var(--fg2)}
-.hour .t{font-size:14px;font-weight:600;margin-top:4px}
+.hour .i{font-size:20px;margin:5px 0}
+.hour .t{font-size:13.5px;font-weight:600}
+.hour .p{font-size:10.5px;color:var(--cold);line-height:13px;min-height:26px}
+.hour .p b{display:block;font-weight:600;color:#58a6ff;height:13px}
 .hour .s{font-size:10.5px;color:var(--fg2);margin-top:2px;white-space:nowrap;
   overflow:hidden;text-overflow:ellipsis}
 

@@ -88,7 +88,8 @@ dist/
 ota/*.mrp
 ota/*.exe
 ota/latest.json
-build/pyi/
+# build/ 同时存放图标包与布局预览等本地产物
+build/
 
 # ---- 内联可视化生成的 SVG 副本（根目录，非交付物）----
 /*_*.html
