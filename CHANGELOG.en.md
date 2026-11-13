@@ -23,6 +23,16 @@ This project follows [Keep a Changelog](https://keepachangelog.com/); entries ar
 - `GET /api/sleep` returns the sleep records of the last 7 days; `?limit=` and
   `?before=<end timestamp>` page backwards and `sum` reports the 7-day count and total seconds
   (S3 only)
+- The device weather page and the router weather page share the same air-quality and 24-hour
+  presentation: pollutant level bars, health advice from the API, a caption and chart note for
+  the 24-hour AQI, hourly icons with precipitation amount and probability, and a fixed 24-item list
+- Weather alerts use a left-column level badge: SVGs for 34 common alert types are inlined,
+  the badge shows the icon, Chinese and English level names and is vertically centred in the row;
+  types without an icon fall back to a text level badge
+- Alert colours use the official RGBA from `alerts[].color`, falling back to the four
+  GB/T 27962-2011 colours; the card border uses the highest level, item borders and badges use
+  their own level, and dark backgrounds use white text
+- Life-index level text is coloured by level; the current-weather icon gets its own enlarged row
 
 ### Changed
 - The sleep timeline and interval list on the device-info page read the day files, so intervals
@@ -31,6 +41,14 @@ This project follows [Keep a Changelog](https://keepachangelog.com/); entries ar
 - The top-bar status heartbeat no longer calls `/api/health` while the page is hidden and fires
   once on return; the previous 15-second poll was denser than the 20-second idle threshold, so
   the device never dropped its clock while any page stayed open
+- The life-index forecast adds the Air Pollution Diffusion and Drying indices
+- Weather-page styles are aligned with the router page: the pollutant grid, hourly icon and
+  precipitation rows, and the air-quality card in day details; the 24-hour AQI chart height and
+  caption are adjusted
+
+### Fixed
+- Pollutant cards render their level colour bar
+- Alert item borders follow the level of each alert
 
 ---
 

@@ -30,7 +30,7 @@ exist only in the S3 build.
 | Page | Path | Content |
 |---|---|---|
 | Home | `/` | Device status, today's lunar date, current weather, entry points |
-| Weather | `/weather.html` | Current conditions, hourly, 7-day forecast, air quality, life indices |
+| Weather | `/weather.html` | Current conditions, hourly, 7-day forecast, air quality, weather alerts, life indices |
 | Market | `/market.html` | Three major indices, FX rates, watchlist (stored on device), Anhui fuel prices (cached daily; fuel prices S3 only) |
 | Radio | `/radio.html` | 67 stations in 9 categories, search and collapsing |
 | News | `/news.html` | Single-column cards, time and importance on the title row, full body text, tags below the card, importance and topic filters, bold `【】` titles, tap a stock tag to add/remove it from the watchlist, hourly catch-up fetch (S3 only) |
@@ -231,6 +231,7 @@ Files under `mirouter/` are written in Chinese.
 | Idle frequency floor | 80 MHz | Lower bound for the WiFi APB and Octal PSRAM timing |
 | Full-speed baseline | Config value `power.max_mhz` | `esp_pm` clock configuration does not survive a soft reset |
 | LED heartbeat | Judged from main-loop ticks, no sleep | Avoids waking the CPU so idle frequency scaling is unaffected |
+| External icons | Inline SVG only | Weather-alert icons are inlined by hazard type; unknown types fall back to a text level badge; pages never reference external icon resources |
 
 ---
 
