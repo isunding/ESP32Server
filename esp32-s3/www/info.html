@@ -658,6 +658,9 @@ var MR = (function () {
   /* 心跳：取一次 /api/health，把 IP 与状态点刷到顶栏。
      重复调用复用同一次请求，多页共用一个 15 秒定时器。 */
   function healthTick() {
+    /* 页面在后台就不再问：这个请求每 15 秒一次，比空闲降频阈值（20 秒）还密，
+       会让设备一直停在满频，休眠记录永远产生不了。回到前台时补一次。 */
+    if (document.hidden) return Promise.resolve(MR.device);
     if (tickBusy) return tickBusy;
     if (MR.device && Date.now() - tickAt < 800) return Promise.resolve(MR.device);
     tickBusy = api("/api/health").then(function (h) {
@@ -690,6 +693,9 @@ var MR = (function () {
 
   function startBeat() {
     if (tickTimer) return;
+    document.addEventListener("visibilitychange", function () {
+      if (!document.hidden) healthTick();   // 切回前台立即补一次，别等下一个 15 秒
+    });
     healthTick();
     tickTimer = setInterval(healthTick, 15000);
   }
