@@ -14,6 +14,21 @@ This project follows [Keep a Changelog](https://keepachangelog.com/); entries ar
 
 ---
 
+## 2026-11-14
+
+### Changed
+- The 7-day sleep timeline and interval records are ordered Monday to Sunday; "today" sits on its
+  weekday and is expanded by default, while the statistics window stays a rolling 7 days
+
+### Fixed
+- The 7-day forecast list on the weather page and the router weather page narrows its fixed columns
+  (date, icon, temperature bar) and allows the condition text to wrap, so it is no longer truncated
+- Domestic quake list and statistics are deduplicated by event key: keys are restored from every day
+  file in the retention window and each event is listed and counted once, so a restart no longer makes
+  the same event appear twice
+
+---
+
 ## 2026-11-13
 
 ### Added
