@@ -14,6 +14,23 @@ This project follows [Keep a Changelog](https://keepachangelog.com/); entries ar
 
 ---
 
+## 2026-11-13
+
+### Added
+- Idle intervals are persisted to `sleep-YYYYMMDD.csv`, one row per interval (key, end, start,
+  seconds, idle frequency), kept for 7 days like the other day files; nothing is written while
+  the system clock is unset
+- `GET /api/sleep` returns the sleep records of the last 7 days; `?limit=` and
+  `?before=<end timestamp>` page backwards and `sum` reports the 7-day count and total seconds
+  (S3 only)
+
+### Changed
+- The sleep timeline and interval list on the device-info page read the day files, so intervals
+  recorded before a restart are shown; the accumulative sleep time and count now cover the last
+  7 days, with the window stated in the card subtitle
+
+---
+
 ## 2026-11-12
 
 ### Added

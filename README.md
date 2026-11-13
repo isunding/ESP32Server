@@ -166,9 +166,10 @@ python esp32-s3/scripts/flash.py esp32-s3/main.py esp32-s3/www/index.html ...
 | GET | `/api/news` | 新闻电报（近 7 天，本地 CSV）；`?limit=<条数>` 与 `?before=<ctime>` 分段向前取，`?force=1` 触发上游刷新；每小时定时补采并翻页追平（仅 S3） |
 | GET | `/api/ota` | 升级状态：版本（`ver`）、待重启标记（`pending`）、最近 5 次记录（`hist`）、上次写入、文件数、可用空间（仅 S3） |
 | PUT | `/api/ota` | `?path=<相对路径>&crc=<crc32>`，上传单个文件；流式写入 `.new`，长度与 CRC 都对上才顶替（仅 S3） |
-| PUT | `/api/ota/pack` | 上传升级包（`MRP1` 格式），边收边解，逐项校验（仅 S3） |
+| PUT | `/api/ota/pack` | 上传升级包（`MRP2` 格式），边收边解，逐项校验（仅 S3） |
 | POST | `/api/ota` | `?a=done&ver=<版本>` 记录版本并重启；`?a=reboot` 仅重启（仅 S3） |
 | GET | `/api/quake` | 地震列表（近 7 天，本地 CSV）；`?a=global` 全球震情，`?a=usgs` USGS M2.5+ 近 24 小时，`?force=1` 触发刷新；响应附带 `stat`（近 7 天逐日次数与 M3 / M4 / M5 / M6 累计）（仅 S3） |
+| GET | `/api/sleep` | 休眠区间（近 7 天，本地 CSV `sleep-YYYYMMDD.csv`）；`?limit=<段数>` 与 `?before=<结束时间戳>` 向前翻页，`sum` 给出近 7 天段数与总秒数（仅 S3） |
 
 ---
 

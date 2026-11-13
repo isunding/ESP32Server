@@ -240,6 +240,12 @@ backwards (another slice is fetched automatically within 240px of the bottom, an
 the first screen is not full). Pull-to-refresh and the 5-minute timer only read the on-device
 cache; `?force=1` triggers a fetch.
 
+Idle periods are persisted the same way: when the CPU returns to full speed the interval is
+appended to `sleep-YYYYMMDD.csv` as `key, end, start, seconds, MHz`. The in-memory `pm.log`
+keeps only the 24 intervals of the current boot and is lost on restart, so the info page reads
+the day files for its history and 7-day totals; `/api/sleep` reuses the same tail read and
+`?before=` paging as the news and quake endpoints.
+
 Fuel prices and the almanac share the same proxy pattern: the router CGI holds the upstream
 credentials and caches for 24 hours, while the device caches only the parsed, trimmed
 structures (prices keep value and change, the almanac keeps only the fields the page uses).

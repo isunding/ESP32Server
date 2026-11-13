@@ -175,9 +175,10 @@ Both board directories use the same scripts. Full steps: [docs/DEPLOY.en.md](doc
 | GET | `/api/news` | News feed (last 7 days, local CSV); `?limit=<n>` and `?before=<ctime>` page backwards, `?force=1` triggers an upstream refresh; hourly catch-up fetch pages back to the last collected item (S3 only) |
 | GET | `/api/ota` | Upgrade status: version (`ver`), pending-reboot flag (`pending`), last 5 records (`hist`), last write, file count, free space (S3 only) |
 | PUT | `/api/ota` | `?path=<relative path>&crc=<crc32>` uploads a single file; written to `.new`, replaced only when length and CRC match (S3 only) |
-| PUT | `/api/ota/pack` | Upload an upgrade package (`MRP1`), unpacked while receiving, verified per entry (S3 only) |
+| PUT | `/api/ota/pack` | Upload an upgrade package (`MRP2`), unpacked while receiving, verified per entry (S3 only) |
 | POST | `/api/ota` | `?a=done&ver=<version>` records the version and reboots; `?a=reboot` reboots only (S3 only) |
 | GET | `/api/quake` | Quake list (last 7 days, local CSV); `?a=global` for global events, `?a=usgs` for USGS M2.5+ in the last 24 hours, `?force=1` to refresh; the response carries `stat` (daily counts for 7 days plus M3 / M4 / M5 / M6 totals) (S3 only) |
+| GET | `/api/sleep` | Sleep intervals (last 7 days, from `sleep-YYYYMMDD.csv`); `?limit=<n>` and `?before=<end timestamp>` page backwards, and `sum` reports the 7-day count and total seconds (S3 only) |
 
 ---
 
