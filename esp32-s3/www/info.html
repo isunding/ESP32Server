@@ -980,10 +980,16 @@ function pmRender(d, sl) {
         if (y > x) { d.segs.push([x, y]); d.total += (y - x) / 1000; }
       });
     });
-    html = days.map(function (d, i) {
+    /* 按周一~周日排列：窗口是滚动 7 天，每天恰好出现一次，重排不丢数据也不改
+       统计口径；周一到周日为一轮，跨周的两天分别落在首尾。 */
+    days.forEach(function (d, i) { d.today = (i === 6); });
+    days.sort(function (a, b) {
+      return (new Date(a.st).getDay() + 6) % 7 - (new Date(b.st).getDay() + 6) % 7;
+    });
+    html = days.map(function (d) {
       var dt = new Date(d.st);
       var label = fullDate(d.st) + " 周" + WEEK[dt.getDay()] +
-        (i === 6 ? " · 今天" : "");
+        (d.today ? " · 今天" : "");
       var meta = d.segs.length
         ? d.segs.length + " 段 · " + MR.fmtDur(Math.round(d.total)) : "无记录";
       var bars = d.segs.map(function (s) {
@@ -991,7 +997,7 @@ function pmRender(d, sl) {
           stampMs(s[0]) + " → " + stampMs(s[1]) +
           "（" + MR.fmtDur(Math.round((s[1] - s[0]) / 1000)) + "）");
       }).join("");
-      return panel(label, meta, bars, ["00:00", "12:00", "24:00"], i === 6,
+      return panel(label, meta, bars, ["00:00", "12:00", "24:00"], d.today,
         absRecords(d.segs));
     }).join("");
   } else {

@@ -412,6 +412,19 @@ video{width:100%;height:100%;display:block;background:#0b0e12}
     color:var(--fg2);margin-left:2px}
   .dt-grid .g.aqg{padding-left:11px}
 
+  /* 窄屏：7 天列表的固定列（日期 / 图标 / 温度条 / 温度）挤占宽度，
+     天气文字只剩几十像素被省略号截断。这里压缩固定列并允许文字折行。 */
+  @media (max-width:520px){
+    #days .day{gap:6px}
+    #days .day .d{width:40px;font-size:13px}
+    #days .day .i{font-size:16px;width:20px;flex:0 0 20px}
+    #days .day .s{flex:1 1 0;min-width:0;overflow:visible;text-overflow:clip;
+      white-space:normal;line-height:1.25}
+    #days .day .bar{width:44px}
+    #days .day .r{font-size:12.5px}
+    #days .day .arw{margin-left:0;font-size:9px}
+  }
+
   /* 路由器原始天气页入口 */
   .srcbar{display:flex;align-items:center;gap:10px;padding:12px 14px;margin-top:14px;
     background:var(--bg2);border:1px solid var(--line);border-radius:var(--radius);

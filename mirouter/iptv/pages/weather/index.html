@@ -164,6 +164,19 @@ header a{color:var(--acc);text-decoration:none;font-size:14px}
 .bar{width:76px;height:5px;border-radius:3px;background:var(--bg3);position:relative;flex:0 0 auto}
 .bar span{position:absolute;height:100%;border-radius:3px;
   background:linear-gradient(90deg,var(--cold),var(--warm))}
+/* 窄屏：日期 / 图标 / 温度条 / 温度四个固定列挤占宽度，天气文字只剩几十像素
+   被省略号截断。压缩固定列并允许文字折行。 */
+@media(max-width:520px){
+  .day{gap:6px}
+  .day .d{width:44px;font-size:13px}
+  .day .i{font-size:16px;width:20px}
+  .day .s{flex:1 1 0;min-width:0;overflow:visible;text-overflow:clip;
+    white-space:normal;line-height:1.25}
+  .bar{width:44px}
+  .day .r{font-size:12.5px}
+  .day .arw{margin-left:0;font-size:9px}
+  .day .meta{padding-left:0}
+}
 
 /* 指数 */
 .idx{display:grid;grid-template-columns:1fr 1fr;gap:9px}

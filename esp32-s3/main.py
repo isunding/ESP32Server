@@ -1772,9 +1772,13 @@ class App:
 
     # ---------------- 新闻 / 地震（CSV 日文件） ----------------
     def _daily_ids(self, prefix):
-        """重启后从当天、昨天的日文件里恢复去重键（第一列，保证无逗号）"""
+        """重启后从保留期内的日文件里恢复去重键（第一列，保证无逗号）。
+
+        只读当天与昨天不够：上游一次返回的 30 条会横跨数天，重启前写进更早
+        文件的记录会被当成新记录重新追加到当天文件，同一事件出现两份。
+        """
         ids = set()
-        for back in (0, 1):
+        for back in range(CSV_KEEP_DAYS):
             fn = "%s-%s.csv" % (prefix, _ymd(back))
             if not self._file_ok(fn):
                 continue
@@ -1808,6 +1812,7 @@ class App:
         n4 = [0] * CSV_KEEP_DAYS
         n5 = [0] * CSV_KEEP_DAYS
         n6 = [0] * CSV_KEEP_DAYS
+        seen = set()                      # 同一事件可能落在两个日文件里，只计一次
         for back in range(CSV_KEEP_DAYS):
             fn = "%s-%s.csv" % (prefix, _ymd(back))
             if not self._file_ok(fn):
@@ -1821,6 +1826,9 @@ class App:
                         parts = line.split(",", 2)
                         if len(parts) < 3:
                             continue
+                        if parts[0] in seen:
+                            continue
+                        seen.add(parts[0])
                         stamp = parts[2].strip('"')[:10]
                         if len(stamp) != 10 or stamp[4] != "-" or stamp[7] != "-":
                             continue
@@ -1894,9 +1902,21 @@ class App:
         if not rows:
             return _out({"ok": 0, "pending": 1,
                          "msg": "正在取数，几秒后自动刷新"})
-        more = 0
+        # 还有更早的记录：去重前就判断，否则重复行会让「是否还有更多」失真
+        more = 1 if len(rows) >= need else 0
+        # 各日文件按抓取日期分文件，同一事件可能同时存在于两个文件（重启后重新
+        # 追加），这里按第一列去重并保留最新那份，页面不再出现两条一样的记录。
+        seen = set()
+        uniq = []
+        for row in reversed(rows):
+            k = row.split(",", 1)[0]
+            if k in seen:
+                continue
+            seen.add(k)
+            uniq.append(row)
+        uniq.reverse()
+        rows = uniq
         if len(rows) > limit:
-            more = 1
             rows = rows[len(rows) - limit:]
         return _out({"ok": 1, "rows": rows, "more": more})
 
