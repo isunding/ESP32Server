@@ -35,7 +35,7 @@ exist only in the S3 build.
 | Radio | `/radio.html` | 67 stations in 9 categories, search and collapsing |
 | News | `/news.html` | Single-column cards, time and importance on the title row, full body text, tags below the card, importance and topic filters, bold `【】` titles, tap a stock tag to add/remove it from the watchlist, hourly catch-up fetch (S3 only) |
 | Quake | `/quake.html` | Domestic / global / USGS sources, 7-day bar chart with M3 / M4 / M5 / M6 buckets, cards with magnitude block, location, depth and coordinates, magnitude filter and coloring (S3 only) |
-| Device | `/info.html` | Firmware, board, CPU, chip temperature, internal RAM blocks, MAC, heap, flash, sleep history and timeline |
+| Device | `/info.html` | Firmware, board, CPU, chip temperature, internal RAM blocks, MAC, heap, flash, sleep history (7-day collapsible timeline and interval list) |
 | NTP | `/ntp.html` | Almanac (lunar date, sexagenary cycle, dos and don'ts, solar terms, cached daily), on-board NTP server status, upstream sync, time zone |
 | IPTV | `/iptv.html` | Channel library browsing and in-browser playback |
 | Upgrade | `/ota.html` | Upload an upgrade package, show version and free space, reboot to apply (S3 only) |

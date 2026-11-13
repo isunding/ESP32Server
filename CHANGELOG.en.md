@@ -33,6 +33,9 @@ This project follows [Keep a Changelog](https://keepachangelog.com/); entries ar
   GB/T 27962-2011 colours; the card border uses the highest level, item borders and badges use
   their own level, and dark backgrounds use white text
 - Life-index level text is coloured by level; the current-weather icon gets its own enlarged row
+- Sleep history on the device-info page is split into seven daily Gantt rows; only today is
+  expanded by default and the previous six days stay collapsed, and each row shows that day's
+  interval list when opened, up to the latest six intervals per day
 
 ### Changed
 - The sleep timeline and interval list on the device-info page read the day files, so intervals
@@ -45,6 +48,9 @@ This project follows [Keep a Changelog](https://keepachangelog.com/); entries ar
 - Weather-page styles are aligned with the router page: the pollutant grid, hourly icon and
   precipitation rows, and the air-quality card in day details; the 24-hour AQI chart height and
   caption are adjusted
+- Sleep-group headings show the full date (year/month/day and weekday) while interval details
+  and hover tips keep the time only; intervals crossing midnight are split at 00:00 across
+  the two days
 
 ### Fixed
 - Pollutant cards render their level colour bar
