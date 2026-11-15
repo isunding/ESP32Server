@@ -109,10 +109,13 @@ def _query(host, timeout, yield_cb=None):
     return sec, ms, rtt
 
 
-def _set_rtc(sec, tz_off):
-    """把本地时间写进 RTC，供页面上显示（NTP 应答不依赖它）。"""
+def _set_rtc(sec, ms, tz_off):
+    """把本地时间写进 RTC，供页面上显示（NTP 应答不依赖它）。
+
+    RTC 只有整秒精度，按最近整秒取整，避免固定丢弃毫秒造成系统性偏慢。
+    """
     try:
-        tm = time.gmtime(int(sec) + tz_off - MP_DELTA)
+        tm = time.gmtime(int(sec) + (1 if ms >= 500 else 0) + tz_off - MP_DELTA)
         machine.RTC().datetime((tm[0], tm[1], tm[2], tm[6],
                                 tm[3], tm[4], tm[5], 0))
     except Exception:
@@ -143,7 +146,7 @@ def sync(hosts, tz_off=8 * 3600, timeout=4, yield_cb=None, fallback_ips=None):
     def commit(sec, ms, rtt, host):
         ticks = time.ticks_ms()
         ntpsrv.set_anchor(sec, ms, ticks, tz_off)
-        _set_rtc(sec, tz_off)
+        _set_rtc(sec, ms, tz_off)
         res["ok"] = True
         res["host"] = IP_ALIAS.get(host, host)
         res["delay"] = rtt
@@ -196,9 +199,13 @@ def sync(hosts, tz_off=8 * 3600, timeout=4, yield_cb=None, fallback_ips=None):
 
 
 def snapshot():
+    # esp_time 与 esp_ms 必须来自同一次取样，分两次取会在跨秒时偏 1 秒
+    sec, ms = ntpsrv.now_parts()
     return {
         "last": last,
         "history": history,
-        "esp_time": ntpsrv.now_local_str(),
+        "esp_time": (ntpsrv.local_str(sec) if ntpsrv.has_anchor()
+                     else ntpsrv.now_local_str()),
+        "esp_ms": ms,
         "calibrated": ntpsrv.has_anchor(),
     }

@@ -63,16 +63,24 @@ def now_parts():
     return _anchor[0] + total // 1000, total % 1000
 
 
-def now_local_str():
+def local_str(sec):
+    """把 UTC 整数秒格式化成本地墙钟字符串，供同一时刻的秒与毫秒配对输出。"""
     try:
-        sec, _ms = now_parts()
-        if _anchor[0] is None:
-            t = time.localtime()
-        else:
-            t = time.localtime(sec + _anchor[3] - MP_DELTA)
+        t = time.localtime(sec + _anchor[3] - MP_DELTA)
         return "%04d-%02d-%02d %02d:%02d:%02d" % (t[0], t[1], t[2], t[3], t[4], t[5])
     except Exception:
         return None
+
+
+def now_local_str():
+    if _anchor[0] is None:
+        try:
+            t = time.localtime()
+            return "%04d-%02d-%02d %02d:%02d:%02d" % (t[0], t[1], t[2], t[3], t[4], t[5])
+        except Exception:
+            return None
+    sec, _ms = now_parts()
+    return local_str(sec)
 
 
 # ---------------------------------------------------------------- 服务

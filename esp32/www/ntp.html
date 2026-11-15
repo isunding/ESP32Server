@@ -773,9 +773,9 @@ function loadCal() {
 }
 
 /* ---------------- 顶部时钟 ----------------
- * 以 /api/ntp 的 esp_time 为锚点，之后只累加「浏览器流逝的时间」走秒：
+ * 以 /api/ntp 的 esp_time + esp_ms 为锚点，之后只累加「浏览器流逝的时间」走秒：
  * 不对齐浏览器本地时间（两者可能差几分钟），也不每秒打接口（板子是单线程）。
- * 每次轮询（15s）重新取锚点，秒针抖一下就自动纠回来。
+ * 锚点按请求区间中点估算，补掉单程传输耗时；每次轮询（30s）重新取锚点。
  */
 var CLK = { base: 0, t0: 0, ok: false, why: "正在读取 ESP32 时间…" };
 var WD = ["日", "一", "二", "三", "四", "五", "六"];
@@ -869,7 +869,7 @@ function buildTz() {
 }
 buildTz();
 
-function setClock(str, calibrated) {
+function setClock(str, calibrated, ms, lag) {
   var m = /^(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2}):(\d{2})$/.exec(str || "");
   if (!m) {
     CLK.ok = false;
@@ -881,8 +881,9 @@ function setClock(str, calibrated) {
     CLK.why = "时钟未校准（RTC），等待同步";
     return;
   }
-  CLK.base = new Date(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +m[6]).getTime();
-  CLK.t0 = Date.now();
+  CLK.base = new Date(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +m[6]).getTime()
+             + (+ms || 0);
+  CLK.t0 = Date.now() - (+lag || 0);
   CLK.ok = true;
 }
 
@@ -928,7 +929,7 @@ function fmtOffset(ms) {
   return (ms > 0 ? "+" : "") + ms + " ms";
 }
 
-function render() {
+function render(lag) {
   if (!D) {
     MR.$("stateRow").innerHTML = '<span class="dot err"></span>状态不可用';
     return;
@@ -943,7 +944,7 @@ function render() {
     (on ? "ESP32 本机 NTP 服务运行中" : "服务已停止");
 
   MR.$("listen").textContent = on ? (L.ip + ":123/udp（本机）") : ":123 未监听";
-  setClock(S.esp_time, S.calibrated);
+  setClock(S.esp_time, S.calibrated, S.esp_ms, lag);
   paintClock();
   MR.$("served").textContent = (L.served || 0) + " 次";
   MR.$("lastClient").textContent = L.last_client
@@ -1025,9 +1026,11 @@ function render() {
 }
 
 function load() {
+  var t0 = Date.now();
   return MR.api("/api/ntp").then(function (r) {
+    var lag = Math.round((Date.now() - t0) / 2);
     D = (r && r.ok) ? r : null;
-    render();
+    render(lag);
     // 串行取第二个接口：板子是单线程 HTTP，并发会挤掉请求
     return loadCal();
   }).catch(function () {
