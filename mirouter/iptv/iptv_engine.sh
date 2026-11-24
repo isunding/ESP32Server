@@ -653,6 +653,24 @@ build_epg_slices() {
 build_playlists() {
   [ -f "$DB" ] || return 0
   mkdir -p "$PLAYER_BASE" 2>/dev/null
+
+  # 指纹跳过: 频道库与配置都没变、产物也齐全时不再重新生成。
+  # start.sh 由 cron 每分钟执行一次, 绝大多数分钟此处只做两次 md5,
+  # 不重写 7 份播放列表, 也不复制到镜像目录, 避免每分钟写闪存。
+  # 节目单切片有独立 TTL, 走的是 build_epg_slices 自己的判断, 这里照旧调用。
+  fp=$( { cat "$DB"; cat "$CONF" 2>/dev/null; } | md5sum 2>/dev/null | cut -d' ' -f1)
+  if [ -n "$fp" ] && [ "$fp" = "$(cat "$TMP/build.stamp" 2>/dev/null)" ]; then
+    ok=1
+    for f in iptv.m3u iptv-rtp.m3u iptv-r2h.m3u iptv.txt \
+             iptv-kodi.m3u iptv-tvbox.m3u iptv-iptvpro.m3u; do
+      [ -s "$PLAYER_BASE/$f" ] || { ok=0; break; }
+    done
+    if [ "$ok" = "1" ]; then
+      build_epg_slices
+      return 0
+    fi
+  fi
+
   db_sorted > "$TMP/db.sorted"
 
   # FCC 查询串
@@ -863,6 +881,9 @@ build_playlists() {
       r2h_reload >/dev/null 2>&1
     fi
   fi
+
+  # 本次生成成功, 记下指纹供下一次 build 判断是否需要重做
+  printf '%s\n' "$fp" > "$TMP/build.stamp" 2>/dev/null
 
   # 节目单切片: 有 TTL 与库指纹双重判断, 命中时不做任何网络与解压
   build_epg_slices

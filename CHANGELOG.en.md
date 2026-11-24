@@ -33,6 +33,15 @@ This project follows [Keep a Changelog](https://keepachangelog.com/); entries ar
 - Channel rows on the ESP32-S3 live page show a catchup badge, present only when the channel has a
   catchup template, a catchup chid and a tvg-id
 
+### Changed
+- Playlists are rebuilt by a daily `iptv build` run and by channel edits on the management page;
+  the keep-alive script only builds when the output is missing, and `build_playlists` compares a
+  fingerprint of the channel database and configuration before regenerating, so unchanged input
+  no longer rewrites the lists or the mirror directory
+- The keep-alive script drops its per-minute duplicate work: configuration and the channel database
+  are written only when their content changes, nginx routes are injected once behind a marker, the
+  NTP server is configured on the first run, and absent legacy interfaces are no longer touched
+
 ---
 
 ## 2026-11-14
