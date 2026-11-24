@@ -441,6 +441,9 @@ video{width:100%;height:100%;display:block;background:#0b0e12}
   .ch .caret{color:var(--fg2);font-size:10px;flex:0 0 auto;transition:transform .15s;
     padding:2px}
   .ch.on .caret{transform:rotate(90deg)}
+  /* 可回看标识：频道级别的能力标记，与"可用/失效"的源状态区分开 */
+  .ch .tag.cu{color:var(--acc);border:1px solid currentColor;border-radius:999px;
+    padding:0 5px;line-height:14px;font-size:10px;flex:0 0 auto}
   .cblk{border-radius:10px}
   .addr{background:var(--bg3);border-radius:10px;padding:2px 12px;margin:0 6px 6px}
   .arow{display:flex;align-items:center;gap:9px;padding:8px 0;border-top:1px solid var(--line)}
@@ -1104,11 +1107,14 @@ function render() {
         var tag = c.live === "1" ? '<span class="tag live">可用</span>'
           : c.live === "0" ? '<span class="tag dead">失效</span>'
             : '<span class="tag">未检测</span>';
+        /* 回看入口只有节目单一条路径：没有 tvg-id 就没有节目单，标了也点不到，
+           所以三项齐全（模板 / chid / tvg-id）才显示 */
+        var cutag = (c.cu && c.chid && c.tvg) ? '<span class="tag cu">可回看</span>' : "";
         var pdot = playing ? '<span class="tag live">' +
           (state.playing.vod ? "回看中" : "播放中") + "</span>" : "";
         return '<div class="cblk" data-key="' + MR.esc(key) + '">' +
           '<div class="ch' + (on || playing ? " on" : "") + '">' +
-          '<span class="name">' + MR.esc(c.name) + "</span>" + pdot + tag +
+          '<span class="name">' + MR.esc(c.name) + "</span>" + pdot + cutag + tag +
           '<span class="caret">▸</span></div>' +
           (on ? chanExtra(c) : "") + "</div>";
       }).join("");

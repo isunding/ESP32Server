@@ -30,6 +30,8 @@ This project follows [Keep a Changelog](https://keepachangelog.com/); entries ar
 - The ESP32-S3 live page gains schedules and catchup: expanding a channel shows yesterday / today,
   the programme on air is marked as live, a finished programme replays from its start with one
   click, and a playing channel can switch back to live
+- Channel rows on the ESP32-S3 live page show a catchup badge, present only when the channel has a
+  catchup template, a catchup chid and a tvg-id
 
 ---
 
