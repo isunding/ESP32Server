@@ -51,6 +51,9 @@ FCC_ENABLE=0
 RTSP_ENABLE=0
 RTSP_TMPL=""
 CATCHUP_DAYS=7
+# --- EPG 切片: 把节目单按频道拆成小文件, 供网页直接取 ---
+EPG_SLICE_ENABLE=1
+EPG_SLICE_TTL=21600
 
 [ -f "$CONF" ] && . "$CONF"
 
@@ -489,6 +492,164 @@ db_sorted() {
     | sort -t"$TAB" -k1,1n -k2,2n | cut -f3-
 }
 
+# ---------------------------------------------------------------- EPG 切片
+# 把 XMLTV 节目单按频道拆成小文件, 让网页能直接取某个频道的节目。
+#
+# 为什么不在板子上解析: 完整 EPG 解压后约 18MB / 12 万条, 远超终端设备可用内存,
+# 且 MicroPython 没有 XML 解析能力。这里只做一次性切片, 之后按频道取都是小文件。
+#
+# 输出: $PLAYER_BASE/epg/<tvg-id>.json
+#   {"id":"17","p":[["20261124060000","20261124063000","新闻联播"], ...]}
+#   时间为北京时间 14 位数字, 与 CGI a=tvr 的入参格式一致, 网页可直接拼 URL。
+#
+# 只切频道库里出现过 tvg-id 的频道; 时间窗为 [现在-1天, 现在+2天]。
+build_epg_slices() {
+  [ "$EPG_SLICE_ENABLE" = "1" ] || return 0
+  [ -f "$DB" ] || return 0
+
+  out_dir="$PLAYER_BASE/epg"
+  stamp="$TMP/epg.stamp"
+  now=$(date +%s 2>/dev/null)
+  case "$now" in ''|*[!0-9]*) now=0 ;; esac
+  [ "$now" -gt 0 ] || return 0
+
+  # 频道库变化或超过 TTL 才重建。build 由 cron 每分钟调用一次,
+  # 绝大多数情况下这里只做两次读取就返回, 不产生网络与解压开销。
+  dbmd5=$(md5sum "$DB" 2>/dev/null | cut -d' ' -f1)
+  if [ -f "$stamp" ] && [ -d "$out_dir" ]; then
+    read -r lts ldb llen < "$stamp" 2>/dev/null
+    if [ -n "$lts" ] && [ "$ldb" = "$dbmd5" ] && [ $((now - lts)) -lt "$EPG_SLICE_TTL" ]; then
+      return 0
+    fi
+  fi
+
+  # 单飞: build 由 cron 每分钟触发, 手动重建可能与它撞在同一时间。
+  # 两个实例同时写 $TMP/epg.new 会互相删文件, 结果是一份残缺的切片。
+  lock="$RUN/epg.lock"
+  if [ -d "$lock" ]; then
+    lk_ts=$(cat "$lock/t" 2>/dev/null)
+    case "$lk_ts" in ''|*[!0-9]*) lk_ts=0 ;; esac
+    if [ "$lk_ts" -gt 0 ] && [ $((now - lk_ts)) -lt 900 ]; then
+      return 0
+    fi
+    rm -rf "$lock" 2>/dev/null
+  fi
+  mkdir "$lock" 2>/dev/null || return 0
+  printf '%s\n' "$now" > "$lock/t" 2>/dev/null
+
+  # 取节目单: 优先用 rtp2httpd 已抓好的本地缓存, 不可用时回退上游。
+  # 注意这里只读 /epg.xml.gz, 不写不改, rtp2httpd 与 /player 用的仍是同一份。
+  dl="$TMP/epg.dl.gz"
+  rm -f "$dl" 2>/dev/null
+  got=0
+  if [ "$R2H_ENABLE" = "1" ]; then
+    curl -s --max-time 60 -o "$dl" "http://127.0.0.1:$R2H_PORT/epg.xml.gz" 2>/dev/null
+    [ -s "$dl" ] && got=1
+  fi
+  if [ "$got" = "0" ] && [ -n "$EPG_URL" ]; then
+    curl -sL --max-time 90 -o "$dl" "$EPG_URL" 2>/dev/null
+    [ -s "$dl" ] && got=1
+  fi
+  [ "$got" = "1" ] || { rm -rf "$lock"; return 0; }
+
+  # EPG 大小没变、频道库也没变, 说明节目单没更新: 只刷新时间戳,
+  # 省掉解压与逐条扫描的十几秒。上游节目单通常一天才更新一次。
+  cur_len=$(wc -c < "$dl" 2>/dev/null | tr -d ' ')
+  if [ -n "$cur_len" ] && [ "$cur_len" = "$llen" ] && [ "$ldb" = "$dbmd5" ] && [ -d "$out_dir" ]; then
+    printf '%s %s %s\n' "$now" "$dbmd5" "$cur_len" > "$stamp" 2>/dev/null
+    rm -f "$dl" 2>/dev/null
+    rm -rf "$lock" 2>/dev/null
+    return 0
+  fi
+
+  # 只保留频道库用到的 tvg-id
+  awk -F'\t' 'NF >= 11 && $11 != "" { print $11 }' "$DB" 2>/dev/null \
+    | sort -u > "$TMP/epg.ids"
+  [ -s "$TMP/epg.ids" ] || { rm -rf "$lock"; return 0; }
+
+  lo=$(date -d "@$((now - 86400))" +%Y%m%d%H%M%S 2>/dev/null)
+  hi=$(date -d "@$((now + 172800))" +%Y%m%d%H%M%S 2>/dev/null)
+  case "$lo$hi" in ''|*[!0-9]*) rm -rf "$lock"; return 0 ;; esac
+
+  # 从 XML 流里提取 programme 的频道/起止/标题。
+  #
+  # 性能取舍: 整份 EPG 约 39 万行, 在路由器上逐行处理的开销是分钟级还是秒级,
+  # 全看每行做了什么。实测结论是 awk 的函数调用最贵(每次约 30µs),
+  # 所以这里不用函数, 属性定位全部内联; 不是频道库白名单的条目解析到
+  # channel 就置 skip 跳过, 连时间属性都不拆。
+  gunzip -c "$dl" 2>/dev/null | awk -v lo="$lo" -v hi="$hi" -v ids="$TMP/epg.ids" '
+    BEGIN { while ((getline l < ids) > 0) { sub(/\r$/, "", l); if (l != "") want[l] = 1 } close(ids) }
+    {
+      if (skip) { if (index($0, "</programme>") > 0) skip = 0; next }
+      if (!inprog) {
+        if (index($0, "<programme ") == 0) next
+        ti = ""; st = ""; sp = ""
+        i = index($0, "channel=\"")
+        if (i == 0) { skip = 1; next }
+        ch = substr($0, i + 9, 64)
+        j = index(ch, "\"")
+        if (j == 0) { skip = 1; next }
+        ch = substr(ch, 1, j - 1)
+        if (!(ch in want)) { skip = 1; if (index($0, "</programme>") > 0) skip = 0; next }
+        inprog = 1
+        i = index($0, "start=\""); if (i > 0) st = substr($0, i + 7, 32)
+        i = index($0, "stop=\"");  if (i > 0) sp = substr($0, i + 6, 32)
+      }
+      if (ti == "" && (i = index($0, "<title")) > 0) {
+        t = substr($0, i + 6)
+        i = index(t, ">")
+        if (i > 0) {
+          t = substr(t, i + 1)
+          i = index(t, "<")
+          ti = (i > 0 ? substr(t, 1, i - 1) : t)
+        }
+      }
+      if (index($0, "</programme>") == 0) next
+      inprog = 0
+      if (st == "" || sp == "") next
+      s14 = substr(st, 1, 14); e14 = substr(sp, 1, 14)
+      if (s14 < lo || s14 > hi) next
+      # 转义只发生在真正输出的行上
+      if (index(ch, "\"") > 0) gsub(/"/, "", ch)
+      if (index(ch, "\\") > 0) gsub(/\\/, "/", ch)
+      if (index(ti, "\"") > 0) gsub(/"/, "", ti)
+      if (index(ti, "\\") > 0) gsub(/\\/, "/", ti)
+      if (index(ti, "\t") > 0) gsub(/\t/, " ", ti)
+      print ch "\t" s14 "\t" e14 "\t" (ti == "" ? "节目" : ti)
+    }' > "$TMP/epg.tsv" 2>/dev/null
+
+  sort -t"$TAB" -k1,1 -k2,2 "$TMP/epg.tsv" > "$TMP/epg.sorted" 2>/dev/null
+
+  # 先在临时目录拼好再整体替换, 避免重建期间网页取到半截文件
+  work="$TMP/epg.new"
+  rm -rf "$work" 2>/dev/null
+  mkdir -p "$work" 2>/dev/null
+
+  awk -F'\t' -v dir="$work" '
+    {
+      if ($1 != cur) {
+        if (cur != "") { printf "]}\n" > out; close(out) }
+        cur = $1; out = dir "/" cur ".json"
+        printf "{\"id\":\"%s\",\"p\":[", cur > out
+        first = 1
+      }
+      if (!first) printf "," > out
+      first = 0
+      printf "[\"%s\",\"%s\",\"%s\"]", $2, $3, $4 > out
+    }
+    END { if (cur != "") { printf "]}\n" > out; close(out) } }' "$TMP/epg.sorted" 2>/dev/null
+
+  if [ -d "$work" ] && [ -n "$(ls -A "$work" 2>/dev/null)" ]; then
+    rm -rf "$out_dir" 2>/dev/null
+    mv "$work" "$out_dir" 2>/dev/null
+    printf '%s %s %s\n' "$now" "$dbmd5" "$cur_len" > "$stamp" 2>/dev/null
+  fi
+
+  rm -f "$dl" "$TMP/epg.tsv" "$TMP/epg.sorted" 2>/dev/null
+  rm -rf "$work" "$lock" 2>/dev/null
+  return 0
+}
+
 build_playlists() {
   [ -f "$DB" ] || return 0
   mkdir -p "$PLAYER_BASE" 2>/dev/null
@@ -703,6 +864,9 @@ build_playlists() {
     fi
   fi
 
+  # 节目单切片: 有 TTL 与库指纹双重判断, 命中时不做任何网络与解压
+  build_epg_slices
+
   if [ "$LEGACY_NAMES" = "1" ]; then
     for d in "$PLAYER_BASE" "$MIRROR_BASE"; do
       [ -d "$d" ] || continue
@@ -858,12 +1022,20 @@ cgi() {
       awk -F'\t' '
         function esc(s) { gsub(/\\/,"\\\\",s); gsub(/"/,"\\\"",s); gsub(/\r/,"",s); gsub(/\t/," ",s); return s }
         BEGIN { printf "{\"ok\":1,\"items\":["; first=1 }
+        # 字段顺序: 名称 分组 ip port 状态 ... seq 备用源 tvg-id 可回看 chid
+        # 末尾三个字段供网页关联节目单与回放入口: 缺 tvg-id 的频道不出节目单,
+        # chid 是第 13 列模板里 /zte/<chid>/ 那一段, 网页拼 a=tvr 时用
         NF >= 4 && $4 ~ /^[0-9]+$/ {
           if (!first) printf ","
           first=0
-          printf "[\"%s\",\"%s\",\"%s\",\"%s\",\"%s\",\"%s\",\"%s\",\"%s\",\"%s\"]",
+          cid = ""; zi = index($13, "/zte/")
+          if (zi > 0) {
+            zs = substr($13, zi + 5); zj = index(zs, "/")
+            if (zj > 1) cid = substr(zs, 1, zj - 1)
+          }
+          printf "[\"%s\",\"%s\",\"%s\",\"%s\",\"%s\",\"%s\",\"%s\",\"%s\",\"%s\",\"%s\",\"%s\",\"%s\"]",
                  esc($1), esc($2), $3, $4, ($5==""?"-1":$5), ($6==""?"0":$6), ($7==""?"0":$7),
-                 ($8==""?"0":$8), esc($9)
+                 ($8==""?"0":$8), esc($9), esc($11), ($13==""?"0":"1"), cid
         }
         END { printf "]}\n" }
       ' "$TMP/db.sorted"
@@ -1111,7 +1283,7 @@ cgi() {
   # 回看时间换算: 客户端只给 epoch(或已换算好的 14 位北京时间), 由路由器生成
   # 上游需要的路径日期与 playseek, 使回看与客户端时区无关。
   tvr)
-    c=$(getp c); s=$(getp s); e=$(getp e)
+    c=$(getp c); s=$(getp s); e=$(getp e); u=$(getp u)
     case "$c" in ''|*[!0-9A-Za-z_]*) c="" ;; esac
 
     tvr_norm() {
@@ -1145,7 +1317,13 @@ cgi() {
           l = rep(l, "${mm}", substr(b, 11, 2))
           l = rep(l, "${(b)yyyyMMddHHmmss}", b);  l = rep(l, "${(e)yyyyMMddHHmmss}", e)
           print l }')
-      printf 'Status: 302 Found\r\nLocation: %s\r\nContent-Type: text/plain; charset=utf-8\r\nCache-Control: no-store\r\n\r\n' "$url"
+      # u=1: 只把上游地址回给网页, 由网页自行决定走哪种拉流方式 (网页内播放需经
+      #      rtp2httpd 的 /http/ 反代绕开上游 CDN 的跨域限制); 不带 u 仍走 302。
+      if [ "$u" = "1" ]; then
+        printf 'Status: 200 OK\r\nContent-Type: application/json; charset=utf-8\r\nCache-Control: no-store\r\nAccess-Control-Allow-Origin: *\r\n\r\n{"ok":1,"url":"%s"}\n' "$url"
+      else
+        printf 'Status: 302 Found\r\nLocation: %s\r\nContent-Type: text/plain; charset=utf-8\r\nCache-Control: no-store\r\n\r\n' "$url"
+      fi
     fi
     ;;
 

@@ -82,6 +82,30 @@
   .arow code{flex:1;min-width:0;font-size:11px;word-break:break-all;line-height:1.5;
     font-family:ui-monospace,Menlo,Consolas,monospace;color:var(--fg);user-select:all}
   .arow .btn{padding:3px 9px;font-size:11px;flex:0 0 auto}
+
+  /* 节目单：展开频道后显示，可切昨天 / 今天，已播节目点一下回看 */
+  .epgbox{margin:0 6px 6px}
+  .epg{background:var(--bg3);border-radius:10px;overflow:hidden}
+  .epgnote{font-size:11.5px;color:var(--fg2);padding:9px 12px;line-height:1.6}
+  .epg .tabs{display:flex;gap:6px;padding:8px 10px 0}
+  .epg .tab{font:inherit;font-size:11px;line-height:18px;padding:0 10px;border-radius:999px;
+    border:1px solid var(--line);background:transparent;color:var(--fg2);cursor:pointer}
+  .epg .tab.on{background:var(--acc);border-color:var(--acc);color:#fff}
+  .epg .rows{max-height:216px;overflow-y:auto;padding:6px 0 4px}
+  .epg .rows::-webkit-scrollbar{width:6px}
+  .epg .rows::-webkit-scrollbar-thumb{background:var(--line);border-radius:3px}
+  .epg .row{display:flex;align-items:baseline;gap:8px;padding:5px 10px;font-size:12px}
+  .epg .row .tm{flex:0 0 72px;color:var(--fg2);font-size:11px;
+    font-variant-numeric:tabular-nums}
+  .epg .row .ti{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .epg .row .rb{flex:0 0 auto;font-size:10px;line-height:16px;color:var(--fg2);
+    border:1px solid var(--line);border-radius:999px;padding:0 6px}
+  .epg .row.no{opacity:.5}
+  .epg .row.can{cursor:pointer}
+  .epg .row.can:hover{background:var(--bg2)}
+  .epg .row.now{background:var(--bg2)}
+  .epg .row.now .ti{color:var(--acc);font-weight:600}
+  .epg .row.now .rb{color:var(--acc);border-color:var(--acc)}
   /* 分组：默认折叠，一次只展开一组 */
   .grp{margin-bottom:8px}
   .ghd{display:flex;align-items:center;gap:8px;padding:10px 11px;cursor:pointer;
@@ -126,6 +150,7 @@
       <div class="pctl">
         <button class="btn" id="prev">◀ 上一台</button>
         <button class="btn" id="next">下一台 ▶</button>
+        <button class="btn" id="toLive" style="display:none">回到直播</button>
         <button class="btn" id="stop">■ 停止</button>
       </div>
       <div class="perr" id="perr"></div>
@@ -151,7 +176,8 @@
       <button class="btn" id="cpGrp">只复制可用频道</button>
     </div>
     <p class="small muted" style="margin:10px 0 0;line-height:1.7">
-      点频道直接播放，点 <b>▸</b> 展开地址。网页内播放仅走 rtp2httpd <code>:5140</code>（已开 CORS）；
+      点频道直接播放，点 <b>▸</b> 展开节目单与地址；已播节目点一下即从该档开头回看。
+      直播走 rtp2httpd <code>:5140</code>，回看经 <code>/http/</code> 反代，两者都已放行跨域；
       断流封 IP 5 秒，重连 429 属正常。
     </p>
   </div>
@@ -164,7 +190,9 @@ MR.mountTop("IPTV 电视直播");
 var state = {
   channels: [], filter: "", open: "", openGrp: "",
   router: { host: "10.0.0.1", r2h_port: 5140, udpxy_port: 12123 },
-  playing: null, idx: -1
+  playing: null, idx: -1, byKey: {}, mode: "live",
+  /* 节目单缓存：按 tvg-id 存一份，5 分钟内不重复取；epgDay 记住每台选的日期 */
+  epg: {}, epgBusy: {}, epgBad: {}, epgDay: {}
 };
 
 MR.healthTick().then(function (h) {
@@ -179,6 +207,36 @@ function urls(ip, port) {
     udp: "http://" + r.host + ":" + (r.udpxy_port || 12123) + "/rtp/" + ip + ":" + port,
     mcast: "rtp://" + ip + ":" + port
   };
+}
+
+/* ---------------- 时间换算 ----------------
+   节目单里的时间一律是北京时间的 14 位数字。全部按「拿 epoch 加 8 小时再读 UTC」
+   换算，浏览器在哪个时区都不影响比较与回看时间戳。 */
+function pad2(n) { return n < 10 ? "0" + n : "" + n; }
+
+function bjStamp(ms) {
+  var d = new Date((ms === undefined ? Date.now() : ms) + 28800000);
+  return d.getUTCFullYear() + pad2(d.getUTCMonth() + 1) + pad2(d.getUTCDate()) +
+    pad2(d.getUTCHours()) + pad2(d.getUTCMinutes()) + pad2(d.getUTCSeconds());
+}
+
+function epochFromBj(s) {
+  return Math.floor(Date.UTC(+s.substr(0, 4), +s.substr(4, 2) - 1, +s.substr(6, 2),
+    +s.substr(8, 2), +s.substr(10, 2), +s.substr(12, 2)) / 1000) - 28800;
+}
+
+function hhmm14(s) { return s.substr(8, 2) + ":" + s.substr(10, 2); }
+
+function dayNum(day) {
+  return Date.UTC(+day.substr(0, 4), +day.substr(4, 2) - 1, +day.substr(6, 2)) / 86400000;
+}
+
+function dayLabel(day, today) {
+  var diff = dayNum(day) - dayNum(today);
+  if (diff === 0) return "今天";
+  if (diff === -1) return "昨天";
+  if (diff === 1) return "明天";
+  return day.substr(4, 2) + "/" + day.substr(6, 2);
 }
 
 function copyText(text, okMsg) {
@@ -219,16 +277,116 @@ function addrBlock(c) {
   }).join("") + "</div>";
 }
 
+/* 展开频道后先给节目单，再给地址。没有 tvg-id 的频道不出节目单，也就没有回看入口 */
+function chanExtra(c) {
+  var epg = c.tvg ? '<div class="epgbox" data-tvg="' + MR.esc(c.tvg) +
+    '" data-key="' + MR.esc(c.key) + '"></div>' : "";
+  return epg + addrBlock(c);
+}
+
+/* ---------------- 节目单 ----------------
+   切片由路由器 nginx 静态提供（/iptv/epg/<tvg-id>.json，已放行跨域），
+   浏览器直连，板子只发页面不参与。 */
+function epgFetch(tvg) {
+  if (state.epgBusy[tvg]) return;
+  var hit = state.epg[tvg];
+  if (hit && Date.now() - hit.ts < 300000) return;   // 内存里 5 分钟内不重复取
+  if (!hit && state.epgBad[tvg] && Date.now() - state.epgBad[tvg] < 60000) return;
+  state.epgBusy[tvg] = 1;
+  var u = "http://" + state.router.host + "/iptv/epg/" + encodeURIComponent(tvg) + ".json";
+  fetch(u, { cache: "force-cache" }).then(function (r) {
+    if (!r.ok) throw new Error("HTTP " + r.status);
+    return r.json();
+  }).then(function (d) {
+    state.epgBusy[tvg] = 0;
+    state.epg[tvg] = { ts: Date.now(), p: (d && d.p) || [] };
+    epgPaint(tvg);
+  }).catch(function () {
+    state.epgBusy[tvg] = 0;
+    state.epgBad[tvg] = Date.now();
+    epgPaint(tvg);
+  });
+}
+
+function epgPaint(tvg) {
+  var boxes = MR.$("list").querySelectorAll('.epgbox[data-tvg="' + tvg + '"]');
+  for (var i = 0; i < boxes.length; i++) epgPaint1(boxes[i]);
+}
+
+function epgPaint1(box) {
+  var tvg = box.dataset.tvg;
+  box.innerHTML = epgHtml(tvg, box.dataset.key);
+  epgFetch(tvg);
+  var rows = box.querySelector(".rows"), cur = box.querySelector(".row.now");
+  if (rows && cur && cur.offsetTop >= rows.firstChild.offsetTop) {
+    var off = cur.offsetTop - rows.firstChild.offsetTop;
+    rows.scrollTop = Math.max(0, off - rows.clientHeight / 2 + cur.offsetHeight / 2);
+  }
+}
+
+function epgHtml(tvg, key) {
+  var e = state.epg[tvg];
+  if (!e) {
+    return '<div class="epg"><div class="epgnote">' +
+      (state.epgBad[tvg] ? "节目单暂时取不到" : "节目单加载中…") + "</div></div>";
+  }
+  if (!e.p.length) return '<div class="epg"><div class="epgnote">这两天没有节目单</div></div>';
+
+  var now = bjStamp(), today = now.substr(0, 8);
+  var days = {}, order = [];
+  e.p.forEach(function (r) {
+    var d = r[0].substr(0, 8);
+    if (!days[d]) { days[d] = []; order.push(d); }
+    days[d].push(r);
+  });
+  order.sort();
+  var sel = state.epgDay[tvg];
+  if (!days[sel]) sel = days[today] ? today : order[order.length - 1];
+
+  var tabs = "";
+  if (order.length > 1) {
+    tabs = '<div class="tabs">' + order.map(function (d) {
+      return '<button class="tab' + (d === sel ? " on" : "") + '" data-tvg="' +
+        MR.esc(tvg) + '" data-day="' + d + '">' + dayLabel(d, today) + "</button>";
+    }).join("") + "</div>";
+  }
+
+  var c = state.byKey[key] || {};
+  var rows = days[sel].map(function (r) {
+    var s = r[0], en = r[1], isNow = (s <= now && now < en), past = en <= now;
+    var cls = "row", badge = "", live = "";
+    if (isNow) {
+      cls += " now can"; badge = '<span class="rb">直播中</span>'; live = "1";
+    } else if (past) {
+      if (c.cu && c.chid) { cls += " can"; badge = '<span class="rb">回看</span>'; }
+      else cls += " no";
+    }
+    return '<div class="' + cls + '" data-key="' + MR.esc(key) + '" data-s="' + s +
+      '" data-e="' + en + '" data-live="' + live + '">' +
+      '<span class="tm">' + hhmm14(s) + "</span>" +
+      '<span class="ti">' + MR.esc(r[2] || "") + "</span>" + badge + "</div>";
+  }).join("");
+
+  return '<div class="epg">' + tabs + '<div class="rows">' + rows + "</div></div>";
+}
+
 function render() {
   var q = state.filter.toLowerCase();
   var groups = {}, order = [];
+  state.byKey = {};
 
   state.channels.forEach(function (it) {
-    var c = { name: it[0] || "", grp: it[1] || "未分组", ip: it[2], port: it[3], live: it[4] };
+    var c = {
+      name: it[0] || "", grp: it[1] || "未分组", ip: it[2], port: it[3], live: it[4],
+      /* [9] tvg-id 用来对节目单，[10] 可回看，[11] 回看 chid；旧缓存可能没有后两项 */
+      tvg: it[9] || "", cu: it[10] === "1", chid: it[11] || ""
+    };
     if (!c.ip || !c.port) return;
+    c.key = c.ip + ":" + c.port;
     if (q && (c.name + " " + c.grp + " " + c.ip).toLowerCase().indexOf(q) < 0) return;
     if (!groups[c.grp]) { groups[c.grp] = []; order.push(c.grp); }
     groups[c.grp].push(c);
+    state.byKey[c.key] = c;
   });
 
   var searching = q.length > 0;
@@ -252,12 +410,13 @@ function render() {
         var tag = c.live === "1" ? '<span class="tag live">可用</span>'
           : c.live === "0" ? '<span class="tag dead">失效</span>'
             : '<span class="tag">未检测</span>';
-        var pdot = playing ? '<span class="tag live">播放中</span>' : "";
+        var pdot = playing ? '<span class="tag live">' +
+          (state.playing.vod ? "回看中" : "播放中") + "</span>" : "";
         return '<div class="cblk" data-key="' + MR.esc(key) + '">' +
           '<div class="ch' + (on || playing ? " on" : "") + '">' +
           '<span class="name">' + MR.esc(c.name) + "</span>" + pdot + tag +
           '<span class="caret">▸</span></div>' +
-          (on ? addrBlock(c) : "") + "</div>";
+          (on ? chanExtra(c) : "") + "</div>";
       }).join("");
     } else if (state.playing && arr.some(function (c) {
       return (c.ip + ":" + c.port) === state.playing.key;
@@ -277,6 +436,8 @@ function render() {
 
   MR.$("list").innerHTML = html || MR.empty("没有匹配的频道");
   MR.$("cnt").textContent = total + " 个";
+  var boxes = MR.$("list").querySelectorAll(".epgbox");
+  for (var i = 0; i < boxes.length; i++) epgPaint1(boxes[i]);
   state.visible = [];
   order.forEach(function (g) { groups[g].forEach(function (c) { state.visible.push(c); }); });
 }
@@ -293,7 +454,8 @@ function buildM3U(onlyLive) {
 }
 
 /* ---------------- 播放器 ---------------- */
-var player = null;
+var player = null;      // mpegts.js 实例（直播）
+var hls = null;         // hls.js 实例（回看）
 var video = MR.$("video");
 
 function showErr(msg) {
@@ -306,22 +468,26 @@ function showErr(msg) {
 function clearErr() { MR.$("perr").classList.remove("show"); }
 function setStatus(t) { MR.$("pstat").textContent = t; }
 
-function stop() {
+/* 拆播放内核但不重绘：由调用方决定接下来是走直播还是回看，避免连着重绘两次 */
+function teardown() {
+  if (hls) { try { hls.destroy(); } catch (e) { } hls = null; }
   if (player) {
     try { player.destroy(); } catch (e) { }
     player = null;
   }
   try { video.pause(); } catch (e) { }
   try { video.removeAttribute("src"); video.load(); } catch (e) { }
-  state.playing = null; state.idx = -1;
+  state.playing = null; state.idx = -1; state.mode = "live";
   MR.$("ptitle").textContent = "未在播放";
   MR.$("pcover").style.display = "flex";
+  MR.$("toLive").style.display = "none";
   setStatus("");
   clearErr();
-  render();
 }
 
-/* 播放内核按需加载：首屏不下载 52KB 的 mpegts.js，只有真的点播放才去取。
+function stop() { teardown(); render(); }
+
+/* 播放内核按需加载：首屏不下载 218KB 的 mpegts.min.js，只有真的点播放才去取。
    实测 jsdelivr 走公网要 2.1 秒，比板子本地 0.67 秒还慢，所以只用本地；
    取到后浏览器按 max-age 缓存，后续打开直接复用。 */
 var _kernelP = null;
@@ -337,7 +503,7 @@ function loadKernel() {
       if (s.parentNode) s.parentNode.removeChild(s);
       reject(new Error("timeout"));
     }, 15000);
-    s.src = "/mpegts.js?v=20261107d.7.3";
+    s.src = "/mpegts.min.js?v=20261107d.7.3";
     s.onload = function () {
       if (done) return;
       done = true; clearTimeout(timer);
@@ -359,13 +525,13 @@ function playChannel(c, idx) {
     setStatus("加载播放内核…");
     loadKernel().then(function () { playChannel(c, idx); })
       .catch(function () {
-        showErr("播放内核加载失败：CDN 与板子本地都取不到 mpegts.js");
+        showErr("播放内核加载失败：板子本地取不到 mpegts.min.js");
         setStatus("");
       });
     return;
   }
-  stop();
-  state.playing = { name: c.name, grp: c.grp, key: c.ip + ":" + c.port };
+  teardown();
+  state.playing = { name: c.name, grp: c.grp, key: c.key };
   state.idx = idx;
   state.open = state.playing.key;
   state.openGrp = c.grp;   // 展开所属分组，保证能看到正在播的那一项
@@ -400,6 +566,105 @@ function playChannel(c, idx) {
   render();
 }
 
+/* ---------------- 回看 ----------------
+   上游回看 CDN 不回跨域头，网页不能直接取 m3u8 与分片，必须走路由器的
+   /http/ 反代（rtp2httpd 转发、nginx 补 CORS）。地址的换算（epoch → 北京
+   时间）仍在 CGI 里做，这里只负责把域名换成反代前缀。 */
+var _hlsP = null;
+function proxyUrl(u) {
+  return String(u).replace(/^https?:\/\//i, "http://" + state.router.host + "/http/");
+}
+
+function loadHls() {
+  if (window.Hls) return Promise.resolve();
+  if (_hlsP) return _hlsP;
+  _hlsP = new Promise(function (resolve, reject) {
+    var s = document.createElement("script");
+    var done = false;
+    var timer = setTimeout(function () {
+      if (done) return;
+      done = true;
+      if (s.parentNode) s.parentNode.removeChild(s);
+      reject(new Error("timeout"));
+    }, 15000);
+    s.src = "/hls.js";
+    s.onload = function () {
+      if (done) return;
+      done = true; clearTimeout(timer);
+      if (window.Hls) resolve(); else reject(new Error("empty"));
+    };
+    s.onerror = function () {
+      if (done) return;
+      done = true; clearTimeout(timer);
+      reject(new Error("load error"));
+    };
+    document.head.appendChild(s);
+  });
+  return _hlsP;
+}
+
+function playCatchup(key, s, e) {
+  var c = state.byKey[key];
+  if (!c) return;
+  if (!c.chid) { MR.toast("该频道不支持回看"); return; }
+  var sn = epochFromBj(s), en = epochFromBj(e);
+  var now = Math.floor(Date.now() / 1000);
+  if (en > now) en = now;                 // 正在播出的节目截到当前时刻
+  if (en - sn < 30) { MR.toast("这档节目还没播完，先看直播"); return; }
+
+  setStatus("获取回看地址…");
+  clearErr();
+  var q = "http://" + state.router.host + "/cgi-bin/iptv?a=tvr&u=1&c=" +
+    encodeURIComponent(c.chid) + "&s=" + sn + "&e=" + en;
+  fetch(q, { cache: "no-store" }).then(function (r) {
+    return r.json();
+  }).then(function (d) {
+    if (!d || !d.ok || !d.url) throw new Error((d && d.msg) || "回看地址不可用");
+    playHls(proxyUrl(d.url), c, s, e);
+  }).catch(function (err) {
+    showErr("回看取址失败：" + (err && err.message ? err.message : err));
+    setStatus("");
+  });
+}
+
+function playHls(url, c, s, e) {
+  if (!window.Hls) {
+    setStatus("加载回看内核…");
+    loadHls().then(function () { playHls(url, c, s, e); })
+      .catch(function () {
+        showErr("回看内核加载失败：板子本地取不到 hls.js");
+        setStatus("");
+      });
+    return;
+  }
+  teardown();
+  state.mode = "vod";
+  state.playing = { name: c.name, grp: c.grp, key: c.key, vod: 1 };
+  state.open = c.key;
+  state.openGrp = c.grp;
+  MR.$("ptitle").textContent = c.name;
+  MR.$("pcover").style.display = "none";
+  MR.$("toLive").style.display = "";
+  setStatus("回看 " + hhmm14(s) + "–" + hhmm14(e));
+  clearErr();
+  try {
+    hls = new Hls({ enableWorker: false, lowLatencyMode: false });
+    hls.on(Hls.Events.MANIFEST_PARSED, function () {
+      video.play().catch(function () { /* 被拦则等用户点播放 */ });
+    });
+    hls.on(Hls.Events.ERROR, function (evt, data) {
+      if (!data || !data.fatal) return;
+      showErr("回看播放出错：" + (data.details || data.type || ""));
+      setStatus("播放失败");
+    });
+    hls.loadSource(url);
+    hls.attachMedia(video);
+  } catch (err) {
+    showErr("创建回看播放器失败：" + (err && err.message ? err.message : err));
+  }
+  render();
+}
+
 function step(dir) {
   var arr = state.visible || [];
   if (!arr.length) return;
@@ -411,6 +676,11 @@ function step(dir) {
 MR.$("prev").addEventListener("click", function () { step(-1); });
 MR.$("next").addEventListener("click", function () { step(1); });
 MR.$("stop").addEventListener("click", stop);
+MR.$("toLive").addEventListener("click", function () {
+  var c = state.playing && state.byKey[state.playing.key];
+  if (!c) { stop(); return; }
+  playChannel(c, (state.visible || []).indexOf(c));
+});
 
 /* ---------------- 频道加载 ---------------- */
 MR.api("/api/channels").then(function (r) {
@@ -437,6 +707,27 @@ MR.$("list").addEventListener("click", function (e) {
     render();
     return;
   }
+
+  /* 节目单：切日期、点节目回看。这两类点击要先于「点频道」拦下 */
+  var tab = e.target.closest(".epg .tab");
+  if (tab) {
+    state.epgDay[tab.dataset.tvg] = tab.dataset.day;
+    epgPaint(tab.dataset.tvg);
+    return;
+  }
+  var row = e.target.closest(".epg .row");
+  if (row) {
+    if (row.dataset.live === "1") {
+      var cc = state.byKey[row.dataset.key];
+      var ci = (state.visible || []).indexOf(cc);
+      if (cc && ci >= 0) playChannel(cc, ci);
+    } else if (row.dataset.s) {
+      playCatchup(row.dataset.key, row.dataset.s, row.dataset.e);
+    }
+    return;
+  }
+
+  if (e.target.closest(".epg")) return;
 
   var blk = e.target.closest(".cblk");
   if (!blk) return;

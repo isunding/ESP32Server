@@ -159,6 +159,41 @@ NGEOF
     CHANGED=1
   fi
 
+  # 节目单切片 (按频道拆分的小 JSON, 网页从其它源跨域直取)
+  if ! grep -q 'location \^~ /iptv/epg/' "$CONF" 2>/dev/null; then
+    cat >> "$CONF" <<'NGEOF'
+
+    location ^~ /iptv/epg/ {
+        alias /data/iptv/www/iptv/epg/;
+        default_type application/json;
+        add_header Access-Control-Allow-Origin "*" always;
+    }
+NGEOF
+    CHANGED=1
+  fi
+
+  # 回看 HLS 反代: 复用 rtp2httpd 的 /http/ 转发, nginx 只补 CORS 与 Host。
+  # 上游回看 CDN 不返回 Access-Control-Allow-Origin, 网页里的 hls.js 取不到播放
+  # 列表与分片; rtp2httpd 只给 /rtp/ 与 OPTIONS 补跨域头, 这里由 nginx 补齐。
+  # Host 传 $host: rtp2httpd 按 Host 重写 m3u8 内的分片地址, 分片才会继续回到这里。
+  if ! grep -q 'location \^~ /http/' "$CONF" 2>/dev/null; then
+    cat >> "$CONF" <<'NGEOF'
+
+    location ^~ /http/ {
+        proxy_pass http://127.0.0.1:5140;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header Connection "";
+        proxy_buffering off;
+        proxy_request_buffering off;
+        proxy_read_timeout 60s;
+        add_header Access-Control-Allow-Origin "*" always;
+        add_header Access-Control-Allow-Methods "GET, HEAD, OPTIONS" always;
+    }
+NGEOF
+    CHANGED=1
+  fi
+
   # 所有 CGI 路由逐条补齐
   for ep in iptv ntpctl weather weatherhist svcstat sysstat memctl netperip; do
     [ -f "$BASE/www/cgi-bin/$ep" ] || continue

@@ -14,6 +14,25 @@ This project follows [Keep a Changelog](https://keepachangelog.com/); entries ar
 
 ---
 
+## 2026-11-24
+
+### Added
+- The router pre-slices the EPG into one small file per channel at `/iptv/epg/<tvg-id>.json`,
+  covering yesterday to tomorrow; nginx serves them statically with CORS enabled, so pages and
+  players can fetch a single channel's schedule
+- The channel list endpoint `a=list` appends tvg-id, a catchup flag and the catchup chid after the
+  existing fields, letting pages map channels to schedules and replay entries; channels without a
+  tvg-id get no schedule
+- The catchup endpoint `a=tvr` accepts `u=1` and returns the upstream catchup URL as JSON instead
+  of a 302
+- A `/http/` catchup HLS reverse proxy: rtp2httpd forwards the upstream stream and nginx adds the
+  CORS response headers
+- The ESP32-S3 live page gains schedules and catchup: expanding a channel shows yesterday / today,
+  the programme on air is marked as live, a finished programme replays from its start with one
+  click, and a playing channel can switch back to live
+
+---
+
 ## 2026-11-14
 
 ### Changed
