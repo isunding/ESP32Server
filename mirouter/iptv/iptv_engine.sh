@@ -564,7 +564,7 @@ build_playlists() {
         }
       }
       NSRC[nm] = NS; CAT[nm] = $2; SEQ[nm] = (($8 == "" || $8 == "0") ? 999999 : $8 + 0)
-      TID[nm] = $11; TNAME[nm] = $12
+      TID[nm] = $11; TNAME[nm] = $12; CS[nm] = $13
       if (!(nm in seen)) { seen[nm] = 1; ORD[++nn] = nm }
       for (k = 2; k <= NS; k++) { t = tagof(SQ[nm, k]); if (t != "") TC[nm SUBSEP t]++ }
       next
@@ -583,10 +583,11 @@ build_playlists() {
             else disp = nm " " t
           }
           g = bgrp(cat, q); r = (g in rank) ? rank[g] : 50
-          printf "%03d\t%d\t%09d\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", r, (k == 1 ? 0 : 1), s * 1000 + k, g, disp, SP[nm, k], ST[nm, k], TID[nm], TNAME[nm], nm
+          printf "%03d\t%d\t%09d\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", r, (k == 1 ? 0 : 1), s * 1000 + k, g, disp, SP[nm, k], ST[nm, k], TID[nm], TNAME[nm], nm, CS[nm]
           # 央视超高清 的条目在「央视频道」里也保留一份 (允许重复)
-          if (g == "央视超高清")
-            printf "%03d\t%d\t%09d\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", rank["央视频道"], (k == 1 ? 0 : 1), s * 1000 + k, "央视频道", disp, SP[nm, k], ST[nm, k], TID[nm], TNAME[nm], nm
+          # CCTV-16 例外: 央视频道组已有同名高清条目, 不再保留 4K 副本
+          if (g == "央视超高清" && nm != "CCTV-16 奥林匹克")
+            printf "%03d\t%d\t%09d\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", rank["央视频道"], (k == 1 ? 0 : 1), s * 1000 + k, "央视频道", disp, SP[nm, k], ST[nm, k], TID[nm], TNAME[nm], nm, CS[nm]
         }
       }
     }' "$TMP/db.sorted" | sort -t"$TAB" -k1,1n -k2,2n -k3,3n > "$TMP/entries.tsv"
@@ -594,13 +595,14 @@ build_playlists() {
   # 1) udpxy 转单播
   {
     printf '#EXTM3U x-tvg-url="%s"\n' "$EPG_URL"
-    awk -F'\t' -v h="$PUBLIC_HOST" -v p="$MSD_PORT" -v lg="$LOGO_BASE" '
+    awk -F'\t' -v h="$PUBLIC_HOST" -v p="$MSD_PORT" -v lg="$LOGO_BASE" -v cd="$CATCHUP_DAYS" '
       function short(n,   a) { if (split(n, a, /[ ]+/) > 1) return a[1]; return n }
       { extra = ""
         ida = ($8 != "" ? " tvg-id=\"" $8 "\"" : "")
         tvm = ($9 != "" ? $9 : short($5))
         nice = ($10 != "" ? $10 : $5)
         if (nice != $5) extra = extra " display-name=\"" $5 "\""
+        if ($2 == "0" && $11 != "") { c = $11; gsub(/\{name\}/, $5, c); extra = extra " catchup=\"default\" catchup-days=\"" cd "\" catchup-source=\"" c "\"" }
         printf "#EXTINF:-1%s tvg-name=\"%s\" tvg-logo=\"%s/%s.png\" group-title=\"%s\"%s,%s\n", ida, tvm, lg, short($5), $4, extra, nice
         printf "http://%s:%s/rtp/%s:%s\n", h, p, $6, $7 }' "$TMP/entries.tsv"
   } > "$PLAYER_BASE/iptv.m3u"
@@ -609,9 +611,12 @@ build_playlists() {
   #    tvg-id / tvg-name 是播放器匹配 EPG 的依据, 必须带上
   {
     printf '#EXTM3U x-tvg-url="%s"\n' "$EPG_URL"
-    awk -F'\t' -v fccq="$FCCQ" -v cu="$CU" '
+    awk -F'\t' -v fccq="$FCCQ" -v cu="$CU" -v cd="$CATCHUP_DAYS" '
       { extra = ""
-        if ($2 == "0" && cu != "") { c = cu; gsub(/\{name\}/, $5, c); extra = " catchup=\"default\" catchup-source=\"" c "\"" }
+        if ($2 == "0") {
+          c = ($11 != "" ? $11 : cu)
+          if (c != "") { gsub(/\{name\}/, $5, c); extra = " catchup=\"default\" catchup-days=\"" cd "\" catchup-source=\"" c "\"" }
+        }
         ida = ($8 != "" ? " tvg-id=\"" $8 "\"" : "")
         nma = ($9 != "" ? " tvg-name=\"" $9 "\"" : "")
         nice = ($10 != "" ? $10 : $5)
@@ -623,10 +628,13 @@ build_playlists() {
   # 3) rtp2httpd 转单播 (端口 5140)
   {
     printf '#EXTM3U x-tvg-url="%s"\n' "$EPG_URL"
-    awk -F'\t' -v h="$PUBLIC_HOST" -v p="$R2H_PORT" -v lg="$LOGO_BASE" -v fccq="$FCCQ" -v cu="$CU" '
+    awk -F'\t' -v h="$PUBLIC_HOST" -v p="$R2H_PORT" -v lg="$LOGO_BASE" -v fccq="$FCCQ" -v cu="$CU" -v cd="$CATCHUP_DAYS" '
       function short(n,   a) { if (split(n, a, /[ ]+/) > 1) return a[1]; return n }
       { extra = ""
-        if ($2 == "0" && cu != "") { c = cu; gsub(/\{name\}/, $5, c); extra = " catchup=\"default\" catchup-source=\"" c "\"" }
+        if ($2 == "0") {
+          c = ($11 != "" ? $11 : cu)
+          if (c != "") { gsub(/\{name\}/, $5, c); extra = " catchup=\"default\" catchup-days=\"" cd "\" catchup-source=\"" c "\"" }
+        }
         ida = ($8 != "" ? " tvg-id=\"" $8 "\"" : "")
         tvm = ($9 != "" ? $9 : short($5))
         nice = ($10 != "" ? $10 : $5)
@@ -634,6 +642,39 @@ build_playlists() {
         printf "#EXTINF:-1%s tvg-name=\"%s\" tvg-logo=\"%s/%s.png\" group-title=\"%s\"%s,%s\n", ida, tvm, lg, short($5), $4, extra, nice
         printf "http://%s:%s/rtp/%s:%s%s\n", h, p, $6, $7, fccq }' "$TMP/entries.tsv"
   } > "$PLAYER_BASE/iptv-r2h.m3u"
+
+  # 3b) 回看时区自适配
+  #     客户端只提供 epoch (Unix 秒), 由 CGI 的 a=tvr 换算成上游需要的北京时间。
+  #     客户端时区不同也不会偏差; 三份文件只差占位符写法, 指向同一个换算入口。
+  TVR_BASE="http://$PUBLIC_HOST/cgi-bin/iptv?a=tvr"
+  gen_tvr_m3u() {
+    st="$1"; et="$2"; out="$3"
+    {
+      printf '#EXTM3U x-tvg-url="%s"\n' "$EPG_URL"
+      awk -F'\t' -v h="$PUBLIC_HOST" -v p="$MSD_PORT" -v lg="$LOGO_BASE" \
+          -v base="$TVR_BASE" -v st="$st" -v et="$et" -v cd="$CATCHUP_DAYS" '
+        function short(n,   a) { if (split(n, a, /[ ]+/) > 1) return a[1]; return n }
+        function chid(t,   i, s) {
+          i = index(t, "/zte/"); if (i == 0) return ""
+          s = substr(t, i + 5); i = index(s, "/"); if (i == 0) return ""
+          return substr(s, 1, i - 1)
+        }
+        { extra = ""
+          if ($2 == "0") {
+            c = chid($11)
+            if (c != "") extra = " catchup=\"default\" catchup-days=\"" cd "\" catchup-source=\"" base "&c=" c "&s=" st "&e=" et "\""
+          }
+          ida = ($8 != "" ? " tvg-id=\"" $8 "\"" : "")
+          tvm = ($9 != "" ? $9 : short($5))
+          nice = ($10 != "" ? $10 : $5)
+          if (nice != $5) extra = extra " display-name=\"" $5 "\""
+          printf "#EXTINF:-1%s tvg-name=\"%s\" tvg-logo=\"%s/%s.png\" group-title=\"%s\"%s,%s\n", ida, tvm, lg, short($5), $4, extra, nice
+          printf "http://%s:%s/rtp/%s:%s\n", h, p, $6, $7 }' "$TMP/entries.tsv"
+    } > "$PLAYER_BASE/$out"
+  }
+  gen_tvr_m3u '{utc}' '{utcend}' iptv-kodi.m3u
+  gen_tvr_m3u '${(b)timestamp}' '${(e)timestamp}' iptv-tvbox.m3u
+  gen_tvr_m3u '${start}' '${end}' iptv-iptvpro.m3u
 
   # 4) TVBox / DIYP 格式 (udpxy)
   awk -F'\t' -v h="$PUBLIC_HOST" -v p="$MSD_PORT" '
@@ -643,13 +684,24 @@ build_playlists() {
   # 镜像到第二个 docroot
   if [ -n "$MIRROR_BASE" ] && [ "$MIRROR_BASE" != "$PLAYER_BASE" ]; then
     mkdir -p "$MIRROR_BASE" 2>/dev/null
-    for f in iptv.m3u iptv-rtp.m3u iptv-r2h.m3u iptv.txt; do
+    for f in iptv.m3u iptv-rtp.m3u iptv-r2h.m3u iptv.txt \
+             iptv-kodi.m3u iptv-tvbox.m3u iptv-iptvpro.m3u; do
       [ -f "$PLAYER_BASE/$f" ] && cp "$PLAYER_BASE/$f" "$MIRROR_BASE/$f" 2>/dev/null
     done
   fi
 
-  # 让 rtp2httpd 重新加载外部 M3U (它按需读取, 这里触发一次即可)
-  [ "$R2H_ENABLE" = "1" ] && r2h_reload >/dev/null 2>&1
+  # 让 rtp2httpd 重新加载外部 M3U。
+  # rtp2httpd 每次重读 M3U 都会按 x-tvg-url 重新抓取 EPG, 而 start.sh 由 cron
+  # 每分钟执行一次 build, 无条件发信号会变成每分钟拉一次节目单。
+  # 只在 M3U 内容真正变化时发信号, 间隔由 external-m3u-update-interval 兜底。
+  if [ "$R2H_ENABLE" = "1" ]; then
+    h=$(md5sum "$PLAYER_BASE/iptv-r2h.m3u" 2>/dev/null | cut -d' ' -f1)
+    last=$(cat "$TMP/m3u.md5" 2>/dev/null)
+    if [ "$h" != "$last" ]; then
+      printf '%s\n' "$h" > "$TMP/m3u.md5" 2>/dev/null
+      r2h_reload >/dev/null 2>&1
+    fi
+  fi
 
   if [ "$LEGACY_NAMES" = "1" ]; then
     for d in "$PLAYER_BASE" "$MIRROR_BASE"; do
@@ -668,7 +720,8 @@ r2h_running() {
 }
 
 r2h_reload() {
-  pid=$(cat /var/run/rtp2httpd_*.pid 2>/dev/null | head -1)
+  # pid 文件名不带下划线（/var/run/rtp2httpd.pid），旧写法只匹配下划线形式, 会一直取到空值
+  pid=$(cat /var/run/rtp2httpd.pid /var/run/rtp2httpd_*.pid 2>/dev/null | head -1)
   [ -n "$pid" ] && kill -HUP "$pid" 2>/dev/null
   return 0
 }
@@ -1053,6 +1106,47 @@ cgi() {
     done < "$TMP/cfg.tsv"
     cfg_write
     printf '{"ok":1}\n'
+    ;;
+
+  # 回看时间换算: 客户端只给 epoch(或已换算好的 14 位北京时间), 由路由器生成
+  # 上游需要的路径日期与 playseek, 使回看与客户端时区无关。
+  tvr)
+    c=$(getp c); s=$(getp s); e=$(getp e)
+    case "$c" in ''|*[!0-9A-Za-z_]*) c="" ;; esac
+
+    tvr_norm() {
+      case "$1" in ''|*[!0-9]*) printf ''; return ;; esac
+      if [ ${#1} -eq 10 ]; then
+        date -u -d "@$(( $1 + 28800 ))" +%Y%m%d%H%M%S 2>/dev/null
+      elif [ ${#1} -eq 14 ]; then
+        printf '%s' "$1"
+      fi
+    }
+    sb=$(tvr_norm "$s"); se=$(tvr_norm "$e")
+    [ -n "$se" ] || se="$sb"
+
+    tpl=""
+    if [ -n "$c" ] && [ -n "$sb" ]; then
+      tpl=$(awk -F'\t' -v c="$c" 'NF >= 13 && index($13, "/zte/" c "/") { print $13; exit }' "$DB" 2>/dev/null)
+    fi
+
+    if [ -z "$tpl" ]; then
+      printf 'Status: 400 Bad Request\r\nContent-Type: text/plain; charset=utf-8\r\nCache-Control: no-store\r\n\r\ncatchup: channel or time not recognised\n'
+    else
+      url=$(printf '%s' "$tpl" | awk -v b="$sb" -v e="$se" '
+        function rep(s, f, t,   i, o) {
+          o = ""
+          while ((i = index(s, f)) > 0) { o = o substr(s, 1, i - 1) t; s = substr(s, i + length(f)) }
+          return o s
+        }
+        { l = $0
+          l = rep(l, "${yyyy}", substr(b, 1, 4)); l = rep(l, "${MM}", substr(b, 5, 2))
+          l = rep(l, "${dd}", substr(b, 7, 2));   l = rep(l, "${HH}", substr(b, 9, 2))
+          l = rep(l, "${mm}", substr(b, 11, 2))
+          l = rep(l, "${(b)yyyyMMddHHmmss}", b);  l = rep(l, "${(e)yyyyMMddHHmmss}", e)
+          print l }')
+      printf 'Status: 302 Found\r\nLocation: %s\r\nContent-Type: text/plain; charset=utf-8\r\nCache-Control: no-store\r\n\r\n' "$url"
+    fi
     ;;
 
   *)

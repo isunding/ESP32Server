@@ -64,8 +64,11 @@ fi
 # rtp2httpd: 网页播放器 / 状态面板 / EPG, 监听 5140
 if ! pidof rtp2httpd >/dev/null 2>&1; then
   # -O '*' : CORS 允许任意来源（电视/手机 App 跨域拉流需要）
+  # --external-m3u-update-interval: 重读 M3U 与重抓 EPG 的间隔（秒）。
+  #   build 时仅在 M3U 内容变化才发 HUP，这里的间隔作为兜底。
   "$BASE/bin/rtp2httpd" -l 0.0.0.0:5140 -r eth1.43 -m 10 -B 524288 -O '*' \
-    -M "file://$BASE/www/iptv/iptv-r2h.m3u" -I 0 --pid-file /var/run/rtp2httpd.pid >/dev/null 2>&1 &
+    -M "file://$BASE/www/iptv/iptv-r2h.m3u" -I 0 --external-m3u-update-interval 43200 \
+    --pid-file /var/run/rtp2httpd.pid >/dev/null 2>&1 &
 fi
 
 # NTP 服务器: 让内网设备以 10.0.0.1 作为时间源 (UDP 123)
@@ -141,6 +144,17 @@ NGEOF
     location = /iptv {
         return 302 /manage/;
     }
+NGEOF
+    CHANGED=1
+  fi
+
+  # 播放器专用回看列表 (时间以 epoch 传入, 由 CGI 换算, 与客户端时区无关)
+  if ! grep -q 'location = /iptv/iptv-kodi.m3u' "$CONF" 2>/dev/null; then
+    cat >> "$CONF" <<'NGEOF'
+
+    location = /iptv/iptv-kodi.m3u    { alias /data/iptv/www/iptv/iptv-kodi.m3u; }
+    location = /iptv/iptv-tvbox.m3u   { alias /data/iptv/www/iptv/iptv-tvbox.m3u; }
+    location = /iptv/iptv-iptvpro.m3u { alias /data/iptv/www/iptv/iptv-iptvpro.m3u; }
 NGEOF
     CHANGED=1
   fi
