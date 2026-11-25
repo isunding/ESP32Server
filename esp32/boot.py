@@ -17,6 +17,12 @@ try:
 
     _sta = network.WLAN(network.STA_IF)
     _sta.active(True)
+    # 关闭 WiFi 省电（modem sleep）。ESP32 默认会在空闲后让首个包等 beacon，
+    # 表现为每次空闲再访问时的额外延迟；USB 供电不心疼这点功耗。
+    try:
+        _sta.config(pm=network.WLAN.PM_NONE)
+    except Exception:
+        pass
     with open("config.json") as _f:
         _wifi = json.load(_f).get("wifi", {})
     if _wifi.get("ssid"):

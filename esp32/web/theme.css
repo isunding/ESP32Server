@@ -1,43 +1,36 @@
 /* ESP32 终端服务器 · 设计系统
- * 视觉语言照搬原路由器页面：深色底 + 分层卡片 + 细描边 + 等宽数字
+ * 与 miniweb 入口页一致：浅灰蓝底 + 白色卡片 + 蓝紫渐变头图 + 细描边。
+ * 深色为可选项，由顶栏按钮写入 data-theme="dark" 后生效。
  */
 :root{
-  color-scheme:dark;
-  --bg:#0f1216; --bg2:#161b22; --bg3:#1c232c; --line:#283141;
-  --fg:#e6edf3; --fg2:#8b98a9; --acc:#ff6a00; --acc2:#3b82f6;
-  --ok:#3fb950; --err:#f85149; --warm:#ffb454; --cold:#58a6ff;
+  color-scheme:light;
+  --bg:#f4f6fa; --bg2:#ffffff; --bg3:#eef2f8; --line:#d8e0ee;
+  --fg:#1a2233; --fg2:#5f6b7f;
+  --acc:#2563eb; --acc2:#7c3aed;
+  --grad:linear-gradient(135deg,#2563eb,#7c3aed);
+  --ok:#16a34a; --err:#dc2626; --warm:#d97706; --cold:#0284c7;
+  --shadow:0 10px 26px rgba(23,53,110,.12);
   --radius:16px;
 }
-/* 亮色有两处来源：跟随系统（media），或被顶栏按钮手动锁定为 light。
-   两处配色相同，改配色时一起改。手动锁定 dark 时 media 段被 :not 排除，
-   回落到上面的 :root 深色值。 */
-@media (prefers-color-scheme:light){
-  :root:not([data-theme="dark"]){
-    color-scheme:light;
-    --bg:#f2f5f9; --bg2:#ffffff; --bg3:#e9eef4; --line:#d8dee4;
-    --fg:#1f2328; --fg2:#59636e;
-  }
-}
-:root[data-theme="light"]{
-  color-scheme:light;
-  --bg:#f2f5f9; --bg2:#ffffff; --bg3:#e9eef4; --line:#d8dee4;
-  --fg:#1f2328; --fg2:#59636e;
+:root[data-theme="dark"]{
+  color-scheme:dark;
+  --bg:#0f1216; --bg2:#161b22; --bg3:#1c232c; --line:#283141;
+  --fg:#e6edf3; --fg2:#8b98a9;
+  --acc:#3b82f6; --acc2:#8b5cf6;
+  --grad:linear-gradient(135deg,#3b82f6,#8b5cf6);
+  --ok:#3fb950; --err:#f85149; --warm:#ffb454; --cold:#58a6ff;
+  --shadow:0 10px 26px rgba(0,0,0,.45);
 }
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
 html,body{margin:0;padding:0;min-height:100%}
 body{
-  background:radial-gradient(1200px 600px at 50% -10%, #1b2430 0%, var(--bg) 60%);
-  background-attachment:fixed;
+  background:var(--bg);
   color:var(--fg);
   font:15px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
 }
-@media (prefers-color-scheme:light){
-  :root:not([data-theme="dark"]) body{
-    background:radial-gradient(1200px 600px at 50% -10%, #ffffff 0%, var(--bg) 55%);
-  }
-}
-:root[data-theme="light"] body{
-  background:radial-gradient(1200px 600px at 50% -10%, #ffffff 0%, var(--bg) 55%);
+:root[data-theme="dark"] body{
+  background:radial-gradient(1200px 600px at 50% -10%, #1b2430 0%, var(--bg) 60%);
+  background-attachment:fixed;
 }
 a{color:var(--acc);text-decoration:none}
 
@@ -138,7 +131,7 @@ a{color:var(--acc);text-decoration:none}
   border:1px solid var(--line);border-radius:var(--radius);
   padding:18px;transition:.15s;position:relative;overflow:hidden;
 }
-.tile:hover{border-color:var(--acc);transform:translateY(-2px);box-shadow:0 10px 26px rgba(0,0,0,.45)}
+.tile:hover{border-color:var(--acc);transform:translateY(-2px);box-shadow:var(--shadow)}
 .tile:active{transform:translateY(0)}
 .tile .ico{
   width:46px;height:46px;flex:0 0 46px;border-radius:12px;display:flex;
@@ -172,7 +165,7 @@ a{color:var(--acc);text-decoration:none}
   margin-left:2px;letter-spacing:0;color:var(--fg2)}
 .now .txt{font-size:17px;color:var(--fg2);padding-bottom:9px}
 .now .feels{color:var(--fg2);font-size:13.5px;margin-top:2px}
-.metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:16px}
+.metrics{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin-top:16px}
 .metric{background:var(--bg3);border-radius:11px;padding:9px 4px;text-align:center}
 .metric .k{font-size:11px;color:var(--fg2)}
 .metric .v{font-size:15px;font-weight:600;margin-top:2px}
@@ -298,6 +291,7 @@ video{width:100%;height:100%;display:block;background:#0b0e12}
   .nav a{padding:4px 9px;font-size:12px}
   .now .temp{font-size:58px}
   .meters{grid-template-columns:1fr 1fr;gap:10px}
+  .metrics{grid-template-columns:repeat(2,minmax(0,1fr))}
   .grid{grid-template-columns:1fr}
 }
 

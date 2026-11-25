@@ -8,7 +8,6 @@ var MR = (function () {
   var PAGES = [
     { href: "/", title: "首页" },
     { href: "/weather.html", title: "天气" },
-    { href: "/market.html", title: "行情" },
     { href: "/radio.html", title: "电台" },
     { href: "/info.html", title: "本机" },
     { href: "/ntp.html", title: "校时" },
@@ -120,14 +119,15 @@ var MR = (function () {
   }
 
   /* 判定顺序：DOM 上的 data-theme（构建时注入的引导脚本已按 localStorage 打过）
-     → localStorage → 系统配色。少了第一项，手动锁定后图标会画错方向。 */
+     → localStorage → 默认浅色。默认值取浅色，与 miniweb 入口页保持同一套观感；
+     不再跟随系统配色，否则系统处于深色的设备打开子页面会跳成另一套颜色。
+     少了第一项，手动锁定后图标会画错方向。 */
   function themeNow() {
     var d = document.documentElement.getAttribute("data-theme");
     if (d === "light" || d === "dark") return d;
     var t = themePref();
     if (t === "light" || t === "dark") return t;
-    return (window.matchMedia &&
-      window.matchMedia("(prefers-color-scheme: light)").matches) ? "light" : "dark";
+    return "light";
   }
 
   function paintThemeBtn() {
@@ -146,13 +146,7 @@ var MR = (function () {
     paintThemeBtn();
   }
 
-  /* 跟随系统时，系统配色变了要把图标跟着换掉 */
-  if (window.matchMedia) {
-    var mq = window.matchMedia("(prefers-color-scheme: light)");
-    var onScheme = function () { if (!themePref()) paintThemeBtn(); };
-    if (mq.addEventListener) mq.addEventListener("change", onScheme);
-    else if (mq.addListener) mq.addListener(onScheme);
-  }
+  /* 默认浅色，不再监听系统配色变化：图标只随手动切换变化 */
 
   /* 顶栏 + 页签。title 为空时不显示返回键。
      挂载完就自动开始心跳：以前要求每页自己调 healthTick()，漏掉一页
@@ -195,7 +189,7 @@ var MR = (function () {
      重复调用复用同一次请求，多页共用一个 15 秒定时器。 */
   function healthTick() {
     /* 页面在后台就不再问：这个请求每 15 秒一次，比空闲降频阈值（20 秒）还密，
-       会让设备一直停在满频，休眠记录永远产生不了。回到前台时补一次。 */
+       会让设备一直停在满频。回到前台时补一次。 */
     if (document.hidden) return Promise.resolve(MR.device);
     if (tickBusy) return tickBusy;
     if (MR.device && Date.now() - tickAt < 800) return Promise.resolve(MR.device);

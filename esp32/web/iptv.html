@@ -321,7 +321,7 @@ function stop() {
   render();
 }
 
-/* 播放内核按需加载：首屏不下载 52KB 的 mpegts.js，只有真的点播放才去取。
+/* 播放内核按需加载：首屏不下载 218KB 的 mpegts.min.js，只有真的点播放才去取。
    实测 jsdelivr 走公网要 2.1 秒，比板子本地 0.67 秒还慢，所以只用本地；
    取到后浏览器按 max-age 缓存，后续打开直接复用。 */
 var _kernelP = null;
@@ -337,7 +337,7 @@ function loadKernel() {
       if (s.parentNode) s.parentNode.removeChild(s);
       reject(new Error("timeout"));
     }, 15000);
-    s.src = "/mpegts.js?v=20261107d.7.3";
+    s.src = "/mpegts.min.js?v=20261107d.7.3";
     s.onload = function () {
       if (done) return;
       done = true; clearTimeout(timer);
@@ -359,7 +359,7 @@ function playChannel(c, idx) {
     setStatus("加载播放内核…");
     loadKernel().then(function () { playChannel(c, idx); })
       .catch(function () {
-        showErr("播放内核加载失败：CDN 与板子本地都取不到 mpegts.js");
+        showErr("播放内核加载失败：板子本地取不到 mpegts.min.js");
         setStatus("");
       });
     return;

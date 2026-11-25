@@ -8,45 +8,38 @@
 <link rel="icon" href="data:,">
 <style>
 /* ESP32 终端服务器 · 设计系统
- * 视觉语言照搬原路由器页面：深色底 + 分层卡片 + 细描边 + 等宽数字
+ * 与 miniweb 入口页一致：浅灰蓝底 + 白色卡片 + 蓝紫渐变头图 + 细描边。
+ * 深色为可选项，由顶栏按钮写入 data-theme="dark" 后生效。
  */
 :root{
-  color-scheme:dark;
-  --bg:#0f1216; --bg2:#161b22; --bg3:#1c232c; --line:#283141;
-  --fg:#e6edf3; --fg2:#8b98a9; --acc:#ff6a00; --acc2:#3b82f6;
-  --ok:#3fb950; --err:#f85149; --warm:#ffb454; --cold:#58a6ff;
+  color-scheme:light;
+  --bg:#f4f6fa; --bg2:#ffffff; --bg3:#eef2f8; --line:#d8e0ee;
+  --fg:#1a2233; --fg2:#5f6b7f;
+  --acc:#2563eb; --acc2:#7c3aed;
+  --grad:linear-gradient(135deg,#2563eb,#7c3aed);
+  --ok:#16a34a; --err:#dc2626; --warm:#d97706; --cold:#0284c7;
+  --shadow:0 10px 26px rgba(23,53,110,.12);
   --radius:16px;
 }
-/* 亮色有两处来源：跟随系统（media），或被顶栏按钮手动锁定为 light。
-   两处配色相同，改配色时一起改。手动锁定 dark 时 media 段被 :not 排除，
-   回落到上面的 :root 深色值。 */
-@media (prefers-color-scheme:light){
-  :root:not([data-theme="dark"]){
-    color-scheme:light;
-    --bg:#f2f5f9; --bg2:#ffffff; --bg3:#e9eef4; --line:#d8dee4;
-    --fg:#1f2328; --fg2:#59636e;
-  }
-}
-:root[data-theme="light"]{
-  color-scheme:light;
-  --bg:#f2f5f9; --bg2:#ffffff; --bg3:#e9eef4; --line:#d8dee4;
-  --fg:#1f2328; --fg2:#59636e;
+:root[data-theme="dark"]{
+  color-scheme:dark;
+  --bg:#0f1216; --bg2:#161b22; --bg3:#1c232c; --line:#283141;
+  --fg:#e6edf3; --fg2:#8b98a9;
+  --acc:#3b82f6; --acc2:#8b5cf6;
+  --grad:linear-gradient(135deg,#3b82f6,#8b5cf6);
+  --ok:#3fb950; --err:#f85149; --warm:#ffb454; --cold:#58a6ff;
+  --shadow:0 10px 26px rgba(0,0,0,.45);
 }
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
 html,body{margin:0;padding:0;min-height:100%}
 body{
-  background:radial-gradient(1200px 600px at 50% -10%, #1b2430 0%, var(--bg) 60%);
-  background-attachment:fixed;
+  background:var(--bg);
   color:var(--fg);
   font:15px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
 }
-@media (prefers-color-scheme:light){
-  :root:not([data-theme="dark"]) body{
-    background:radial-gradient(1200px 600px at 50% -10%, #ffffff 0%, var(--bg) 55%);
-  }
-}
-:root[data-theme="light"] body{
-  background:radial-gradient(1200px 600px at 50% -10%, #ffffff 0%, var(--bg) 55%);
+:root[data-theme="dark"] body{
+  background:radial-gradient(1200px 600px at 50% -10%, #1b2430 0%, var(--bg) 60%);
+  background-attachment:fixed;
 }
 a{color:var(--acc);text-decoration:none}
 
@@ -147,7 +140,7 @@ a{color:var(--acc);text-decoration:none}
   border:1px solid var(--line);border-radius:var(--radius);
   padding:18px;transition:.15s;position:relative;overflow:hidden;
 }
-.tile:hover{border-color:var(--acc);transform:translateY(-2px);box-shadow:0 10px 26px rgba(0,0,0,.45)}
+.tile:hover{border-color:var(--acc);transform:translateY(-2px);box-shadow:var(--shadow)}
 .tile:active{transform:translateY(0)}
 .tile .ico{
   width:46px;height:46px;flex:0 0 46px;border-radius:12px;display:flex;
@@ -181,7 +174,7 @@ a{color:var(--acc);text-decoration:none}
   margin-left:2px;letter-spacing:0;color:var(--fg2)}
 .now .txt{font-size:17px;color:var(--fg2);padding-bottom:9px}
 .now .feels{color:var(--fg2);font-size:13.5px;margin-top:2px}
-.metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:16px}
+.metrics{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin-top:16px}
 .metric{background:var(--bg3);border-radius:11px;padding:9px 4px;text-align:center}
 .metric .k{font-size:11px;color:var(--fg2)}
 .metric .v{font-size:15px;font-weight:600;margin-top:2px}
@@ -307,6 +300,7 @@ video{width:100%;height:100%;display:block;background:#0b0e12}
   .nav a{padding:4px 9px;font-size:12px}
   .now .temp{font-size:58px}
   .meters{grid-template-columns:1fr 1fr;gap:10px}
+  .metrics{grid-template-columns:repeat(2,minmax(0,1fr))}
   .grid{grid-template-columns:1fr}
 }
 
@@ -534,7 +528,6 @@ var MR = (function () {
   var PAGES = [
     { href: "/", title: "首页" },
     { href: "/weather.html", title: "天气" },
-    { href: "/market.html", title: "行情" },
     { href: "/radio.html", title: "电台" },
     { href: "/info.html", title: "本机" },
     { href: "/ntp.html", title: "校时" },
@@ -646,14 +639,15 @@ var MR = (function () {
   }
 
   /* 判定顺序：DOM 上的 data-theme（构建时注入的引导脚本已按 localStorage 打过）
-     → localStorage → 系统配色。少了第一项，手动锁定后图标会画错方向。 */
+     → localStorage → 默认浅色。默认值取浅色，与 miniweb 入口页保持同一套观感；
+     不再跟随系统配色，否则系统处于深色的设备打开子页面会跳成另一套颜色。
+     少了第一项，手动锁定后图标会画错方向。 */
   function themeNow() {
     var d = document.documentElement.getAttribute("data-theme");
     if (d === "light" || d === "dark") return d;
     var t = themePref();
     if (t === "light" || t === "dark") return t;
-    return (window.matchMedia &&
-      window.matchMedia("(prefers-color-scheme: light)").matches) ? "light" : "dark";
+    return "light";
   }
 
   function paintThemeBtn() {
@@ -672,13 +666,7 @@ var MR = (function () {
     paintThemeBtn();
   }
 
-  /* 跟随系统时，系统配色变了要把图标跟着换掉 */
-  if (window.matchMedia) {
-    var mq = window.matchMedia("(prefers-color-scheme: light)");
-    var onScheme = function () { if (!themePref()) paintThemeBtn(); };
-    if (mq.addEventListener) mq.addEventListener("change", onScheme);
-    else if (mq.addListener) mq.addListener(onScheme);
-  }
+  /* 默认浅色，不再监听系统配色变化：图标只随手动切换变化 */
 
   /* 顶栏 + 页签。title 为空时不显示返回键。
      挂载完就自动开始心跳：以前要求每页自己调 healthTick()，漏掉一页
@@ -721,7 +709,7 @@ var MR = (function () {
      重复调用复用同一次请求，多页共用一个 15 秒定时器。 */
   function healthTick() {
     /* 页面在后台就不再问：这个请求每 15 秒一次，比空闲降频阈值（20 秒）还密，
-       会让设备一直停在满频，休眠记录永远产生不了。回到前台时补一次。 */
+       会让设备一直停在满频。回到前台时补一次。 */
     if (document.hidden) return Promise.resolve(MR.device);
     if (tickBusy) return tickBusy;
     if (MR.device && Date.now() - tickAt < 800) return Promise.resolve(MR.device);

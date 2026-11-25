@@ -8,45 +8,38 @@
 <link rel="icon" href="data:,">
 <style>
 /* ESP32 终端服务器 · 设计系统
- * 视觉语言照搬原路由器页面：深色底 + 分层卡片 + 细描边 + 等宽数字
+ * 与 miniweb 入口页一致：浅灰蓝底 + 白色卡片 + 蓝紫渐变头图 + 细描边。
+ * 深色为可选项，由顶栏按钮写入 data-theme="dark" 后生效。
  */
 :root{
-  color-scheme:dark;
-  --bg:#0f1216; --bg2:#161b22; --bg3:#1c232c; --line:#283141;
-  --fg:#e6edf3; --fg2:#8b98a9; --acc:#ff6a00; --acc2:#3b82f6;
-  --ok:#3fb950; --err:#f85149; --warm:#ffb454; --cold:#58a6ff;
+  color-scheme:light;
+  --bg:#f4f6fa; --bg2:#ffffff; --bg3:#eef2f8; --line:#d8e0ee;
+  --fg:#1a2233; --fg2:#5f6b7f;
+  --acc:#2563eb; --acc2:#7c3aed;
+  --grad:linear-gradient(135deg,#2563eb,#7c3aed);
+  --ok:#16a34a; --err:#dc2626; --warm:#d97706; --cold:#0284c7;
+  --shadow:0 10px 26px rgba(23,53,110,.12);
   --radius:16px;
 }
-/* 亮色有两处来源：跟随系统（media），或被顶栏按钮手动锁定为 light。
-   两处配色相同，改配色时一起改。手动锁定 dark 时 media 段被 :not 排除，
-   回落到上面的 :root 深色值。 */
-@media (prefers-color-scheme:light){
-  :root:not([data-theme="dark"]){
-    color-scheme:light;
-    --bg:#f2f5f9; --bg2:#ffffff; --bg3:#e9eef4; --line:#d8dee4;
-    --fg:#1f2328; --fg2:#59636e;
-  }
-}
-:root[data-theme="light"]{
-  color-scheme:light;
-  --bg:#f2f5f9; --bg2:#ffffff; --bg3:#e9eef4; --line:#d8dee4;
-  --fg:#1f2328; --fg2:#59636e;
+:root[data-theme="dark"]{
+  color-scheme:dark;
+  --bg:#0f1216; --bg2:#161b22; --bg3:#1c232c; --line:#283141;
+  --fg:#e6edf3; --fg2:#8b98a9;
+  --acc:#3b82f6; --acc2:#8b5cf6;
+  --grad:linear-gradient(135deg,#3b82f6,#8b5cf6);
+  --ok:#3fb950; --err:#f85149; --warm:#ffb454; --cold:#58a6ff;
+  --shadow:0 10px 26px rgba(0,0,0,.45);
 }
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
 html,body{margin:0;padding:0;min-height:100%}
 body{
-  background:radial-gradient(1200px 600px at 50% -10%, #1b2430 0%, var(--bg) 60%);
-  background-attachment:fixed;
+  background:var(--bg);
   color:var(--fg);
   font:15px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
 }
-@media (prefers-color-scheme:light){
-  :root:not([data-theme="dark"]) body{
-    background:radial-gradient(1200px 600px at 50% -10%, #ffffff 0%, var(--bg) 55%);
-  }
-}
-:root[data-theme="light"] body{
-  background:radial-gradient(1200px 600px at 50% -10%, #ffffff 0%, var(--bg) 55%);
+:root[data-theme="dark"] body{
+  background:radial-gradient(1200px 600px at 50% -10%, #1b2430 0%, var(--bg) 60%);
+  background-attachment:fixed;
 }
 a{color:var(--acc);text-decoration:none}
 
@@ -147,7 +140,7 @@ a{color:var(--acc);text-decoration:none}
   border:1px solid var(--line);border-radius:var(--radius);
   padding:18px;transition:.15s;position:relative;overflow:hidden;
 }
-.tile:hover{border-color:var(--acc);transform:translateY(-2px);box-shadow:0 10px 26px rgba(0,0,0,.45)}
+.tile:hover{border-color:var(--acc);transform:translateY(-2px);box-shadow:var(--shadow)}
 .tile:active{transform:translateY(0)}
 .tile .ico{
   width:46px;height:46px;flex:0 0 46px;border-radius:12px;display:flex;
@@ -181,7 +174,7 @@ a{color:var(--acc);text-decoration:none}
   margin-left:2px;letter-spacing:0;color:var(--fg2)}
 .now .txt{font-size:17px;color:var(--fg2);padding-bottom:9px}
 .now .feels{color:var(--fg2);font-size:13.5px;margin-top:2px}
-.metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:16px}
+.metrics{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin-top:16px}
 .metric{background:var(--bg3);border-radius:11px;padding:9px 4px;text-align:center}
 .metric .k{font-size:11px;color:var(--fg2)}
 .metric .v{font-size:15px;font-weight:600;margin-top:2px}
@@ -307,6 +300,7 @@ video{width:100%;height:100%;display:block;background:#0b0e12}
   .nav a{padding:4px 9px;font-size:12px}
   .now .temp{font-size:58px}
   .meters{grid-template-columns:1fr 1fr;gap:10px}
+  .metrics{grid-template-columns:repeat(2,minmax(0,1fr))}
   .grid{grid-template-columns:1fr}
 }
 
@@ -341,26 +335,6 @@ video{width:100%;height:100%;display:block;background:#0b0e12}
 
 </style>
 <style>
-  /* 首页「今日」卡：静态公历 + 农历。刻意不做走秒时钟（见下方脚本注释） */
-  .todaycard{display:block;color:inherit;text-decoration:none;text-align:center;
-    background:linear-gradient(150deg,var(--bg2),var(--bg3));
-    border:1px solid var(--line);border-radius:var(--radius);
-    padding:13px 18px;margin-bottom:14px;transition:.15s}
-  .todaycard:hover{border-color:var(--acc)}
-  .todaycard .dt{font-size:14.5px;font-weight:600}
-  .todaycard .dt em,.todaycard .lu em{font-style:normal;font-weight:400;font-size:12px;
-    color:var(--fg2);margin-left:7px}
-  .todaycard .lu{margin-top:4px;font-size:14.5px;font-weight:600}
-  .todaycard .ex{margin-top:9px;display:flex;align-items:center;justify-content:center;
-    gap:6px;flex-wrap:wrap;font-size:11.5px}
-  .todaycard .ex:empty{display:none}
-  .todaycard .ex .tag{border-radius:999px;padding:2px 9px;font-size:11px}
-  .todaycard .ex .tag.term{background:rgba(88,166,255,.14);color:var(--cold);
-    border:1px solid rgba(88,166,255,.35)}
-  .todaycard .ex .tag.fest{background:rgba(255,106,0,.14);color:var(--acc);
-    border:1px solid rgba(255,106,0,.35)}
-  .todaycard .ex .soon{color:var(--fg2)}
-
   /* 首页天气实况卡片 */
   .wxnow{display:block;color:inherit;text-decoration:none;
     background:linear-gradient(150deg,var(--bg2),var(--bg3));
@@ -379,7 +353,7 @@ video{width:100%;height:100%;display:block;background:#0b0e12}
   .wxnow .wxside{min-width:0}
   .wxnow .wxside .txt{font-size:16px;font-weight:600}
   .wxnow .wxside .feels{font-size:12px;color:var(--fg2);margin-top:2px}
-  .wxnow .wxgrid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:14px}
+  .wxnow .wxgrid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin-top:14px}
   .wxnow .wgm{background:var(--bg);border:1px solid var(--line);border-radius:10px;
     padding:8px 6px;text-align:center}
   .wxnow .wgm .k{font-size:10.5px;color:var(--fg2)}
@@ -396,6 +370,10 @@ video{width:100%;height:100%;display:block;background:#0b0e12}
   .wxnow .wxmore{display:block;text-align:center;font-size:11.5px;color:var(--fg2);
     border-top:1px solid var(--line);margin-top:12px;padding-top:9px}
   .wxnow:hover .wxmore{color:var(--acc)}
+  /* 窄屏四格会挤到放不下「1013hPa」这类值，改成两行两列 */
+  @media (max-width:520px){
+    .wxnow .wxgrid{grid-template-columns:repeat(2,minmax(0,1fr))}
+  }
 </style>
 </head>
 <body>
@@ -408,12 +386,6 @@ video{width:100%;height:100%;display:block;background:#0b0e12}
     <div class="sub" id="devSub">正在读取设备信息…</div>
     <div class="badge"><span class="dot" id="pDot"></span><span id="pText">检查中…</span></div>
   </div>
-
-  <a class="todaycard" href="/ntp.html" id="todayCard" style="display:none">
-    <div class="dt" id="tdDate">—</div>
-    <div class="lu" id="tdLunar">—</div>
-    <div class="ex" id="tdExtra"></div>
-  </a>
 
   <a class="wxnow" href="/weather.html" id="wxnow" style="display:none"></a>
 
@@ -441,7 +413,6 @@ var MR = (function () {
   var PAGES = [
     { href: "/", title: "首页" },
     { href: "/weather.html", title: "天气" },
-    { href: "/market.html", title: "行情" },
     { href: "/radio.html", title: "电台" },
     { href: "/info.html", title: "本机" },
     { href: "/ntp.html", title: "校时" },
@@ -553,14 +524,15 @@ var MR = (function () {
   }
 
   /* 判定顺序：DOM 上的 data-theme（构建时注入的引导脚本已按 localStorage 打过）
-     → localStorage → 系统配色。少了第一项，手动锁定后图标会画错方向。 */
+     → localStorage → 默认浅色。默认值取浅色，与 miniweb 入口页保持同一套观感；
+     不再跟随系统配色，否则系统处于深色的设备打开子页面会跳成另一套颜色。
+     少了第一项，手动锁定后图标会画错方向。 */
   function themeNow() {
     var d = document.documentElement.getAttribute("data-theme");
     if (d === "light" || d === "dark") return d;
     var t = themePref();
     if (t === "light" || t === "dark") return t;
-    return (window.matchMedia &&
-      window.matchMedia("(prefers-color-scheme: light)").matches) ? "light" : "dark";
+    return "light";
   }
 
   function paintThemeBtn() {
@@ -579,13 +551,7 @@ var MR = (function () {
     paintThemeBtn();
   }
 
-  /* 跟随系统时，系统配色变了要把图标跟着换掉 */
-  if (window.matchMedia) {
-    var mq = window.matchMedia("(prefers-color-scheme: light)");
-    var onScheme = function () { if (!themePref()) paintThemeBtn(); };
-    if (mq.addEventListener) mq.addEventListener("change", onScheme);
-    else if (mq.addListener) mq.addListener(onScheme);
-  }
+  /* 默认浅色，不再监听系统配色变化：图标只随手动切换变化 */
 
   /* 顶栏 + 页签。title 为空时不显示返回键。
      挂载完就自动开始心跳：以前要求每页自己调 healthTick()，漏掉一页
@@ -628,7 +594,7 @@ var MR = (function () {
      重复调用复用同一次请求，多页共用一个 15 秒定时器。 */
   function healthTick() {
     /* 页面在后台就不再问：这个请求每 15 秒一次，比空闲降频阈值（20 秒）还密，
-       会让设备一直停在满频，休眠记录永远产生不了。回到前台时补一次。 */
+       会让设备一直停在满频。回到前台时补一次。 */
     if (document.hidden) return Promise.resolve(MR.device);
     if (tickBusy) return tickBusy;
     if (MR.device && Date.now() - tickAt < 800) return Promise.resolve(MR.device);
@@ -709,13 +675,12 @@ var ICONS = {
 
 /* 顺序按「功能相近、左右成对」排：网格是 2 列（760px 容器、minmax 240px），
    所以数组里每两个相邻项就是视觉上的一行：
-     天气 · 行情   —— 每天要看的实时数据看板
-     IPTV · 电台   —— 音视频娱乐，都是浏览器直连取流
-     本机 · NTP    —— 设备与网络 / 时间（NTP 页里也有农历节气）
+     天气 · 直播   —— 每天要看的实时数据与视频
+     电台 · 本机   —— 音视频与设备信息
+     NTP           —— 时间校准（精简版不提供行情：没有实时行情数据源）
    手机单列时按同一顺序纵向排列，相邻的仍然是同一类。 */
 var TILES = [
   { key: "weather", href: "/weather.html", title: "天气", sub: "实况 · 24 小时 · 7 天 · 空气" },
-  { key: "market", href: "/market.html", title: "行情", sub: "指数 · 汇率 · 自选股" },
   { key: "iptv", href: "/iptv.html", title: "IPTV 电视直播", sub: "频道列表 · 网页播放" },
   { key: "radio", href: "/radio.html", title: "电台", sub: "网络收音机 · 浏览器直连" },
   { key: "info", href: "/info.html", title: "本机", sub: "固件 · 内存 · Flash · 文件" },
@@ -814,39 +779,11 @@ function renderWx(w) {
   el.style.display = "block";
 }
 
-/* ---------- 今日卡：静态公历 + 农历 ----------
- * 首页刻意不做走秒时钟：每秒重绘 DOM + 反复取数，在单线程 HTTP 的 ESP32 上
- * 会和首屏串行取数抢连接，实测明显拖慢整页。农历数据随 /api/home 一次带出
- * （health + 服务状态 + 今日历法三合一），这里只在首屏渲染一次——页面里没有
- * 任何 setInterval。要看走秒时间请点卡片进 NTP 页，刷新本页即可更新日期。
- */
-var WD = ["一", "二", "三", "四", "五", "六", "日"];   // 农历接口的 week: 0=周一
-function renderHomeCal(c) {
-  var el = MR.$("todayCard");
-  if (!c || !c.ok || !c.lunar) { el.style.display = "none"; return; }
-  MR.$("tdDate").innerHTML = c.y + " 年 " + c.m + " 月 " + c.d + " 日" +
-    "<em>星期" + WD[c.week || 0] + "</em>";
-  MR.$("tdLunar").innerHTML = "农历 " + MR.esc(c.ganzhi) + "年 " +
-    MR.esc(c.lunar) + "<em>" + MR.esc(c.zodiac) + "年</em>";
-  var p = [];
-  if (c.term) p.push('<span class="tag term">今日 ' + MR.esc(c.term) + "</span>");
-  (c.festivals || []).forEach(function (n) {
-    p.push('<span class="tag fest">' + MR.esc(n) + "</span>");
-  });
-  var nx = (c.next || [])[0];
-  if (nx) p.push('<span class="soon">距 ' + MR.esc(nx.name) + " " + nx.days + " 天</span>");
-  MR.$("tdExtra").innerHTML = p.join("");
-  el.style.display = "block";
-}
-
-/* 取数刻意串行：板子是单线程 HTTP 服务，并发连接会被挤掉。
-   顺序 = health（首屏必需）→ weather → status → services。
-   每个接口在板子上都带 TTL 缓存，短时间内重复刷新不会再去问路由器。 */
-/* 取数刻意串行，而且尽量少：板子是单线程 HTTP 服务，lwIP 只有约 10 个
-   TCP PCB，手机浏览器还要预连 6~8 条，每多一条请求都在逼近死线。
-   现在首屏只有两条请求：/api/home（健康 + 服务状态 + 今日历法）
-   和 /api/weather（29KB 的天气聚合）。原来这里是 4 条。 */
-MR.api("/api/home").then(function (h) {
+/* 取数串行、尽量少：板子是单线程 HTTP 服务，lwIP 只有约 10 个 TCP PCB，
+   手机浏览器还要预连 6~8 条。首屏两条：/api/health（健康 + 服务状态）与
+   /api/weather（实况聚合，接口侧带 TTL，短时间内重复刷新不会重取）。
+   首页不做走秒时钟，也没有定时器重绘。 */
+MR.api("/api/health").then(function (h) {
   if (!h || !h.ok) {
     MR.$("pDot").className = "dot err";
     MR.$("pText").textContent = "设备离线";
@@ -860,7 +797,7 @@ MR.api("/api/home").then(function (h) {
   MR.$("fIp").textContent = h.ip;
   MR.$("fUp").textContent = MR.fmtDur(h.up);
   MR.$("fMem").textContent = MR.fmtBytes(h.mem_free);
-  /* 顶栏那颗小灯也顺手更新（不再单独发 /api/health） */
+  /* 顶栏那颗小灯也顺手更新（不再单独发一次请求） */
   var dot = MR.$("hDot"), tip = MR.$("hIp");
   if (dot) dot.className = "dot " + (h.router_ok ? "on" : "err");
   if (tip) {
@@ -870,13 +807,10 @@ MR.api("/api/home").then(function (h) {
   }
   svcData = { svc: h.svc || {} };
   renderSvc();
-  renderHomeCal(h.cal);
   return MR.api("/api/weather").catch(function () { return null; });
 }).then(function (wx) {
-  if (wx && wx.ok) {
-    renderWx(wx);
-    subs.weather = "实况 · 24 小时 · 7 天 · 空气";
-  }
+  /* 取不到就保持隐藏，不显示占位卡片 */
+  if (wx && wx.ok) renderWx(wx);
 });
 </script>
 </body>
