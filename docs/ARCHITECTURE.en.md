@@ -210,7 +210,7 @@ flowchart TD
     J --> D
 ```
 
-Large responses (weather about 30KB, channel library about 18KB) are never read into memory
+Large responses (weather about 30KB, channel library about 29KB) are never read into memory
 as a whole; they are written to disk as they arrive. Any path that would allocate more than
 8KB in one go must stream: GC does not compact memory, so large contiguous allocations fail
 easily.

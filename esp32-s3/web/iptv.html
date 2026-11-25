@@ -94,15 +94,18 @@
   .epg .tab{font:inherit;font-size:11px;line-height:18px;padding:0 10px;border-radius:999px;
     border:1px solid var(--line);background:transparent;color:var(--fg2);cursor:pointer}
   .epg .tab.on{background:var(--acc);border-color:var(--acc);color:#fff}
-  .epg .rows{max-height:216px;overflow-y:auto;padding:6px 0 4px}
+  .epg .rows{max-height:216px;overflow-y:auto;overflow-x:hidden;padding:6px 0 4px}
   .epg .rows::-webkit-scrollbar{width:6px}
   .epg .rows::-webkit-scrollbar-thumb{background:var(--line);border-radius:3px}
-  .epg .row{display:flex;align-items:baseline;gap:8px;padding:5px 10px;font-size:12px}
-  .epg .row .tm{flex:0 0 72px;color:var(--fg2);font-size:11px;
+  .epg .row{display:flex;align-items:flex-start;gap:8px;padding:5px 10px;font-size:12px}
+  .epg .row .tm{flex:0 0 72px;color:var(--fg2);font-size:11px;line-height:1.55;
     font-variant-numeric:tabular-nums}
-  .epg .row .ti{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  /* 节目名允许换行：节目单标题常带副标题与括号，单行只靠省略号会把内容截掉，
+     窄屏下还容易把整行撑出卡片。改为整条换行显示，行高与时间列对齐 */
+  .epg .row .ti{flex:1;min-width:0;line-height:1.55;
+    white-space:normal;overflow-wrap:anywhere}
   .epg .row .rb{flex:0 0 auto;font-size:10px;line-height:16px;color:var(--fg2);
-    border:1px solid var(--line);border-radius:999px;padding:0 6px}
+    border:1px solid var(--line);border-radius:999px;padding:0 6px;margin-top:2px}
   .epg .row.no{opacity:.5}
   .epg .row.can{cursor:pointer}
   .epg .row.can:hover{background:var(--bg2)}

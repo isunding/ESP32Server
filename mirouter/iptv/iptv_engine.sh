@@ -650,43 +650,12 @@ build_epg_slices() {
   return 0
 }
 
-build_playlists() {
-  [ -f "$DB" ] || return 0
-  mkdir -p "$PLAYER_BASE" 2>/dev/null
-
-  # 指纹跳过: 频道库与配置都没变、产物也齐全时不再重新生成。
-  # start.sh 由 cron 每分钟执行一次, 绝大多数分钟此处只做两次 md5,
-  # 不重写 7 份播放列表, 也不复制到镜像目录, 避免每分钟写闪存。
-  # 节目单切片有独立 TTL, 走的是 build_epg_slices 自己的判断, 这里照旧调用。
-  fp=$( { cat "$DB"; cat "$CONF" 2>/dev/null; } | md5sum 2>/dev/null | cut -d' ' -f1)
-  if [ -n "$fp" ] && [ "$fp" = "$(cat "$TMP/build.stamp" 2>/dev/null)" ]; then
-    ok=1
-    for f in iptv.m3u iptv-rtp.m3u iptv-r2h.m3u iptv.txt \
-             iptv-kodi.m3u iptv-tvbox.m3u iptv-iptvpro.m3u; do
-      [ -s "$PLAYER_BASE/$f" ] || { ok=0; break; }
-    done
-    if [ "$ok" = "1" ]; then
-      build_epg_slices
-      return 0
-    fi
-  fi
-
+# 生成统一「条目表」: rank / isbackup / order / group / name / ip / port / tvg-id / tvg-name / 频道名 / 回看模板
+# 播放列表与 a=list 共用同一份, 分组、命名、顺序与 m3u 完全一致。
+#   $1 = 1 跳过失效源（播放列表用）; 0 保留（网页要显示「失效」）
+#   $2 = 1 央视 4K 额外在「央视频道」留一份（历史兼容，仅 m3u 用）; 0 不留（网页不重复）
+emit_entries() {
   db_sorted > "$TMP/db.sorted"
-
-  # FCC 查询串
-  if [ "$FCC_ENABLE" = "1" ] && [ -n "$FCC_ADDR" ]; then
-    if [ -n "$FCC_TYPE" ] && [ "$FCC_TYPE" != "telecom" ]; then
-      FCCQ="?fcc=$FCC_ADDR&fcc-type=$FCC_TYPE"
-    else
-      FCCQ="?fcc=$FCC_ADDR"
-    fi
-  else
-    FCCQ=""
-  fi
-
-  # 时移回看模板 (仅在启用且填写时生效)
-  if [ "$RTSP_ENABLE" = "1" ]; then CU="$RTSP_TMPL"; else CU=""; fi
-
   # 生成统一「条目表」: rank / isbackup / order / group / name / ip / port
   # 分组规则 (每个源按自身清晰度归组):
   #   央视频道  4K -> 央视超高清 ; 标清 -> 央视标清 ; 其它 -> 央视频道
@@ -696,7 +665,7 @@ build_playlists() {
   #   4K 源            -> "<频道名> (50p)" / "<频道名> (25p)"
   #   非 4K 的备用源    -> "<频道名> 高清" / "<频道名> 标清"
   #   同名同标签有多条  -> 追加序号 1/2/3
-  awk -F'\t' -v OFS='\t' '
+  awk -F'\t' -v OFS='\t' -v skipdead="$1" -v dup="$2" '
     function base(c,   b) { b = (c == "" ? "未分组" : c); if (b == "安徽频道") b = "地方频道"; return b }
     function bgrp(c, q,   b) {
       b = base(c)
@@ -727,7 +696,7 @@ build_playlists() {
       rank["其他频道"]=10; rank["自动发现"]=11; rank["未分组"]=12
     }
     NF >= 4 && $4 ~ /^[0-9]+$/ {
-      if ($5 == "0") next
+      if (skipdead == "1" && $5 == "0") next
       nm = ($1 == "" ? "频道-" $4 : $1)
       NS = 1
       SP[nm, 1] = $3; ST[nm, 1] = $4; SQ[nm, 1] = $10
@@ -765,11 +734,49 @@ build_playlists() {
           printf "%03d\t%d\t%09d\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", r, (k == 1 ? 0 : 1), s * 1000 + k, g, disp, SP[nm, k], ST[nm, k], TID[nm], TNAME[nm], nm, CS[nm]
           # 央视超高清 的条目在「央视频道」里也保留一份 (允许重复)
           # CCTV-16 例外: 央视频道组已有同名高清条目, 不再保留 4K 副本
-          if (g == "央视超高清" && nm != "CCTV-16 奥林匹克")
+          if (dup == "1" && g == "央视超高清" && nm != "CCTV-16 奥林匹克")
             printf "%03d\t%d\t%09d\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", rank["央视频道"], (k == 1 ? 0 : 1), s * 1000 + k, "央视频道", disp, SP[nm, k], ST[nm, k], TID[nm], TNAME[nm], nm, CS[nm]
         }
       }
-    }' "$TMP/db.sorted" | sort -t"$TAB" -k1,1n -k2,2n -k3,3n > "$TMP/entries.tsv"
+    }' "$TMP/db.sorted" | sort -t"$TAB" -k1,1n -k2,2n -k3,3n
+}
+
+build_playlists() {
+  [ -f "$DB" ] || return 0
+  mkdir -p "$PLAYER_BASE" 2>/dev/null
+
+  # 指纹跳过: 频道库与配置都没变、产物也齐全时不再重新生成。
+  # start.sh 由 cron 每分钟执行一次, 绝大多数分钟此处只做两次 md5,
+  # 不重写 7 份播放列表, 也不复制到镜像目录, 避免每分钟写闪存。
+  # 节目单切片有独立 TTL, 走的是 build_epg_slices 自己的判断, 这里照旧调用。
+  fp=$( { cat "$DB"; cat "$CONF" 2>/dev/null; } | md5sum 2>/dev/null | cut -d' ' -f1)
+  if [ -n "$fp" ] && [ "$fp" = "$(cat "$TMP/build.stamp" 2>/dev/null)" ]; then
+    ok=1
+    for f in iptv.m3u iptv-rtp.m3u iptv-r2h.m3u iptv.txt \
+             iptv-kodi.m3u iptv-tvbox.m3u iptv-iptvpro.m3u; do
+      [ -s "$PLAYER_BASE/$f" ] || { ok=0; break; }
+    done
+    if [ "$ok" = "1" ]; then
+      build_epg_slices
+      return 0
+    fi
+  fi
+
+  emit_entries 1 1 > "$TMP/entries.tsv"
+
+  # FCC 查询串
+  if [ "$FCC_ENABLE" = "1" ] && [ -n "$FCC_ADDR" ]; then
+    if [ -n "$FCC_TYPE" ] && [ "$FCC_TYPE" != "telecom" ]; then
+      FCCQ="?fcc=$FCC_ADDR&fcc-type=$FCC_TYPE"
+    else
+      FCCQ="?fcc=$FCC_ADDR"
+    fi
+  else
+    FCCQ=""
+  fi
+
+  # 时移回看模板 (仅在启用且填写时生效)
+  if [ "$RTSP_ENABLE" = "1" ]; then CU="$RTSP_TMPL"; else CU=""; fi
 
   # 1) udpxy 转单播
   {
@@ -1038,28 +1045,39 @@ cgi() {
   list)
     hdr
     if [ -f "$DB" ]; then
-      # 必须用 db_sorted: 数据库文件的行顺序可能被打乱, 真正顺序由第 8 列 seq 决定
-      db_sorted > "$TMP/db.sorted" 2>/dev/null
+      # 与播放列表共用同一份条目表: 分组、名称后缀、条目顺序完全一致，
+      # 板子直播页看到的分组布局就是 m3u 的分组布局。
+      # 失效台保留（状态 0），网页要显示「失效」；备用源没有单独探测结果，状态记 -1。
+      emit_entries 0 0 > "$TMP/entries.list" 2>/dev/null
       awk -F'\t' '
         function esc(s) { gsub(/\\/,"\\\\",s); gsub(/"/,"\\\"",s); gsub(/\r/,"",s); gsub(/\t/," ",s); return s }
-        BEGIN { printf "{\"ok\":1,\"items\":["; first=1 }
-        # 字段顺序: 名称 分组 ip port 状态 ... seq 备用源 tvg-id 可回看 chid
-        # 末尾三个字段供网页关联节目单与回放入口: 缺 tvg-id 的频道不出节目单,
-        # chid 是第 13 列模板里 /zte/<chid>/ 那一段, 网页拼 a=tvr 时用
-        NF >= 4 && $4 ~ /^[0-9]+$/ {
-          if (!first) printf ","
-          first=0
-          cid = ""; zi = index($13, "/zte/")
+        FILENAME == ARGV[1] {
+          if (NF >= 4 && $4 ~ /^[0-9]+$/) {
+            nm = ($1 == "" ? "频道-" $4 : $1)
+            ST[nm] = $5; TS[nm] = $6; KB[nm] = $7; SQ[nm] = $8; CU[nm] = $13
+          }
+          next
+        }
+        BEGIN { printf "{\"ok\":1,\"items\":["; first = 1 }
+        NF >= 4 {
+          nm = $10
+          cid = ""; zi = index(CU[nm], "/zte/")
           if (zi > 0) {
-            zs = substr($13, zi + 5); zj = index(zs, "/")
+            zs = substr(CU[nm], zi + 5); zj = index(zs, "/")
             if (zj > 1) cid = substr(zs, 1, zj - 1)
           }
+          live = ($2 == "0" ? (ST[nm] == "" ? "-1" : ST[nm]) : "-1")
+          if (!first) printf ","
+          first = 0
           printf "[\"%s\",\"%s\",\"%s\",\"%s\",\"%s\",\"%s\",\"%s\",\"%s\",\"%s\",\"%s\",\"%s\",\"%s\"]",
-                 esc($1), esc($2), $3, $4, ($5==""?"-1":$5), ($6==""?"0":$6), ($7==""?"0":$7),
-                 ($8==""?"0":$8), esc($9), esc($11), ($13==""?"0":"1"), cid
+                 esc($5), esc($4), $6, $7, live,
+                 (TS[nm] == "" ? "0" : TS[nm]),
+                 ($2 == "0" ? (KB[nm] == "" ? "0" : KB[nm]) : "0"),
+                 (SQ[nm] == "" ? "0" : SQ[nm]),
+                 "", esc($8), (CU[nm] == "" ? "0" : "1"), cid
         }
         END { printf "]}\n" }
-      ' "$TMP/db.sorted"
+      ' "$TMP/db.sorted" "$TMP/entries.list"
     else
       printf '{"ok":1,"items":[]}\n'
     fi
