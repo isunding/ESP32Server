@@ -689,6 +689,13 @@ emit_entries() {
       if (q == "高清") return "高清"
       return ""
     }
+    # 卫视口径: 4K -> "4K", 高清 -> "HD"; 其余分类沿用 tagof
+    function wtag(c, q) {
+      if (base(c) != "卫视频道") return tagof(q)
+      if (q ~ /^4K/)   return "4K"
+      if (q == "高清") return "HD"
+      return tagof(q)
+    }
     BEGIN {
       rank["央视频道"]=1; rank["央视超高清"]=2; rank["卫视超高清"]=3
       rank["卫视频道"]=4; rank["数字频道"]=5; rank["地方频道"]=6
@@ -714,21 +721,33 @@ emit_entries() {
       NSRC[nm] = NS; CAT[nm] = $2; SEQ[nm] = (($8 == "" || $8 == "0") ? 999999 : $8 + 0)
       TID[nm] = $11; TNAME[nm] = $12; CS[nm] = $13
       if (!(nm in seen)) { seen[nm] = 1; ORD[++nn] = nm }
-      for (k = 2; k <= NS; k++) { t = tagof(SQ[nm, k]); if (t != "") TC[nm SUBSEP t]++ }
+      # 同一台同一后缀的条目总数（主源带后缀时也算进来），用于同后缀多条时编号
+      if ($10 ~ /^4K/ || ($10 == "高清" && base($2) == "卫视频道"))
+        CNT[nm SUBSEP wtag($2, $10)]++
+      for (k = 2; k <= NS; k++) {
+        t = wtag($2, SQ[nm, k])
+        if (t != "") CNT[nm SUBSEP t]++
+      }
       next
     }
     END {
       for (oi = 1; oi <= nn; oi++) {
         nm = ORD[oi]; ns = NSRC[nm]; cat = CAT[nm]; s = SEQ[nm]
         for (k = 1; k <= ns; k++) {
-          q = SQ[nm, k]; t = tagof(q)
+          q = SQ[nm, k]; t = wtag(cat, q)
+          hd = (t == "HD")
+          mainapp = (k == 1 && (q ~ /^4K/ || hd))     # 主源也带后缀的情形: 4K / 卫视 HD
           if (k == 1) {
             disp = nm
-            if (q ~ /^4K/) disp = nm " " t          # 主源是 4K 时带上帧率
+            if (mainapp) disp = nm " " t
           } else {
             if (t == "") t = "源"
-            if (TC[nm SUBSEP t] > 1) { TC2[nm SUBSEP t]++; disp = nm " " t TC2[nm SUBSEP t] }
-            else disp = nm " " t
+            disp = nm " " t
+          }
+          # 同后缀多条: 主源带后缀时不编号，后续从 2 起; 主源不带后缀时从 1 起
+          if ((k == 1 ? mainapp : 1) && t != "" && CNT[nm SUBSEP t] > 1) {
+            SQ2[nm SUBSEP t]++
+            if (!mainapp || SQ2[nm SUBSEP t] > 1) disp = disp SQ2[nm SUBSEP t]
           }
           g = bgrp(cat, q); r = (g in rank) ? rank[g] : 50
           printf "%03d\t%d\t%09d\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", r, (k == 1 ? 0 : 1), s * 1000 + k, g, disp, SP[nm, k], ST[nm, k], TID[nm], TNAME[nm], nm, CS[nm]
@@ -786,7 +805,7 @@ build_playlists() {
       { extra = ""
         ida = ($8 != "" ? " tvg-id=\"" $8 "\"" : "")
         tvm = ($9 != "" ? $9 : short($5))
-        nice = ($10 != "" ? $10 : $5)
+        nice = (($4 == "卫视超高清" || $4 == "卫视频道") ? $5 : ($10 != "" ? $10 : $5))
         if (nice != $5) extra = extra " display-name=\"" $5 "\""
         if ($2 == "0" && $11 != "") { c = $11; gsub(/\{name\}/, $5, c); extra = extra " catchup=\"default\" catchup-days=\"" cd "\" catchup-source=\"" c "\"" }
         printf "#EXTINF:-1%s tvg-name=\"%s\" tvg-logo=\"%s/%s.png\" group-title=\"%s\"%s,%s\n", ida, tvm, lg, short($5), $4, extra, nice
@@ -805,7 +824,7 @@ build_playlists() {
         }
         ida = ($8 != "" ? " tvg-id=\"" $8 "\"" : "")
         nma = ($9 != "" ? " tvg-name=\"" $9 "\"" : "")
-        nice = ($10 != "" ? $10 : $5)
+        nice = (($4 == "卫视超高清" || $4 == "卫视频道") ? $5 : ($10 != "" ? $10 : $5))
         if (nice != $5) extra = extra " display-name=\"" $5 "\""
         printf "#EXTINF:-1%s%s group-title=\"%s\"%s,%s\n", ida, nma, $4, extra, nice
         printf "rtp://%s:%s%s\n", $6, $7, fccq }' "$TMP/entries.tsv"
@@ -823,7 +842,7 @@ build_playlists() {
         }
         ida = ($8 != "" ? " tvg-id=\"" $8 "\"" : "")
         tvm = ($9 != "" ? $9 : short($5))
-        nice = ($10 != "" ? $10 : $5)
+        nice = (($4 == "卫视超高清" || $4 == "卫视频道") ? $5 : ($10 != "" ? $10 : $5))
         if (nice != $5) extra = extra " display-name=\"" $5 "\""
         printf "#EXTINF:-1%s tvg-name=\"%s\" tvg-logo=\"%s/%s.png\" group-title=\"%s\"%s,%s\n", ida, tvm, lg, short($5), $4, extra, nice
         printf "http://%s:%s/rtp/%s:%s%s\n", h, p, $6, $7, fccq }' "$TMP/entries.tsv"
@@ -852,7 +871,7 @@ build_playlists() {
           }
           ida = ($8 != "" ? " tvg-id=\"" $8 "\"" : "")
           tvm = ($9 != "" ? $9 : short($5))
-          nice = ($10 != "" ? $10 : $5)
+          nice = (($4 == "卫视超高清" || $4 == "卫视频道") ? $5 : ($10 != "" ? $10 : $5))
           if (nice != $5) extra = extra " display-name=\"" $5 "\""
           printf "#EXTINF:-1%s tvg-name=\"%s\" tvg-logo=\"%s/%s.png\" group-title=\"%s\"%s,%s\n", ida, tvm, lg, short($5), $4, extra, nice
           printf "http://%s:%s/rtp/%s:%s\n", h, p, $6, $7 }' "$TMP/entries.tsv"
