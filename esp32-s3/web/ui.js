@@ -148,6 +148,61 @@ var MR = (function () {
     paintThemeBtn();
   }
 
+  /* ---------- 主题皮肤 ----------
+     只换强调色，明暗由旁边的太阳/月亮按钮管。图标是一件衣服，点一下换下一套。
+     顺序即点击顺序：蓝 → 绿 → 橙 → 玫红 → 紫 → 青。 */
+  var SKINS = ["orange", "blue", "green", "rose", "violet", "teal"];
+  var SKIN_NAME = { orange: "橙", blue: "蓝", green: "绿",
+                    rose: "玫红", violet: "紫", teal: "青" };
+  var SKIN_KEY = "mr.skin";
+  var SHIRT_SVG = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" ' +
+    'stroke="currentColor" stroke-width="2" stroke-linecap="round" ' +
+    'stroke-linejoin="round" aria-hidden="true">' +
+    '<path d="M9 3l3 2 3-2 4 3-2 3-2-1v11H9V8L7 9 5 6z"/></svg>';
+
+  function skinNow() {
+    var d = document.documentElement.getAttribute("data-skin");
+    if (d) return d;
+    try {
+      var v = localStorage.getItem(SKIN_KEY);
+      if (v) return v;
+    } catch (e) {}
+    if (MR.device && MR.device.ui_skin) return MR.device.ui_skin;
+    return "orange";
+  }
+
+  /* 以板上配置为准：换浏览器 / 清缓存后打开，还是设备上保存的那一套。
+     只在没存过、或板上值与当前不同时才改 DOM，避免每 15 秒心跳重排一次。 */
+  function applySkinFromDevice(h) {
+    if (!h || !h.ui_skin) return;
+    if (h.ui_skin !== document.documentElement.getAttribute("data-skin")) {
+      document.documentElement.setAttribute("data-skin", h.ui_skin);
+      try { localStorage.setItem(SKIN_KEY, h.ui_skin); } catch (e) {}
+    }
+    paintSkinBtn();
+  }
+
+  function paintSkinBtn() {
+    var b = $("hSkin");
+    if (!b) return;
+    var s = skinNow();
+    b.title = "主题色：" + (SKIN_NAME[s] || s) + "（点击切换）";
+    b.setAttribute("aria-label", b.title);
+    b.style.color = "var(--acc)";
+    b.style.opacity = "1";
+  }
+
+  function toggleSkin() {
+    var i = SKINS.indexOf(skinNow());
+    var next = SKINS[(i < 0 ? 0 : i + 1) % SKINS.length];
+    document.documentElement.setAttribute("data-skin", next);
+    try { localStorage.setItem(SKIN_KEY, next); } catch (e) {}
+    paintSkinBtn();
+    toast("主题色：" + (SKIN_NAME[next] || next));
+    /* 同步到板上：写盘后重启、OTA 都不影响；失败只影响跨设备一致性 */
+    post("/api/skin", { skin: next }).catch(function () {});
+  }
+
   /* 跟随系统时，系统配色变了要把图标跟着换掉 */
   if (window.matchMedia) {
     var mq = window.matchMedia("(prefers-color-scheme: light)");
@@ -175,6 +230,8 @@ var MR = (function () {
       '<div class="st"><span class="dot" id="hDot"></span><span id="hIp">连接中…</span>' +
       '<button class="hbtn" id="hLed" type="button" data-on="0" ' +
       'aria-pressed="false" title="板载心跳">' + LED_SVG + "</button>" +
+      '<button class="hbtn" id="hSkin" type="button" title="主题色">' +
+      SHIRT_SVG + "</button>" +
       '<button class="hbtn" id="hTheme" type="button" title="切换深浅色"></button></div>' +
       "</div>" +
       '<div class="nav">' + nav + "</div>";
@@ -184,8 +241,11 @@ var MR = (function () {
       host.innerHTML = html;
       var lb = $("hLed");
       if (lb) lb.onclick = toggleLed;
+      var sk = $("hSkin");
+      if (sk) sk.onclick = toggleSkin;
       var tb = $("hTheme");
       if (tb) tb.onclick = toggleTheme;
+      paintSkinBtn();
       paintThemeBtn();
       startBeat();
     }
@@ -210,6 +270,7 @@ var MR = (function () {
           " · 运行 " + fmtDur(h.up) + " · 空闲内存 " + fmtBytes(h.mem_free);
       }
       setLedBtn(h.led_on ? 1 : 0, h.led_hw ? 1 : 0);
+      applySkinFromDevice(h);
       MR.device = h;
       return h;
     }).catch(function () {

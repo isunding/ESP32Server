@@ -22,7 +22,9 @@ OUT = os.path.join(ROOT, "www")
 # 主题引导：在 <head> 里同步读一次 localStorage，先给 <html> 打上 data-theme。
 # 没有它时 ui.js 要到 </body> 前才执行，慢设备上会先画一遍深色再跳成浅色。
 THEME_BOOT = ('<script>try{var t=localStorage.getItem("mr.theme");'
-              'if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>')
+              'if(t)document.documentElement.setAttribute("data-theme",t);'
+              'var k=localStorage.getItem("mr.skin");'
+              'if(k)document.documentElement.setAttribute("data-skin",k)}catch(e){}</script>')
 
 
 def read(name):

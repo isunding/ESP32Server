@@ -123,8 +123,15 @@ def led_heartbeat():
         _led_beat = True
         _led_ts = now
 
+# 网页可选的强调色，必须与 theme.css 里的 [data-skin] 一一对应
+UI_SKINS = ("orange", "blue", "green", "rose", "violet", "teal")
+
 DEFAULT_CFG = {
     "device_name": "",
+    # 网页主题色（皮肤）：blue/green/orange/rose/violet/teal。
+    # 存板上而不是只存浏览器：换设备、清缓存后打开还是同一套配色，
+    # OTA 只覆盖 .py 与 www/，不会动 config.json。
+    "ui": {"skin": "orange"},
     "wifi": {
         "ssid": "",
         "password": "",
@@ -920,7 +927,11 @@ class App:
         # 资源
         w.serve_file("/theme.css", "www/theme.css")
         w.serve_file("/ui.js", "www/ui.js")
+        # 播放内核：两个路径都映射到同一个文件。页面按实际文件名
+        # （/mpegts.min.js）取，旧的 /mpegts.js 别名保留，避免旧缓存页面 404。
+        w.serve_file("/mpegts.min.js", "www/mpegts.min.js")
         w.serve_file("/mpegts.js", "www/mpegts.min.js")
+        w.serve_file("/hls.min.js", "www/hls.min.js")
         w.serve_file("/hls.js", "www/hls.min.js")
 
         w.route("GET", "/api/health", self.h_health)
@@ -944,6 +955,7 @@ class App:
         w.route("GET", "/api/sleep", self.h_sleep)
         w.route("POST", "/api/config", self.h_set_cfg)
         w.route("POST", "/api/led", self.h_led_action)
+        w.route("POST", "/api/skin", self.h_skin_action)
         # OTA：GET 状态、PUT 单文件 / 整包（流式，请求体不进内存）、POST 收尾重启
         w.route("GET", "/api/ota", self.h_ota_get)
         w.route_stream("PUT", "/api/ota", self.h_ota_put)
@@ -998,6 +1010,7 @@ class App:
             "router_ok": bool(self.reachable),
             "led_on": 1 if _hb_enable else 0,
             "led_hw": 1 if (_np is not None or _led is not None) else 0,
+            "ui_skin": (self.cfg.get("ui") or {}).get("skin", "orange"),
             "err": self.api.last_err,
         }
 
@@ -1598,6 +1611,23 @@ class App:
         led_config(self.cfg)
         return httpsrv.json_resp({"ok": 1, "on": 1 if _hb_enable else 0,
                                   "msg": "心跳已开启" if v else "心跳已关闭"})
+
+    def h_skin_action(self, req):
+        """网页主题色。只动 ui.skin，写盘后立即生效，不重启。
+
+        存板上而不是只存浏览器：换设备、清缓存后打开还是同一套配色；
+        OTA 只覆盖 .py 与 www/，不碰 config.json，升级后照样生效。
+        """
+        d = req.json() or {}
+        skin = d.get("skin")
+        if skin not in UI_SKINS:
+            return httpsrv.json_resp({"ok": 0, "msg": "不支持的主题色"}, 400)
+        self.cfg.setdefault("ui", {})["skin"] = skin
+        try:
+            save_cfg(self.cfg)
+        except Exception as e:
+            return httpsrv.json_resp({"ok": 0, "msg": "写入失败: %s" % e}, 500)
+        return httpsrv.json_resp({"ok": 1, "skin": skin})
 
     # ---------------- OTA 升级（应用文件，不含固件） ----------------
     def h_ota_get(self, req):

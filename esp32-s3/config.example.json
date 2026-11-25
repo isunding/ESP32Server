@@ -1,6 +1,9 @@
 {
   "_说明": "复制本文件为 config.json 后修改。config.json 已在 .gitignore 里，不会被提交。字段删掉时使用代码内置默认值。",
   "device_name": "客厅终端",
+  "ui": {
+    "skin": "orange"
+  },
   "wifi": {
     "_说明": "ssid 留空则开机直接进配网热点模式",
     "ssid": "YOUR_WIFI_SSID",
